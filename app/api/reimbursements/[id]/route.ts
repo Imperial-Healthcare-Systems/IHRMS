@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         ),
         created_at, updated_at
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) {
@@ -46,8 +47,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -72,7 +74,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('expense_claims')
       .select('id, status, employee_id')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (fetchError) {
@@ -137,7 +139,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data, error } = await supabaseAdmin
       .from('expense_claims')
       .update(updatePayload)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
@@ -149,8 +151,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -161,7 +164,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('expense_claims')
       .select('id, status, employee_id')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (fetchError) {
@@ -185,7 +188,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const { error } = await supabaseAdmin
       .from('expense_claims')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
 
     if (error) throw error
 

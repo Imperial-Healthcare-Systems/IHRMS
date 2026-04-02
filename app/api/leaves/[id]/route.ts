@@ -3,15 +3,16 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { data, error } = await supabaseAdmin
       .from('leave_requests')
       .select(`*, employee:employees(*), level1_approver:employees!level1_approver_id(*), level2_approver:employees!level2_approver_id(*)`)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
     if (error) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json({ data })
@@ -20,8 +21,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -34,7 +36,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
         .update({ status: 'cancelled', updated_at: now })
-        .eq('id', params.id)
+        .eq('id', id)
         .select().single()
       if (error) throw error
       return NextResponse.json({ data })
@@ -57,7 +59,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
         .update(update)
-        .eq('id', params.id)
+        .eq('id', id)
         .select().single()
       if (error) throw error
       return NextResponse.json({ data })
@@ -67,7 +69,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
         .update({ status: 'escalated', escalated_at: now, escalation_reason: remarks })
-        .eq('id', params.id)
+        .eq('id', id)
         .select().single()
       if (error) throw error
       return NextResponse.json({ data })

@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const { data: run, error: runError } = await supabaseAdmin
       .from('payroll_runs')
       .select('id, month, year, status')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (runError) {
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         ),
         created_at, updated_at
       `, { count: 'exact' })
-      .eq('payroll_run_id', params.id)
+      .eq('payroll_run_id', id)
       .order('created_at', { ascending: true })
       .limit(limit)
       .range(offset, offset + limit - 1)

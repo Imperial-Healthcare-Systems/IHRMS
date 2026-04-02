@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         approved_by:employees!job_requisitions_approved_by_fkey(id, first_name, last_name, emp_id),
         created_at, updated_at
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) {
@@ -33,13 +34,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const { count: candidatesCount } = await supabaseAdmin
       .from('candidates')
       .select('*', { count: 'exact', head: true })
-      .eq('requisition_id', params.id)
+      .eq('requisition_id', id)
 
     // Count by stage
     const { data: stageCounts } = await supabaseAdmin
       .from('candidates')
       .select('status')
-      .eq('requisition_id', params.id)
+      .eq('requisition_id', id)
 
     const stageBreakdown: Record<string, number> = {}
     for (const c of stageCounts ?? []) {
@@ -56,8 +57,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -68,7 +70,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data, error } = await supabaseAdmin
       .from('job_requisitions')
       .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
@@ -83,8 +85,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -94,7 +97,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const { data, error } = await supabaseAdmin
       .from('job_requisitions')
       .update({ status: 'closed', updated_at: new Date().toISOString() })
-      .eq('id', params.id)
+      .eq('id', id)
       .select('id, title, status')
       .single()
 

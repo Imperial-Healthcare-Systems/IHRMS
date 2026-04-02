@@ -5,9 +5,10 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -20,7 +21,7 @@ export async function GET(
           designation:designations(title)
         )
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) {
@@ -37,9 +38,10 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const isAdmin = (session.user as any)?.isAdmin
@@ -65,7 +67,7 @@ export async function PATCH(
     const { data, error } = await supabaseAdmin
       .from('announcements')
       .update(updates)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
@@ -83,9 +85,10 @@ export async function PATCH(
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const isAdmin = (session.user as any)?.isAdmin
@@ -95,7 +98,7 @@ export async function DELETE(
     const { data: existing, error: fetchError } = await supabaseAdmin
       .from('announcements')
       .select('id, title')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (fetchError) {
@@ -106,7 +109,7 @@ export async function DELETE(
     const { error } = await supabaseAdmin
       .from('announcements')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
 
     if (error) throw error
 

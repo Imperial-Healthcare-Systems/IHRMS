@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         approved_by:employees!payroll_runs_approved_by_fkey(id, first_name, last_name, emp_id),
         created_at, updated_at
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const { data: payslipStats } = await supabaseAdmin
       .from('payslips')
       .select('net_pay, total_deductions, gross_earnings, payment_status')
-      .eq('payroll_run_id', params.id)
+      .eq('payroll_run_id', id)
 
     const stats = {
       payslip_count: payslipStats?.length ?? 0,
@@ -47,8 +48,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -63,7 +65,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('payroll_runs')
       .select('id, status')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (fetchError) {
@@ -109,7 +111,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data, error } = await supabaseAdmin
       .from('payroll_runs')
       .update(updatePayload)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 

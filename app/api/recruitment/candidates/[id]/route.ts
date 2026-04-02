@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         referred_by:employees!candidates_referred_by_fkey(id, first_name, last_name, emp_id),
         created_at, updated_at
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) {
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const { data: interviews } = await supabaseAdmin
       .from('interview_schedules')
       .select('id, round_number, round_name, scheduled_at, duration_minutes, mode, result, remarks, created_at')
-      .eq('candidate_id', params.id)
+      .eq('candidate_id', id)
       .order('scheduled_at', { ascending: true })
 
     return NextResponse.json({ data, interviews: interviews ?? [] })
@@ -43,8 +44,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -78,7 +80,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data, error } = await supabaseAdmin
       .from('candidates')
       .update(updatePayload)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 

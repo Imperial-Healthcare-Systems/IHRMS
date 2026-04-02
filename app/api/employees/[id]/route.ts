@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         designation:designations(*),
         reporting_manager:employees!reporting_manager_id(id, first_name, last_name, emp_id, email)
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) {
@@ -29,8 +30,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -43,7 +45,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data, error } = await supabaseAdmin
       .from('employees')
       .update({ ...body, updated_at: new Date().toISOString() })
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
     if (error) throw error
@@ -53,8 +55,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const isAdmin = (session.user as any)?.isAdmin
@@ -64,7 +67,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const { data, error } = await supabaseAdmin
       .from('employees')
       .update({ status: 'terminated', updated_at: new Date().toISOString() })
-      .eq('id', params.id)
+      .eq('id', id)
       .select('id, emp_id, status')
       .single()
     if (error) throw error
