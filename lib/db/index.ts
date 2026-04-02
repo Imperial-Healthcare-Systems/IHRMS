@@ -4,7 +4,17 @@ export * from './attendance'
 export * from './leaves'
 export * from './payroll'
 export * from './recruitment'
-export * from './performance'
+export {
+  getPerformanceReviews,
+  createReview,
+  updateReview,
+  getWarningLetters,
+  createWarning as createPerformanceWarning,
+  issueWarning as issuePerformanceReviewWarning,
+  getAppreciationNotes,
+  createAppreciation,
+  getProbationReviews,
+} from './performance'
 export * from './dashboard'
 export * from './exit'
 export * from './compliance'

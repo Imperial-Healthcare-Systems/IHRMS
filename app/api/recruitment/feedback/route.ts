@@ -105,12 +105,14 @@ export async function POST(req: NextRequest) {
     if (feedbackError) throw feedbackError
 
     // Mark the interview schedule as completed
-    await supabaseAdmin
+    const { error: scheduleResultError } = await supabaseAdmin
       .from('interview_schedules')
       .update({ result: 'selected', updated_at: new Date().toISOString() })
       .eq('id', schedule_id)
-      .then(() => null)
-      .catch(() => null)
+
+    if (scheduleResultError) {
+      console.error('Failed to update interview result', scheduleResultError)
+    }
 
     // Also update the interview_schedules result to reflect completion
     // (The schema uses `result` for interview outcome; mark with a remark instead)

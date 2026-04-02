@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
 
     // If 3 or more warnings, auto-create exit process for termination
     if (autoTermination) {
-      await supabaseAdmin
+      const { error: exitProcessError } = await supabaseAdmin
         .from('exit_processes')
         .upsert(
           {
@@ -132,8 +132,10 @@ export async function POST(req: NextRequest) {
           },
           { onConflict: 'employee_id', ignoreDuplicates: true }
         )
-        .then(() => null)
-        .catch(() => null)
+
+      if (exitProcessError) {
+        console.error('Failed to auto-create exit process', exitProcessError)
+      }
     }
 
     return NextResponse.json(
@@ -200,7 +202,7 @@ export async function PATCH(req: NextRequest) {
       const autoTermination = (warningCount ?? 0) >= 3
 
       if (autoTermination) {
-        await supabaseAdmin
+        const { error: exitProcessError } = await supabaseAdmin
           .from('exit_processes')
           .upsert(
             {
@@ -210,8 +212,10 @@ export async function PATCH(req: NextRequest) {
             },
             { onConflict: 'employee_id', ignoreDuplicates: true }
           )
-          .then(() => null)
-          .catch(() => null)
+
+        if (exitProcessError) {
+          console.error('Failed to auto-create exit process', exitProcessError)
+        }
       }
 
       return NextResponse.json({ data, auto_termination_triggered: autoTermination })

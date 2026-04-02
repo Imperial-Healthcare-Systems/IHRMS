@@ -112,7 +112,7 @@ export async function approveLeaveRequest(
     update.level1_status = action
     update.level1_remarks = remarks
     update.level1_actioned_at = now
-    // If approved at L1, check if L2 needed — for now mark as approved
+    // If approved at L1, check if L2 needed - for now mark as approved
     update.status = action === 'approved' ? 'approved' : 'rejected'
   } else {
     update.level2_status = action
@@ -133,12 +133,16 @@ export async function approveLeaveRequest(
   if (action === 'approved') {
     const req = await getLeaveRequest(id)
     const year = new Date(req.start_date).getFullYear()
-    await supabaseAdmin.rpc('deduct_leave_balance', {
+    const { error: deductLeaveBalanceError } = await supabaseAdmin.rpc('deduct_leave_balance', {
       p_employee_id: req.employee_id,
       p_leave_type: req.leave_type,
       p_year: year,
       p_days: req.days,
-    }).catch(() => null) // graceful — rpc may not exist yet
+    })
+
+    if (deductLeaveBalanceError) {
+      console.error('Failed to deduct leave balance', deductLeaveBalanceError)
+    }
   }
 
   return data
@@ -195,7 +199,7 @@ export async function getTeamLeaveCalendar(manager_id: string, year: number, mon
 
   if (!team?.length) return []
 
-  const teamIds = team.map(e => e.id)
+  const teamIds = team.map((e) => e.id)
   const { data, error } = await supabaseAdmin
     .from('leave_requests')
     .select('employee_id, leave_type, start_date, end_date, days, status')

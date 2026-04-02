@@ -96,11 +96,15 @@ export async function POST(req: NextRequest) {
     // Create probation review entry
     const probReviewDate = new Date(hire_date)
     probReviewDate.setMonth(probReviewDate.getMonth() + 6)
-    await supabaseAdmin.from('probation_reviews').insert({
+    const { error: probationReviewError } = await supabaseAdmin.from('probation_reviews').insert({
       employee_id: data.id,
       due_date: probReviewDate.toISOString().split('T')[0],
       outcome: 'pending',
-    }).catch(() => null)
+    })
+
+    if (probationReviewError) {
+      console.error('Failed to create probation review', probationReviewError)
+    }
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
