@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 96" fill="none">
+  <!-- Gradient definitions -->
+  <defs>
+    <linearGradient id="flame" x1="40" y1="0" x2="40" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="50%" stop-color="#F47920"/>
+      <stop offset="100%" stop-color="#E53E1A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer flame -->
+  <path d="M40 2 C34 8 28 14 30 22 C32 28 36 30 40 28 C44 30 48 28 50 22 C52 14 46 8 40 2Z" fill="url(#flame)"/>
+  <!-- Inner flame highlight -->
+  <path d="M40 10 C37 14 35 18 37 22 C38.5 25 40 24 40 24 C40 24 41.5 25 43 22 C45 18 43 14 40 10Z" fill="#FFD700" opacity="0.6"/>
+
+  <!-- Human figure head (top of staff) -->
+  <circle cx="40" cy="34" r="4" fill="#1565C0"/>
+  <!-- Body / staff top cap -->
+  <path d="M36 38 Q40 36 44 38 L43 44 L37 44 Z" fill="#1565C0"/>
+
+  <!-- Wings -->
+  <path d="M36 40 C30 36 20 38 16 42 C20 40 28 42 36 44Z" fill="#1565C0"/>
+  <path d="M44 40 C50 36 60 38 64 42 C60 40 52 42 44 44Z" fill="#1565C0"/>
+
+  <!-- Central staff -->
+  <rect x="38.5" y="44" width="3" height="44" rx="1.5" fill="#1565C0"/>
+
+  <!-- Left serpent -->
+  <path d="M38.5 50 C32 52 30 58 34 62 C38 66 38.5 68 38.5 68 C38.5 68 34 70 32 74 C30 78 34 82 38.5 84"
+        stroke="#1565C0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- Right serpent -->
+  <path d="M41.5 50 C48 52 50 58 46 62 C42 66 41.5 68 41.5 68 C41.5 68 46 70 48 74 C50 78 46 82 41.5 84"
+        stroke="#1565C0" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Serpent head left -->
+  <ellipse cx="37" cy="86" rx="3" ry="2" fill="#1565C0" transform="rotate(-20 37 86)"/>
+  <!-- Serpent head right -->
+  <ellipse cx="43" cy="86" rx="3" ry="2" fill="#1565C0" transform="rotate(20 43 86)"/>
+
+  <!-- TM badge -->
+  <circle cx="56" cy="8" r="5" stroke="#F47920" stroke-width="1" fill="none"/>
+  <text x="54" y="10" font-size="7" fill="#F47920" font-family="Arial" font-weight="bold">TM</text>
+</svg>
