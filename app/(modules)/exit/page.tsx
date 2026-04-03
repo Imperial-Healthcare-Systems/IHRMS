@@ -1,25 +1,11 @@
 'use client'
 
-
 import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
-  UserMinus,
-  LogOut,
-  IndianRupee,
-  Clock,
-  X,
-  CheckCircle2,
-  Circle,
-  Eye,
-  ChevronRight,
-  Download,
-  FileText,
-  Play,
-  Calendar,
-  User,
-  AlertTriangle,
-  Check,
+  UserMinus, LogOut, IndianRupee, Clock, X,
+  CheckCircle2, Circle, Eye, Download, FileText,
+  Settings2,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -32,128 +18,155 @@ type ReviewStatus = 'Pending' | 'Scheduled' | 'Completed' | 'Overdue'
 type ProbationOutcome = 'Confirmed' | 'Extended' | 'Terminated'
 
 interface ExitRecord {
-  id: number
-  name: string
-  empId: string
-  department: string
-  exitType: ExitType
-  resignationDate: string
-  lastWorkingDate: string
-  noticePeriod: number
-  clearanceCleared: number
-  clearanceTotal: number
+  id: number; name: string; empId: string; department: string
+  exitType: ExitType; resignationDate: string; lastWorkingDate: string
+  noticePeriod: number; clearanceCleared: number; clearanceTotal: number
   fnfStatus: FnFStatus
 }
-
 interface ClearanceItem {
-  id: string
-  label: string
-  description: string
-  cleared: boolean
+  id: string; label: string; description: string; cleared: boolean
 }
-
 interface FnFRecord {
-  id: number
-  name: string
-  empId: string
-  lastWorkingDate: string
-  salaryEarned: number
-  leaveEncashment: number
-  noticePeriodRecovery: number
-  bonusArrears: number
-  deductions: number
-  netFnF: number
-  status: FnFStatus
+  id: number; name: string; empId: string; lastWorkingDate: string
+  salaryEarned: number; leaveEncashment: number; noticePeriodRecovery: number
+  bonusArrears: number; deductions: number; netFnF: number; status: FnFStatus
 }
-
 interface ProbationEmployee {
-  id: number
-  name: string
-  empId: string
-  designation: string
-  department: string
-  joinDate: string
-  probationEndDate: string
-  manager: string
-  reviewStatus: ReviewStatus
-  daysRemaining: number
+  id: number; name: string; empId: string; designation: string; department: string
+  joinDate: string; probationEndDate: string; manager: string
+  reviewStatus: ReviewStatus; daysRemaining: number
 }
 
 /* ─────────────────────────────────────────────────────────────
    MOCK DATA
 ───────────────────────────────────────────────────────────── */
 const EXIT_RECORDS: ExitRecord[] = [
-  { id: 1, name: 'Vivek Sharma', empId: 'EMP/2024/045', department: 'Engineering', exitType: 'Resignation', resignationDate: 'Mar 15, 2026', lastWorkingDate: 'Apr 14, 2026', noticePeriod: 30, clearanceCleared: 3, clearanceTotal: 5, fnfStatus: 'Pending' },
-  { id: 2, name: 'Anita Nair', empId: 'EMP/2023/012', department: 'HR', exitType: 'Resignation', resignationDate: 'Mar 20, 2026', lastWorkingDate: 'May 19, 2026', noticePeriod: 60, clearanceCleared: 1, clearanceTotal: 5, fnfStatus: 'Pending' },
-  { id: 3, name: 'Suresh Kumar', empId: 'EMP/2022/008', department: 'Finance', exitType: 'Retirement', resignationDate: 'Feb 28, 2026', lastWorkingDate: 'Feb 28, 2026', noticePeriod: 0, clearanceCleared: 5, clearanceTotal: 5, fnfStatus: 'Completed' },
-  { id: 4, name: 'Pradeep Singh', empId: 'EMP/2023/078', department: 'Sales', exitType: 'Termination', resignationDate: 'Mar 1, 2026', lastWorkingDate: 'Mar 31, 2026', noticePeriod: 30, clearanceCleared: 4, clearanceTotal: 5, fnfStatus: 'Pending' },
-  { id: 5, name: 'Kavya Menon', empId: 'EMP/2024/091', department: 'Operations', exitType: 'Resignation', resignationDate: 'Apr 1, 2026', lastWorkingDate: 'Apr 30, 2026', noticePeriod: 30, clearanceCleared: 0, clearanceTotal: 5, fnfStatus: 'Not Started' },
+  { id: 1, name: 'Vivek Sharma',  empId: 'EMP/2024/045', department: 'Engineering', exitType: 'Resignation',  resignationDate: 'Mar 15, 2026', lastWorkingDate: 'Apr 14, 2026', noticePeriod: 30, clearanceCleared: 3, clearanceTotal: 5, fnfStatus: 'Pending' },
+  { id: 2, name: 'Anita Nair',    empId: 'EMP/2023/012', department: 'HR',          exitType: 'Resignation',  resignationDate: 'Mar 20, 2026', lastWorkingDate: 'May 19, 2026', noticePeriod: 60, clearanceCleared: 1, clearanceTotal: 5, fnfStatus: 'Pending' },
+  { id: 3, name: 'Suresh Kumar',  empId: 'EMP/2022/008', department: 'Finance',     exitType: 'Retirement',   resignationDate: 'Feb 28, 2026', lastWorkingDate: 'Feb 28, 2026', noticePeriod: 0,  clearanceCleared: 5, clearanceTotal: 5, fnfStatus: 'Completed' },
+  { id: 4, name: 'Pradeep Singh', empId: 'EMP/2023/078', department: 'Sales',       exitType: 'Termination',  resignationDate: 'Mar 1, 2026',  lastWorkingDate: 'Mar 31, 2026', noticePeriod: 30, clearanceCleared: 4, clearanceTotal: 5, fnfStatus: 'Pending' },
+  { id: 5, name: 'Kavya Menon',   empId: 'EMP/2024/091', department: 'Operations',  exitType: 'Resignation',  resignationDate: 'Apr 1, 2026',  lastWorkingDate: 'Apr 30, 2026', noticePeriod: 30, clearanceCleared: 0, clearanceTotal: 5, fnfStatus: 'Not Started' },
 ]
 
 const INITIAL_CLEARANCE: ClearanceItem[] = [
-  { id: 'hr', label: 'HR Clearance', description: 'Clear pending leaves, update records', cleared: true },
-  { id: 'it', label: 'IT Clearance', description: 'Return laptop, revoke access', cleared: true },
-  { id: 'finance', label: 'Finance Clearance', description: 'No pending expense claims', cleared: true },
-  { id: 'manager', label: 'Manager Clearance', description: 'Knowledge transfer done', cleared: false },
-  { id: 'admin', label: 'Admin Clearance', description: 'Return ID card, access card', cleared: false },
+  { id: 'hr',      label: 'HR Clearance',      description: 'Clear pending leaves, update records', cleared: true },
+  { id: 'it',      label: 'IT Clearance',       description: 'Return laptop, revoke access',         cleared: true },
+  { id: 'finance', label: 'Finance Clearance',  description: 'No pending expense claims',            cleared: true },
+  { id: 'manager', label: 'Manager Clearance',  description: 'Knowledge transfer done',              cleared: false },
+  { id: 'admin',   label: 'Admin Clearance',    description: 'Return ID card, access card',          cleared: false },
 ]
 
 const FNF_RECORDS: FnFRecord[] = [
-  { id: 1, name: 'Vivek Sharma', empId: 'EMP/2024/045', lastWorkingDate: 'Apr 14, 2026', salaryEarned: 14423, leaveEncashment: 7696, noticePeriodRecovery: 0, bonusArrears: 5000, deductions: 4331, netFnF: 22788, status: 'Pending' },
-  { id: 2, name: 'Anita Nair', empId: 'EMP/2023/012', lastWorkingDate: 'May 19, 2026', salaryEarned: 29167, leaveEncashment: 4808, noticePeriodRecovery: 0, bonusArrears: 0, deductions: 3992, netFnF: 29983, status: 'Pending' },
-  { id: 3, name: 'Suresh Kumar', empId: 'EMP/2022/008', lastWorkingDate: 'Feb 28, 2026', salaryEarned: 45000, leaveEncashment: 12000, noticePeriodRecovery: 0, bonusArrears: 10000, deductions: 7200, netFnF: 59800, status: 'Approved' },
-  { id: 4, name: 'Pradeep Singh', empId: 'EMP/2023/078', lastWorkingDate: 'Mar 31, 2026', salaryEarned: 38000, leaveEncashment: 6000, noticePeriodRecovery: 0, bonusArrears: 0, deductions: 5320, netFnF: 38680, status: 'Pending' },
+  { id: 1, name: 'Vivek Sharma',  empId: 'EMP/2024/045', lastWorkingDate: 'Apr 14, 2026', salaryEarned: 14423, leaveEncashment: 7696,  noticePeriodRecovery: 0, bonusArrears: 5000,  deductions: 4331, netFnF: 22788, status: 'Pending' },
+  { id: 2, name: 'Anita Nair',    empId: 'EMP/2023/012', lastWorkingDate: 'May 19, 2026', salaryEarned: 29167, leaveEncashment: 4808,  noticePeriodRecovery: 0, bonusArrears: 0,     deductions: 3992, netFnF: 29983, status: 'Pending' },
+  { id: 3, name: 'Suresh Kumar',  empId: 'EMP/2022/008', lastWorkingDate: 'Feb 28, 2026', salaryEarned: 45000, leaveEncashment: 12000, noticePeriodRecovery: 0, bonusArrears: 10000, deductions: 7200, netFnF: 59800, status: 'Approved' },
+  { id: 4, name: 'Pradeep Singh', empId: 'EMP/2023/078', lastWorkingDate: 'Mar 31, 2026', salaryEarned: 38000, leaveEncashment: 6000,  noticePeriodRecovery: 0, bonusArrears: 0,     deductions: 5320, netFnF: 38680, status: 'Pending' },
 ]
 
 const PROBATION_EMPLOYEES: ProbationEmployee[] = [
-  { id: 1, name: 'Arjun Patel', empId: 'EMP/2026/013', designation: 'Software Engineer', department: 'Engineering', joinDate: 'Oct 1, 2025', probationEndDate: 'Apr 1, 2026', manager: 'Rajeev Gupta', reviewStatus: 'Overdue', daysRemaining: -1 },
-  { id: 2, name: 'Sunita Rao', empId: 'EMP/2026/014', designation: 'HR Executive', department: 'HR', joinDate: 'Oct 1, 2025', probationEndDate: 'Apr 1, 2026', manager: 'Meena Iyer', reviewStatus: 'Overdue', daysRemaining: -1 },
-  { id: 3, name: 'Mohammed Irfan', empId: 'EMP/2026/015', designation: 'Sales Executive', department: 'Sales', joinDate: 'Oct 15, 2025', probationEndDate: 'Apr 15, 2026', manager: 'Suresh Nair', reviewStatus: 'Scheduled', daysRemaining: 14 },
-  { id: 4, name: 'Deepika Sharma', empId: 'EMP/2026/016', designation: 'Finance Analyst', department: 'Finance', joinDate: 'Oct 15, 2025', probationEndDate: 'Apr 15, 2026', manager: 'Priya Menon', reviewStatus: 'Pending', daysRemaining: 14 },
-  { id: 5, name: 'Vikram Nair', empId: 'EMP/2026/017', designation: 'Operations Executive', department: 'Operations', joinDate: 'Nov 1, 2025', probationEndDate: 'May 1, 2026', manager: 'Anil Kumar', reviewStatus: 'Pending', daysRemaining: 30 },
-  { id: 6, name: 'Sonia Kapoor', empId: 'EMP/2026/018', designation: 'Marketing Analyst', department: 'Marketing', joinDate: 'Nov 1, 2025', probationEndDate: 'May 1, 2026', manager: 'Neha Singh', reviewStatus: 'Pending', daysRemaining: 30 },
-  { id: 7, name: 'Ravi Shankar', empId: 'EMP/2026/019', designation: 'Senior Engineer', department: 'Engineering', joinDate: 'Nov 15, 2025', probationEndDate: 'May 15, 2026', manager: 'Rajeev Gupta', reviewStatus: 'Pending', daysRemaining: 44 },
-  { id: 8, name: 'Kavita Pillai', empId: 'EMP/2026/020', designation: 'Support Executive', department: 'Customer Support', joinDate: 'Apr 5, 2026', probationEndDate: 'Apr 7, 2026', manager: 'Deepak Rao', reviewStatus: 'Pending', daysRemaining: 6 },
+  { id: 1, name: 'Arjun Patel',      empId: 'EMP/2026/013', designation: 'Software Engineer',    department: 'Engineering',     joinDate: 'Oct 1, 2025',  probationEndDate: 'Apr 1, 2026',  manager: 'Rajeev Gupta', reviewStatus: 'Overdue',   daysRemaining: -1 },
+  { id: 2, name: 'Sunita Rao',        empId: 'EMP/2026/014', designation: 'HR Executive',          department: 'HR',              joinDate: 'Oct 1, 2025',  probationEndDate: 'Apr 1, 2026',  manager: 'Meena Iyer',   reviewStatus: 'Overdue',   daysRemaining: -1 },
+  { id: 3, name: 'Mohammed Irfan',    empId: 'EMP/2026/015', designation: 'Sales Executive',       department: 'Sales',           joinDate: 'Oct 15, 2025', probationEndDate: 'Apr 15, 2026', manager: 'Suresh Nair',  reviewStatus: 'Scheduled', daysRemaining: 14 },
+  { id: 4, name: 'Deepika Sharma',    empId: 'EMP/2026/016', designation: 'Finance Analyst',       department: 'Finance',         joinDate: 'Oct 15, 2025', probationEndDate: 'Apr 15, 2026', manager: 'Priya Menon',  reviewStatus: 'Pending',   daysRemaining: 14 },
+  { id: 5, name: 'Vikram Nair',       empId: 'EMP/2026/017', designation: 'Operations Executive',  department: 'Operations',      joinDate: 'Nov 1, 2025',  probationEndDate: 'May 1, 2026',  manager: 'Anil Kumar',   reviewStatus: 'Pending',   daysRemaining: 30 },
+  { id: 6, name: 'Sonia Kapoor',      empId: 'EMP/2026/018', designation: 'Marketing Analyst',     department: 'Marketing',       joinDate: 'Nov 1, 2025',  probationEndDate: 'May 1, 2026',  manager: 'Neha Singh',   reviewStatus: 'Pending',   daysRemaining: 30 },
+  { id: 7, name: 'Ravi Shankar',      empId: 'EMP/2026/019', designation: 'Senior Engineer',       department: 'Engineering',     joinDate: 'Nov 15, 2025', probationEndDate: 'May 15, 2026', manager: 'Rajeev Gupta', reviewStatus: 'Pending',   daysRemaining: 44 },
+  { id: 8, name: 'Kavita Pillai',     empId: 'EMP/2026/020', designation: 'Support Executive',     department: 'Customer Support',joinDate: 'Apr 5, 2026',  probationEndDate: 'Apr 7, 2026',  manager: 'Deepak Rao',   reviewStatus: 'Pending',   daysRemaining: 6 },
 ]
 
 /* ─────────────────────────────────────────────────────────────
-   HELPERS
+   DESIGN TOKENS
 ───────────────────────────────────────────────────────────── */
-function exitTypeBadge(type: ExitType) {
-  const map: Record<ExitType, string> = {
-    Resignation: 'bg-orange-100 text-orange-700',
-    Termination: 'bg-red-100 text-red-700',
-    Retirement: 'bg-blue-100 text-blue-700',
-    'Contract End': 'bg-gray-100 text-gray-700',
-    'Mutual Separation': 'bg-purple-100 text-purple-700',
-  }
-  return map[type] ?? 'bg-gray-100 text-gray-700'
+const PALETTE = ['#1E3A5F', '#E8622A', '#1A7A4A', '#7C3AED', '#0369A1', '#BE185D', '#0F766E', '#B45309']
+
+const EXIT_TYPE_CFG: Record<ExitType, { bg: string; color: string; border: string }> = {
+  Resignation:       { bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
+  Termination:       { bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' },
+  Retirement:        { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  'Contract End':    { bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb' },
+  'Mutual Separation': { bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe' },
 }
 
-function fnfBadge(status: FnFStatus) {
-  const map: Record<FnFStatus, string> = {
-    Pending: 'bg-amber-100 text-amber-700',
-    Completed: 'bg-green-100 text-green-700',
-    Approved: 'bg-green-100 text-green-700',
-    'Not Started': 'bg-gray-100 text-gray-600',
-  }
-  return map[status] ?? 'bg-gray-100 text-gray-600'
+const FNF_CFG: Record<FnFStatus, { bg: string; color: string; border: string }> = {
+  Pending:     { bg: '#fffbeb', color: '#b45309', border: '#fde68a' },
+  Completed:   { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  Approved:    { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  'Not Started': { bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb' },
 }
 
-function daysRemainingColor(days: number) {
-  if (days < 0) return 'text-red-600 font-semibold'
-  if (days < 7) return 'text-amber-600 font-semibold'
-  return 'text-green-600 font-semibold'
+const REVIEW_CFG: Record<ReviewStatus, { bg: string; color: string; border: string }> = {
+  Overdue:   { bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' },
+  Pending:   { bg: '#fffbeb', color: '#b45309', border: '#fde68a' },
+  Scheduled: { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  Completed: { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
 }
 
-function reviewStatusBadge(status: ReviewStatus) {
-  const map: Record<ReviewStatus, string> = {
-    Overdue: 'bg-red-100 text-red-700',
-    Pending: 'bg-amber-100 text-amber-700',
-    Scheduled: 'bg-blue-100 text-blue-700',
-    Completed: 'bg-green-100 text-green-700',
-  }
-  return map[status] ?? 'bg-gray-100 text-gray-600'
+/* ─────────────────────────────────────────────────────────────
+   ATOM COMPONENTS
+───────────────────────────────────────────────────────────── */
+function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+  const idx = (name.charCodeAt(0) + (name.charCodeAt(1) || 0)) % PALETTE.length
+  const initials = name.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase()
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: `${PALETTE[idx]}1A`, border: `2px solid ${PALETTE[idx]}35`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.32, fontWeight: 700, color: PALETTE[idx], flexShrink: 0,
+    }}>
+      {initials}
+    </div>
+  )
+}
+
+function ExitTypeBadge({ type }: { type: ExitType }) {
+  const c = EXIT_TYPE_CFG[type]
+  return <span className="badge" style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>{type}</span>
+}
+
+function FnFBadge({ status }: { status: FnFStatus }) {
+  const c = FNF_CFG[status]
+  return <span className="badge badge-dot" style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>{status}</span>
+}
+
+function ReviewBadge({ status }: { status: ReviewStatus }) {
+  const c = REVIEW_CFG[status]
+  return <span className="badge badge-dot" style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>{status}</span>
+}
+
+/* ─────────────────────────────────────────────────────────────
+   MODAL WRAPPER
+───────────────────────────────────────────────────────────── */
+function Modal({ open, onClose, title, sub, wide, children }: {
+  open: boolean; onClose: () => void; title: string; sub?: string; wide?: boolean; children: React.ReactNode
+}) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div className="relative bg-white flex flex-col" style={{ width: wide ? '640px' : '480px', maxWidth: '95vw', maxHeight: '90vh', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.18)' }}>
+        <div className="flex items-start justify-between px-6 pt-5 pb-4" style={{ borderBottom: '1.5px solid #f1f5f9' }}>
+          <div>
+            <h2 style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>{title}</h2>
+            {sub && <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '4px 0 0', fontWeight: 400 }}>{sub}</p>}
+          </div>
+          <button onClick={onClose} className="btn btn-ghost btn-sm btn-icon" style={{ marginTop: -2 }}><X size={15} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+const FIELD_STYLE = {
+  width: '100%', borderRadius: 8, border: '1.5px solid #e5e7eb',
+  padding: '9px 12px', fontSize: '0.875rem', color: '#111827',
+  background: '#f9fafb', outline: 'none', boxSizing: 'border-box' as const,
+  fontFamily: 'inherit',
+}
+const LABEL_STYLE = {
+  display: 'block', fontSize: '0.75rem', fontWeight: 600 as const,
+  color: '#374151', marginBottom: 5, textTransform: 'uppercase' as const,
+  letterSpacing: '0.04em',
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -161,634 +174,549 @@ function reviewStatusBadge(status: ReviewStatus) {
 ───────────────────────────────────────────────────────────── */
 export default function ExitPage() {
   const [tab, setTab] = useState<ExitTab>('exit')
-  const [showInitiateModal, setShowInitiateModal] = useState(false)
-  const [selectedExit, setSelectedExit] = useState<ExitRecord | null>(null)
-  const [showManageModal, setShowManageModal] = useState(false)
-  const [showFnFModal, setShowFnFModal] = useState(false)
-  const [selectedFnF, setSelectedFnF] = useState<FnFRecord | null>(null)
-  const [showProbationModal, setShowProbationModal] = useState(false)
-  const [selectedProbation, setSelectedProbation] = useState<ProbationEmployee | null>(null)
-  const [clearanceItems, setClearanceItems] = useState<ClearanceItem[]>(INITIAL_CLEARANCE)
+  const [showInitiateModal, setShowInitiateModal]   = useState(false)
+  const [selectedExit, setSelectedExit]             = useState<ExitRecord | null>(null)
+  const [showManageModal, setShowManageModal]        = useState(false)
+  const [showFnFModal, setShowFnFModal]              = useState(false)
+  const [selectedFnF, setSelectedFnF]               = useState<FnFRecord | null>(null)
+  const [showProbationModal, setShowProbationModal]  = useState(false)
+  const [selectedProbation, setSelectedProbation]   = useState<ProbationEmployee | null>(null)
+  const [clearanceItems, setClearanceItems]         = useState<ClearanceItem[]>(INITIAL_CLEARANCE)
 
-  // Initiate modal state
-  const [initEmployee, setInitEmployee] = useState('')
-  const [initExitType, setInitExitType] = useState<ExitType>('Resignation')
-  const [initResignDate, setInitResignDate] = useState('')
-  const [initLastDate, setInitLastDate] = useState('')
+  const [initEmployee, setInitEmployee]       = useState('')
+  const [initExitType, setInitExitType]       = useState<ExitType>('Resignation')
+  const [initResignDate, setInitResignDate]   = useState('')
+  const [initLastDate, setInitLastDate]       = useState('')
   const [initNoticePeriod, setInitNoticePeriod] = useState('30')
-  const [initReason, setInitReason] = useState('')
+  const [initReason, setInitReason]           = useState('')
 
-  // Probation review modal state
-  const [probRating, setProbRating] = useState('4')
-  const [probOutcome, setProbOutcome] = useState<ProbationOutcome>('Confirmed')
+  const [probRating, setProbRating]             = useState('4')
+  const [probOutcome, setProbOutcome]           = useState<ProbationOutcome>('Confirmed')
   const [probExtendMonths, setProbExtendMonths] = useState('3')
-  const [probRemarks, setProbRemarks] = useState('')
+  const [probRemarks, setProbRemarks]           = useState('')
   const [probEffectiveDate, setProbEffectiveDate] = useState('')
 
-  const toggleClearance = (id: string) => {
+  const toggleClearance = (id: string) =>
     setClearanceItems(prev => prev.map(item => item.id === id ? { ...item, cleared: !item.cleared } : item))
-  }
 
-  const openManage = (exit: ExitRecord) => {
-    setSelectedExit(exit)
-    setShowManageModal(true)
-  }
+  const openManage = (exit: ExitRecord) => { setSelectedExit(exit); setShowManageModal(true) }
+  const openFnF    = (fnf: FnFRecord)   => { setSelectedFnF(fnf);   setShowFnFModal(true) }
+  const openProbationReview = (emp: ProbationEmployee) => { setSelectedProbation(emp); setShowProbationModal(true) }
 
-  const openFnF = (fnf: FnFRecord) => {
-    setSelectedFnF(fnf)
-    setShowFnFModal(true)
-  }
+  const noticePeriodCount = EXIT_RECORDS.length
+  const fnfPending = FNF_RECORDS.filter(f => f.status === 'Pending').length
+  const overdueCount = PROBATION_EMPLOYEES.filter(p => p.reviewStatus === 'Overdue').length
 
-  const openProbationReview = (emp: ProbationEmployee) => {
-    setSelectedProbation(emp)
-    setShowProbationModal(true)
-  }
-
-  const TABS: { key: ExitTab; label: string }[] = [
-    { key: 'exit', label: 'Exit Management' },
-    { key: 'fnf', label: 'FnF Settlement' },
-    { key: 'probation', label: 'Probation Tracking' },
+  const TABS: { key: ExitTab; label: string; count: number }[] = [
+    { key: 'exit',      label: 'Exit Management',   count: EXIT_RECORDS.length },
+    { key: 'fnf',       label: 'FnF Settlement',     count: FNF_RECORDS.length },
+    { key: 'probation', label: 'Probation Tracking', count: PROBATION_EMPLOYEES.length },
   ]
 
   return (
-    <div className="p-6 space-y-6">
+    <>
+      {/* ── Modals ── */}
+
+      {/* Initiate Exit */}
+      <Modal open={showInitiateModal} onClose={() => setShowInitiateModal(false)} title="Initiate Exit Process" sub="Record a new employee exit or separation">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={LABEL_STYLE}>Employee</label>
+            <select value={initEmployee} onChange={e => setInitEmployee(e.target.value)} className="form-select" style={{ width: '100%' }}>
+              <option value="">Select employee…</option>
+              <option>Vivek Sharma (EMP/2024/045)</option>
+              <option>Anita Nair (EMP/2023/012)</option>
+              <option>Kavya Menon (EMP/2024/091)</option>
+              <option>Ravi Shankar (EMP/2026/019)</option>
+            </select>
+          </div>
+          <div>
+            <label style={LABEL_STYLE}>Exit Type</label>
+            <select value={initExitType} onChange={e => setInitExitType(e.target.value as ExitType)} className="form-select" style={{ width: '100%' }}>
+              {(['Resignation','Termination','Retirement','Contract End','Mutual Separation'] as ExitType[]).map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={LABEL_STYLE}>Resignation Date</label>
+              <input type="date" value={initResignDate} onChange={e => setInitResignDate(e.target.value)} style={FIELD_STYLE} />
+            </div>
+            <div>
+              <label style={LABEL_STYLE}>Last Working Date</label>
+              <input type="date" value={initLastDate} onChange={e => setInitLastDate(e.target.value)} style={FIELD_STYLE} />
+            </div>
+          </div>
+          <div>
+            <label style={LABEL_STYLE}>Notice Period (days)</label>
+            <input type="number" value={initNoticePeriod} onChange={e => setInitNoticePeriod(e.target.value)} placeholder="30" style={FIELD_STYLE} />
+          </div>
+          <div>
+            <label style={LABEL_STYLE}>Reason</label>
+            <textarea
+              rows={3} value={initReason} onChange={e => setInitReason(e.target.value)}
+              placeholder="Enter reason for exit…"
+              style={{ ...FIELD_STYLE, resize: 'none', lineHeight: 1.5 }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
+            <button onClick={() => setShowInitiateModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+            <button className="btn btn-primary btn-sm" style={{ flex: 2 }}>Initiate Exit</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Manage Exit / Clearance */}
+      <Modal open={showManageModal && !!selectedExit} onClose={() => setShowManageModal(false)} title={selectedExit?.name ?? ''} sub={`${selectedExit?.empId} · ${selectedExit?.department}`} wide>
+        {selectedExit && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Exit Info */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+              {[
+                ['Exit Type',          <ExitTypeBadge key="et" type={selectedExit.exitType} />],
+                ['Resignation Date',   selectedExit.resignationDate],
+                ['Last Working Date',  selectedExit.lastWorkingDate],
+                ['Notice Period',      `${selectedExit.noticePeriod} days`],
+                ['FnF Status',         <FnFBadge key="fnf" status={selectedExit.fnfStatus} />],
+                ['Clearance Progress', `${selectedExit.clearanceCleared} / ${selectedExit.clearanceTotal} cleared`],
+              ].map(([k, v]) => (
+                <div key={String(k)} style={{ padding: '10px 12px', borderRadius: 8, background: '#f9fafb', border: '1px solid #f1f5f9' }}>
+                  <p style={{ fontSize: '0.7rem', color: '#9ca3af', margin: '0 0 4px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{k}</p>
+                  {typeof v === 'string'
+                    ? <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', margin: 0 }}>{v}</p>
+                    : v}
+                </div>
+              ))}
+            </div>
+
+            {/* Clearance Checklist */}
+            <div>
+              <p style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#111827', margin: '0 0 10px' }}>Clearance Checklist</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {clearanceItems.map(item => (
+                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, border: `1.5px solid ${item.cleared ? '#bbf7d0' : '#e5e7eb'}`, background: item.cleared ? '#f0fdf4' : '#fafafa', transition: 'all 150ms' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {item.cleared
+                        ? <CheckCircle2 size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
+                        : <Circle       size={18} style={{ color: '#d1d5db', flexShrink: 0 }} />}
+                      <div>
+                        <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#111827', margin: 0 }}>{item.label}</p>
+                        <p style={{ fontSize: '0.75rem', color: '#6b7280', margin: 0 }}>{item.description}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleClearance(item.id)}
+                      className={item.cleared ? 'btn btn-outline btn-sm' : 'btn btn-ghost btn-sm'}
+                      style={{ fontSize: '0.75rem', color: item.cleared ? '#dc2626' : '#15803d', borderColor: item.cleared ? '#fecaca' : undefined }}
+                    >
+                      {item.cleared ? 'Undo' : 'Mark Cleared'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10, paddingTop: 4, borderTop: '1px solid #f1f5f9' }}>
+              <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <FileText size={13} /> Generate Experience Letter
+              </button>
+              <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <IndianRupee size={13} /> Initiate FnF
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* FnF Calculation */}
+      <Modal open={showFnFModal && !!selectedFnF} onClose={() => setShowFnFModal(false)} title={`FnF Statement — ${selectedFnF?.name ?? ''}`} sub={selectedFnF ? `Last working day: ${selectedFnF.lastWorkingDate}` : ''}>
+        {selectedFnF && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Earnings */}
+            <div style={{ borderRadius: 10, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 14px', background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                <p style={{ fontSize: '0.7rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Earnings</p>
+              </div>
+              <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  ['Salary for Apr 1–14 (14 of 26 working days)', `₹${selectedFnF.salaryEarned.toLocaleString('en-IN')}`],
+                  ['Leave Encashment', `₹${selectedFnF.leaveEncashment.toLocaleString('en-IN')}`],
+                  ['Bonus / Arrears', `₹${selectedFnF.bonusArrears.toLocaleString('en-IN')}`],
+                  ['Gratuity', '₹0'],
+                ].map(([label, val]) => (
+                  <div key={String(label)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}>
+                    <span style={{ color: '#6b7280' }}>{label}</span>
+                    <span style={{ fontWeight: 600, color: '#111827' }}>{val}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+                  <span style={{ fontWeight: 700, color: '#15803d' }}>Total Earnings</span>
+                  <span style={{ fontWeight: 700, color: '#15803d' }}>₹{(selectedFnF.salaryEarned + selectedFnF.leaveEncashment + selectedFnF.bonusArrears).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Deductions */}
+            <div style={{ borderRadius: 10, border: '1px solid #f1f5f9', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 14px', background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                <p style={{ fontSize: '0.7rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Deductions</p>
+              </div>
+              <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  ['PF for partial month', '₹1,731'],
+                  ['PT for partial month', '₹100'],
+                  ['TDS on FnF',           '₹2,500'],
+                  ['Outstanding Advance',  '₹0'],
+                ].map(([label, val]) => (
+                  <div key={String(label)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}>
+                    <span style={{ color: '#6b7280' }}>{label}</span>
+                    <span style={{ fontWeight: 600, color: '#dc2626' }}>{val}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+                  <span style={{ fontWeight: 700, color: '#b91c1c' }}>Total Deductions</span>
+                  <span style={{ fontWeight: 700, color: '#b91c1c' }}>-₹{selectedFnF.deductions.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Net FnF */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderRadius: 10, background: '#f0fdf4', border: '1.5px solid #bbf7d0' }}>
+              <div>
+                <p style={{ fontSize: '0.7rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 2px' }}>Net FnF Payable</p>
+                <p style={{ fontSize: '0.75rem', color: '#6b7280', margin: 0 }}>After all earnings and deductions</p>
+              </div>
+              <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#15803d', margin: 0, fontFamily: 'var(--font-heading)' }}>₹{selectedFnF.netFnF.toLocaleString('en-IN')}</p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Download size={13} /> Download Statement
+              </button>
+              {selectedFnF.status !== 'Approved' && (
+                <button className="btn btn-primary btn-sm" style={{ flex: 1 }}>Approve FnF</button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Probation Review */}
+      <Modal open={showProbationModal && !!selectedProbation} onClose={() => setShowProbationModal(false)} title="Complete Probation Review" sub={selectedProbation ? `${selectedProbation.name} · ${selectedProbation.designation}` : ''}>
+        {selectedProbation && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Info strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {[['Department', selectedProbation.department], ['Manager', selectedProbation.manager], ['Join Date', selectedProbation.joinDate], ['Probation End', selectedProbation.probationEndDate]].map(([k, v]) => (
+                <div key={k} style={{ padding: '9px 12px', borderRadius: 8, background: '#f9fafb', border: '1px solid #f1f5f9' }}>
+                  <p style={{ fontSize: '0.7rem', color: '#9ca3af', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{k}</p>
+                  <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#111827', margin: 0 }}>{v}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Rating */}
+            <div>
+              <label style={LABEL_STYLE}>Performance Rating</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {['1','2','3','4','5'].map(r => (
+                  <button key={r} onClick={() => setProbRating(r)}
+                    style={{
+                      width: 38, height: 38, borderRadius: '50%', fontSize: '0.875rem', fontWeight: 700,
+                      border: `2px solid ${probRating === r ? '#1E3A5F' : '#e5e7eb'}`,
+                      background: probRating === r ? '#1E3A5F' : 'white',
+                      color: probRating === r ? '#fff' : '#6b7280', cursor: 'pointer', transition: 'all 150ms',
+                    }}>{r}</button>
+                ))}
+                <span style={{ fontSize: '0.8125rem', color: '#6b7280', marginLeft: 4 }}>{probRating}/5</span>
+              </div>
+            </div>
+
+            {/* Outcome */}
+            <div>
+              <label style={LABEL_STYLE}>Outcome</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(['Confirmed', 'Extended', 'Terminated'] as ProbationOutcome[]).map(o => {
+                  const active = probOutcome === o
+                  const col = o === 'Confirmed' ? '#15803d' : o === 'Extended' ? '#b45309' : '#b91c1c'
+                  const bg  = o === 'Confirmed' ? '#f0fdf4' : o === 'Extended' ? '#fffbeb' : '#fef2f2'
+                  const bdr = o === 'Confirmed' ? '#bbf7d0' : o === 'Extended' ? '#fde68a' : '#fecaca'
+                  return (
+                    <button key={o} onClick={() => setProbOutcome(o)}
+                      style={{
+                        flex: 1, padding: '9px', borderRadius: 8, fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer', transition: 'all 150ms',
+                        border: active ? `2px solid ${bdr}` : '2px solid #e5e7eb',
+                        background: active ? bg : 'white',
+                        color: active ? col : '#6b7280',
+                      }}>{o}</button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {probOutcome === 'Extended' && (
+              <div>
+                <label style={LABEL_STYLE}>Extend by (months)</label>
+                <select value={probExtendMonths} onChange={e => setProbExtendMonths(e.target.value)} className="form-select" style={{ width: '100%' }}>
+                  <option value="1">1 month</option>
+                  <option value="2">2 months</option>
+                  <option value="3">3 months</option>
+                  <option value="6">6 months</option>
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label style={LABEL_STYLE}>Remarks</label>
+              <textarea rows={3} value={probRemarks} onChange={e => setProbRemarks(e.target.value)} placeholder="Enter review remarks…"
+                style={{ ...FIELD_STYLE, resize: 'none', lineHeight: 1.5 }} />
+            </div>
+
+            <div>
+              <label style={LABEL_STYLE}>Effective Date</label>
+              <input type="date" value={probEffectiveDate} onChange={e => setProbEffectiveDate(e.target.value)} style={FIELD_STYLE} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
+              <button onClick={() => setShowProbationModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+              <button className="btn btn-primary btn-sm" style={{ flex: 2 }}>Submit Review</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Page ── */}
       <Topbar
         title="Exit Management & Employee Lifecycle"
         subtitle="Manage exits, full & final settlements, and probation reviews"
+        notificationCount={overdueCount}
       >
-        <button
-          onClick={() => setShowInitiateModal(true)}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          <UserMinus className="w-4 h-4" />
-          Initiate Exit Process
+        <button onClick={() => setShowInitiateModal(true)} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <UserMinus size={14} /> Initiate Exit Process
         </button>
       </Topbar>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'On Notice Period', value: 5, color: 'orange', Icon: UserMinus },
-          { label: 'Exit This Month', value: 3, color: 'red', Icon: LogOut },
-          { label: 'FnF Pending', value: 2, color: 'amber', Icon: IndianRupee },
-          { label: 'Probation Due', value: 4, color: 'blue', Icon: Clock },
-        ].map(({ label, value, color, Icon }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-200 p-5 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center bg-${color}-100`}>
-              <Icon className={`w-6 h-6 text-${color}-600`} />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-900">{value}</p>
-              <p className="text-sm text-gray-500">{label}</p>
-            </div>
-          </div>
-        ))}
-      </div>
+      <div style={{ padding: '28px 28px 56px' }}>
 
-      {/* Tabs */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="flex border-b border-gray-200">
-          {TABS.map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-6 py-4 text-sm font-medium transition-colors ${
-                tab === t.key
-                  ? 'border-b-2 border-blue-600 text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {t.label}
-            </button>
+        {/* ── KPI Strip ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+          {([
+            { label: 'On Notice Period', value: noticePeriodCount, icon: UserMinus, color: '#E8622A' },
+            { label: 'Exit This Month',  value: 3,                 icon: LogOut,    color: '#b91c1c' },
+            { label: 'FnF Pending',      value: fnfPending,        icon: IndianRupee, color: '#b45309' },
+            { label: 'Probation Due',    value: PROBATION_EMPLOYEES.length, icon: Clock, color: '#1d4ed8' },
+          ] as { label: string; value: number; icon: React.ElementType; color: string }[]).map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="card card-interactive" style={{ padding: '16px 18px', textAlign: 'center' }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: `${color}14`, border: `1.5px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+                <Icon size={16} style={{ color }} />
+              </div>
+              <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1.75rem', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1 }}>{value}</p>
+              <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '4px 0 0' }}>{label}</p>
+            </div>
           ))}
         </div>
 
-        {/* TAB 1 — Exit Management */}
-        {tab === 'exit' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {['Employee', 'EMP ID', 'Department', 'Exit Type', 'Resignation Date', 'Last Working Date', 'Notice Period', 'Clearance', 'FnF Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {EXIT_RECORDS.map(exit => (
-                  <tr key={exit.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-900">{exit.name}</td>
-                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{exit.empId}</td>
-                    <td className="px-4 py-3 text-gray-600">{exit.department}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${exitTypeBadge(exit.exitType)}`}>
-                        {exit.exitType}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{exit.resignationDate}</td>
-                    <td className="px-4 py-3 text-gray-600">{exit.lastWorkingDate}</td>
-                    <td className="px-4 py-3 text-gray-600">{exit.noticePeriod} days</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-gray-200 rounded-full h-1.5" style={{ minWidth: 60 }}>
-                          <div
-                            className={`h-1.5 rounded-full ${exit.clearanceCleared === exit.clearanceTotal ? 'bg-green-500' : 'bg-blue-500'}`}
-                            style={{ width: `${(exit.clearanceCleared / exit.clearanceTotal) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-gray-500">{exit.clearanceCleared}/{exit.clearanceTotal}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${fnfBadge(exit.fnfStatus)}`}>
-                        {exit.fnfStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => openManage(exit)} className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium">
-                          <Eye className="w-3.5 h-3.5" /> View
-                        </button>
-                        <button onClick={() => openManage(exit)} className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-xs font-medium">
-                          <ChevronRight className="w-3.5 h-3.5" /> Manage
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/* ── Main Card ── */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
 
-        {/* TAB 2 — FnF Settlement */}
-        {tab === 'fnf' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {['Employee', 'Last Working Date', 'Salary Earned', 'Leave Encashment', 'Notice Recovery', 'Bonus/Arrears', 'Deductions', 'Net FnF', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {FNF_RECORDS.map(fnf => (
-                  <tr key={fnf.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-gray-900">{fnf.name}</p>
-                      <p className="text-xs text-gray-400 font-mono">{fnf.empId}</p>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{fnf.lastWorkingDate}</td>
-                    <td className="px-4 py-3 text-gray-600">₹{fnf.salaryEarned.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-gray-600">₹{fnf.leaveEncashment.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {fnf.noticePeriodRecovery > 0 ? <span className="text-red-600">-₹{fnf.noticePeriodRecovery.toLocaleString()}</span> : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">₹{fnf.bonusArrears.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-red-600">-₹{fnf.deductions.toLocaleString()}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-900">₹{fnf.netFnF.toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${fnfBadge(fnf.status)}`}>
-                        {fnf.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => openFnF(fnf)} className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium">
-                          <Eye className="w-3.5 h-3.5" /> View
-                        </button>
-                        {fnf.status !== 'Approved' && (
-                          <button onClick={() => openFnF(fnf)} className="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium">
-                            <IndianRupee className="w-3.5 h-3.5" /> Pay
+          {/* Tab Bar */}
+          <div style={{ display: 'flex', borderBottom: '1.5px solid #f1f5f9', padding: '0 4px' }}>
+            {TABS.map(t => {
+              const active = tab === t.key
+              return (
+                <button key={t.key} onClick={() => setTab(t.key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    padding: '14px 18px', fontSize: '0.8125rem', fontWeight: active ? 700 : 500,
+                    color: active ? '#1E3A5F' : '#6b7280', background: 'none', border: 'none', cursor: 'pointer',
+                    borderBottom: active ? '2px solid #1E3A5F' : '2px solid transparent',
+                    marginBottom: -1, transition: 'color 150ms',
+                  }}>
+                  {t.label}
+                  <span style={{
+                    fontSize: '0.7rem', fontWeight: 700, padding: '1px 6px', borderRadius: 20,
+                    background: active ? '#dbeafe' : '#f1f5f9',
+                    color: active ? '#1d4ed8' : '#9ca3af',
+                  }}>{t.count}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* TAB 1 — Exit Management */}
+          {tab === 'exit' && (
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    {['Employee', 'EMP ID', 'Department', 'Exit Type', 'Resignation Date', 'Last Working Date', 'Notice Period', 'Clearance', 'FnF Status', 'Actions'].map(h => (
+                      <th key={h}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {EXIT_RECORDS.map(exit => {
+                    const pct = (exit.clearanceCleared / exit.clearanceTotal) * 100
+                    const done = exit.clearanceCleared === exit.clearanceTotal
+                    return (
+                      <tr key={exit.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Avatar name={exit.name} size={32} />
+                            <span style={{ fontWeight: 600, color: '#111827', fontSize: '0.8125rem' }}>{exit.name}</span>
+                          </div>
+                        </td>
+                        <td><span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: '#6b7280' }}>{exit.empId}</span></td>
+                        <td style={{ color: '#374151' }}>{exit.department}</td>
+                        <td><ExitTypeBadge type={exit.exitType} /></td>
+                        <td style={{ color: '#374151' }}>{exit.resignationDate}</td>
+                        <td style={{ color: '#374151' }}>{exit.lastWorkingDate}</td>
+                        <td style={{ color: '#374151' }}>{exit.noticePeriod > 0 ? `${exit.noticePeriod} days` : '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 100 }}>
+                            <div style={{ flex: 1, height: 5, borderRadius: 99, background: '#f1f5f9', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: done ? '#22c55e' : '#3b82f6', transition: 'width 300ms' }} />
+                            </div>
+                            <span style={{ fontSize: '0.75rem', color: '#6b7280', flexShrink: 0 }}>{exit.clearanceCleared}/{exit.clearanceTotal}</span>
+                          </div>
+                        </td>
+                        <td><FnFBadge status={exit.fnfStatus} /></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button onClick={() => openManage(exit)} className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem' }}>
+                              <Eye size={12} /> View
+                            </button>
+                            <button onClick={() => openManage(exit)} className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem' }}>
+                              <Settings2 size={12} /> Manage
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* TAB 2 — FnF Settlement */}
+          {tab === 'fnf' && (
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    {['Employee', 'Last Working Date', 'Salary Earned', 'Leave Encashment', 'Notice Recovery', 'Bonus/Arrears', 'Deductions', 'Net FnF', 'Status', 'Actions'].map(h => (
+                      <th key={h}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {FNF_RECORDS.map(fnf => (
+                    <tr key={fnf.id}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Avatar name={fnf.name} size={32} />
+                          <div>
+                            <p style={{ fontWeight: 600, color: '#111827', fontSize: '0.8125rem', margin: 0 }}>{fnf.name}</p>
+                            <p style={{ fontSize: '0.7rem', color: '#9ca3af', fontFamily: 'monospace', margin: 0 }}>{fnf.empId}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ color: '#374151' }}>{fnf.lastWorkingDate}</td>
+                      <td style={{ color: '#374151' }}>₹{fnf.salaryEarned.toLocaleString('en-IN')}</td>
+                      <td style={{ color: '#374151' }}>₹{fnf.leaveEncashment.toLocaleString('en-IN')}</td>
+                      <td>{fnf.noticePeriodRecovery > 0 ? <span style={{ color: '#dc2626', fontWeight: 600 }}>-₹{fnf.noticePeriodRecovery.toLocaleString('en-IN')}</span> : <span style={{ color: '#9ca3af' }}>—</span>}</td>
+                      <td style={{ color: '#374151' }}>₹{fnf.bonusArrears.toLocaleString('en-IN')}</td>
+                      <td style={{ color: '#dc2626', fontWeight: 600 }}>-₹{fnf.deductions.toLocaleString('en-IN')}</td>
+                      <td style={{ fontWeight: 700, color: '#111827' }}>₹{fnf.netFnF.toLocaleString('en-IN')}</td>
+                      <td><FnFBadge status={fnf.status} /></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={() => openFnF(fnf)} className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem' }}>
+                            <Eye size={12} /> View
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* TAB 3 — Probation Tracking */}
-        {tab === 'probation' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  {['Employee', 'EMP ID', 'Designation', 'Join Date', 'Probation End', 'Manager', 'Review Status', 'Days Remaining', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {PROBATION_EMPLOYEES.map(emp => (
-                  <tr key={emp.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-900">{emp.name}</td>
-                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{emp.empId}</td>
-                    <td className="px-4 py-3 text-gray-600">{emp.designation}</td>
-                    <td className="px-4 py-3 text-gray-600">{emp.joinDate}</td>
-                    <td className="px-4 py-3 text-gray-600">{emp.probationEndDate}</td>
-                    <td className="px-4 py-3 text-gray-600">{emp.manager}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${reviewStatusBadge(emp.reviewStatus)}`}>
-                        {emp.reviewStatus}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={daysRemainingColor(emp.daysRemaining)}>
-                        {emp.daysRemaining < 0
-                          ? `${Math.abs(emp.daysRemaining)} day(s) overdue`
-                          : `${emp.daysRemaining} days`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-1">
-                        {emp.reviewStatus === 'Overdue' || emp.reviewStatus === 'Pending' ? (
-                          <>
-                            <button className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100">Schedule</button>
-                            <button onClick={() => openProbationReview(emp)} className="text-xs px-2 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100">Complete</button>
-                            <button className="text-xs px-2 py-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100">Extend</button>
-                          </>
-                        ) : emp.reviewStatus === 'Scheduled' ? (
-                          <>
-                            <button onClick={() => openProbationReview(emp)} className="text-xs px-2 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100">Complete</button>
-                            <button className="text-xs px-2 py-1 bg-gray-50 text-gray-600 rounded hover:bg-gray-100">Confirm</button>
-                          </>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ─── MODAL: Initiate Exit Process ─── */}
-      {showInitiateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Initiate Exit Process</h2>
-              <button onClick={() => setShowInitiateModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={initEmployee}
-                  onChange={e => setInitEmployee(e.target.value)}
-                >
-                  <option value="">Select employee...</option>
-                  <option>Vivek Sharma (EMP/2024/045)</option>
-                  <option>Anita Nair (EMP/2023/012)</option>
-                  <option>Kavya Menon (EMP/2024/091)</option>
-                  <option>Ravi Shankar (EMP/2026/019)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Exit Type</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={initExitType}
-                  onChange={e => setInitExitType(e.target.value as ExitType)}
-                >
-                  <option>Resignation</option>
-                  <option>Termination</option>
-                  <option>Retirement</option>
-                  <option>Contract End</option>
-                  <option>Mutual Separation</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Resignation Date</label>
-                  <input
-                    type="date"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={initResignDate}
-                    onChange={e => setInitResignDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Last Working Date</label>
-                  <input
-                    type="date"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={initLastDate}
-                    onChange={e => setInitLastDate(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notice Period (days)</label>
-                <input
-                  type="number"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={initNoticePeriod}
-                  onChange={e => setInitNoticePeriod(e.target.value)}
-                  placeholder="Auto-calculated or override"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
-                <textarea
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                  value={initReason}
-                  onChange={e => setInitReason(e.target.value)}
-                  placeholder="Enter reason for exit..."
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
-              <button onClick={() => setShowInitiateModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-              <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-                Initiate Exit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── MODAL: Manage Exit / Clearance ─── */}
-      {showManageModal && selectedExit && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">{selectedExit.name}</h2>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm text-gray-500 font-mono">{selectedExit.empId}</span>
-                  <span className="text-gray-300">•</span>
-                  <span className="text-sm text-gray-500">{selectedExit.department}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${exitTypeBadge(selectedExit.exitType)}`}>
-                    {selectedExit.exitType}
-                  </span>
-                </div>
-              </div>
-              <button onClick={() => setShowManageModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 space-y-5">
-              {/* Exit Info */}
-              <div className="grid grid-cols-3 gap-4 bg-gray-50 rounded-xl p-4 text-sm">
-                <div>
-                  <p className="text-gray-500 text-xs">Resignation Date</p>
-                  <p className="font-medium text-gray-800">{selectedExit.resignationDate}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-xs">Last Working Date</p>
-                  <p className="font-medium text-gray-800">{selectedExit.lastWorkingDate}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 text-xs">Notice Period</p>
-                  <p className="font-medium text-gray-800">{selectedExit.noticePeriod} days</p>
-                </div>
-              </div>
-
-              {/* Clearance Checklist */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Clearance Checklist</h3>
-                <div className="space-y-3">
-                  {clearanceItems.map(item => (
-                    <div key={item.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl">
-                      <div className="flex items-center gap-3">
-                        {item.cleared
-                          ? <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
-                          : <Circle className="w-5 h-5 text-gray-300 flex-shrink-0" />}
-                        <div>
-                          <p className="text-sm font-medium text-gray-800">{item.label}</p>
-                          <p className="text-xs text-gray-500">{item.description}</p>
+                          {fnf.status !== 'Approved' && (
+                            <button onClick={() => openFnF(fnf)} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem' }}>
+                              <IndianRupee size={12} /> Pay
+                            </button>
+                          )}
                         </div>
-                      </div>
-                      <button
-                        onClick={() => toggleClearance(item.id)}
-                        className={`text-xs px-3 py-1 rounded-lg font-medium transition-colors ${
-                          item.cleared
-                            ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                            : 'bg-green-50 text-green-600 hover:bg-green-100'
-                        }`}
-                      >
-                        {item.cleared ? 'Undo' : 'Mark Cleared'}
-                      </button>
-                    </div>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <button className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 transition-colors">
-                  <FileText className="w-4 h-4" /> Generate Experience Letter
-                </button>
-                <button className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
-                  <IndianRupee className="w-4 h-4" /> Initiate FnF
-                </button>
-              </div>
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
+
+          {/* TAB 3 — Probation Tracking */}
+          {tab === 'probation' && (
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    {['Employee', 'Designation', 'Join Date', 'Probation End', 'Manager', 'Days Remaining', 'Review Status', 'Actions'].map(h => (
+                      <th key={h}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {PROBATION_EMPLOYEES.map(emp => {
+                    const overdue = emp.daysRemaining < 0
+                    const urgent  = emp.daysRemaining >= 0 && emp.daysRemaining < 7
+                    return (
+                      <tr key={emp.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Avatar name={emp.name} size={32} />
+                            <div>
+                              <p style={{ fontWeight: 600, color: '#111827', fontSize: '0.8125rem', margin: 0 }}>{emp.name}</p>
+                              <p style={{ fontSize: '0.7rem', color: '#9ca3af', fontFamily: 'monospace', margin: 0 }}>{emp.empId}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ color: '#374151' }}>{emp.designation}</td>
+                        <td style={{ color: '#374151' }}>{emp.joinDate}</td>
+                        <td style={{ color: '#374151' }}>{emp.probationEndDate}</td>
+                        <td style={{ color: '#374151' }}>{emp.manager}</td>
+                        <td>
+                          <span style={{
+                            fontSize: '0.8125rem', fontWeight: 600,
+                            color: overdue ? '#b91c1c' : urgent ? '#b45309' : '#15803d',
+                          }}>
+                            {overdue ? `${Math.abs(emp.daysRemaining)}d overdue` : `${emp.daysRemaining} days`}
+                          </span>
+                        </td>
+                        <td><ReviewBadge status={emp.reviewStatus} /></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {(emp.reviewStatus === 'Overdue' || emp.reviewStatus === 'Pending') && (
+                              <>
+                                <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>Schedule</button>
+                                <button onClick={() => openProbationReview(emp)} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem' }}>Complete</button>
+                              </>
+                            )}
+                            {emp.reviewStatus === 'Scheduled' && (
+                              <>
+                                <button onClick={() => openProbationReview(emp)} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem' }}>Complete</button>
+                                <button className="btn btn-outline btn-sm" style={{ fontSize: '0.75rem' }}>Confirm</button>
+                              </>
+                            )}
+                            {emp.reviewStatus === 'Completed' && (
+                              <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Done</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
         </div>
-      )}
-
-      {/* ─── MODAL: FnF Calculation ─── */}
-      {showFnFModal && selectedFnF && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">FnF Calculation Statement — {selectedFnF.name}</h2>
-              <button onClick={() => setShowFnFModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              {/* Earnings */}
-              <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Earnings</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Salary for Apr 1–14 (14 days of 26 working days)</span>
-                    <span className="font-medium">₹14,423</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Leave Encashment (8 EL days @ ₹962/day)</span>
-                    <span className="font-medium">₹7,696</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Performance Bonus (pro-rated)</span>
-                    <span className="font-medium">₹5,000</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Gratuity (3 years service — not eligible)</span>
-                    <span className="font-medium text-gray-400">₹0</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-2 font-semibold text-green-700">
-                    <span>Total Earnings</span>
-                    <span>₹27,119</span>
-                  </div>
-                </div>
-              </div>
-
-              <hr />
-
-              {/* Deductions */}
-              <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Deductions</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">PF for partial month</span>
-                    <span className="font-medium text-red-600">₹1,731</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">PT for partial month</span>
-                    <span className="font-medium text-red-600">₹100</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">TDS on FnF</span>
-                    <span className="font-medium text-red-600">₹2,500</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Outstanding Advance</span>
-                    <span className="font-medium text-gray-400">₹0</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-2 font-semibold text-red-700">
-                    <span>Total Deductions</span>
-                    <span>₹4,331</span>
-                  </div>
-                </div>
-              </div>
-
-              <hr />
-
-              {/* Net */}
-              <div className="bg-blue-50 rounded-xl p-4 flex items-center justify-between">
-                <span className="font-bold text-gray-800 text-lg">NET FnF PAYABLE</span>
-                <span className="font-bold text-blue-700 text-2xl">₹22,788</span>
-              </div>
-
-              <div className="flex gap-3">
-                <button className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
-                  Approve FnF
-                </button>
-                <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-                  <Download className="w-4 h-4" /> Download Statement
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── MODAL: Complete Probation Review ─── */}
-      {showProbationModal && selectedProbation && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Complete Probation Review</h2>
-                <p className="text-sm text-gray-500">{selectedProbation.name} — {selectedProbation.designation}</p>
-              </div>
-              <button onClick={() => setShowProbationModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Performance Rating during Probation</label>
-                <div className="flex gap-2">
-                  {['1', '2', '3', '4', '5'].map(r => (
-                    <button
-                      key={r}
-                      onClick={() => setProbRating(r)}
-                      className={`w-10 h-10 rounded-full text-sm font-semibold border-2 transition-colors ${
-                        probRating === r
-                          ? 'bg-blue-600 border-blue-600 text-white'
-                          : 'border-gray-300 text-gray-600 hover:border-blue-400'
-                      }`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                  <span className="text-sm text-gray-500 self-center ml-2">{probRating}/5</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Outcome</label>
-                <div className="flex gap-2">
-                  {(['Confirmed', 'Extended', 'Terminated'] as ProbationOutcome[]).map(o => (
-                    <button
-                      key={o}
-                      onClick={() => setProbOutcome(o)}
-                      className={`flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-colors ${
-                        probOutcome === o
-                          ? o === 'Confirmed' ? 'bg-green-600 border-green-600 text-white'
-                            : o === 'Extended' ? 'bg-amber-500 border-amber-500 text-white'
-                            : 'bg-red-600 border-red-600 text-white'
-                          : 'border-gray-300 text-gray-600 hover:border-gray-400'
-                      }`}
-                    >
-                      {o}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {probOutcome === 'Extended' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Extend by (months)</label>
-                  <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={probExtendMonths}
-                    onChange={e => setProbExtendMonths(e.target.value)}
-                  >
-                    <option value="1">1 month</option>
-                    <option value="2">2 months</option>
-                    <option value="3">3 months</option>
-                    <option value="6">6 months</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
-                <textarea
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                  value={probRemarks}
-                  onChange={e => setProbRemarks(e.target.value)}
-                  placeholder="Enter review remarks..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Effective Date</label>
-                <input
-                  type="date"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={probEffectiveDate}
-                  onChange={e => setProbEffectiveDate(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
-              <button onClick={() => setShowProbationModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-              <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-                Submit Review
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      </div>
+    </>
   )
 }

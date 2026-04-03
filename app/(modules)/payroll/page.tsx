@@ -3,10 +3,9 @@
 import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
-  IndianRupee, Download, FileText, Eye, Mail, CheckCircle2,
-  Clock, AlertTriangle, X, Building2, Calendar, Shield,
-  BarChart3, Printer, Play, Edit, Check, TrendingUp,
-  Users, ArrowUpRight,
+  Download, FileText, Eye, Mail, CheckCircle2,
+  Clock, AlertTriangle, X, Printer,
+  Play, Edit, Check, Users, Search, Calendar, Filter,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -66,47 +65,98 @@ const SALARY_STRUCTURES: SalaryStructure[] = [
 ]
 
 /* ─────────────────────────────────────────────────────────────
-   HELPERS
+   DESIGN TOKENS  — same bg/color/border triads as Employee page
 ───────────────────────────────────────────────────────────── */
-function StatusBadge({ status }: { status: PayrollStatus }) {
-  const cfg: Record<PayrollStatus, { bg: string; color: string; dot: string }> = {
-    Paid:       { bg: '#DCFCE7', color: '#15803D', dot: '#16A34A' },
-    Processing: { bg: '#FEF9C3', color: '#A16207', dot: '#CA8A04' },
-    Draft:      { bg: '#F1F5F9', color: '#475569', dot: '#94A3B8' },
-  }
-  const c = cfg[status]
+const STATUS_CFG: Record<PayrollStatus, { bg: string; color: string; border: string }> = {
+  Paid:       { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  Processing: { bg: '#fffbeb', color: '#b45309', border: '#fde68a' },
+  Draft:      { bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb' },
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ATOM COMPONENTS  — matching Employee page patterns exactly
+───────────────────────────────────────────────────────────── */
+
+/** Avatar — same palette + transparency trick as Employee page */
+function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+  const PALETTE = ['#1E3A5F', '#E8622A', '#1A7A4A', '#7C3AED', '#0369A1', '#BE185D', '#0F766E', '#B45309']
+  const idx = (name.charCodeAt(0) + (name.charCodeAt(1) || 0)) % PALETTE.length
+  const initials = name.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase()
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: c.bg, color: c.color }}>
-      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: c.dot }} />
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: `${PALETTE[idx]}1A`,
+      border: `2px solid ${PALETTE[idx]}35`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.32, fontWeight: 700, color: PALETTE[idx],
+      flexShrink: 0, letterSpacing: '0.02em',
+    }}>
+      {initials}
+    </div>
+  )
+}
+
+/** Status badge — badge-dot class, same as Employee page */
+function StatusBadge({ status }: { status: PayrollStatus }) {
+  const c = STATUS_CFG[status]
+  return (
+    <span className="badge badge-dot" style={{ background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
       {status}
     </span>
   )
 }
 
-function Pill({ label, color }: { label: string; color: string }) {
-  const map: Record<string, { bg: string; text: string }> = {
-    blue:   { bg: '#DBEAFE', text: '#1D4ED8' },
-    green:  { bg: '#DCFCE7', text: '#15803D' },
-    red:    { bg: '#FEE2E2', text: '#DC2626' },
-    amber:  { bg: '#FEF3C7', text: '#B45309' },
-    purple: { bg: '#F3E8FF', text: '#6D28D9' },
-    gray:   { bg: '#F1F5F9', text: '#475569' },
-  }
-  const c = map[color] ?? map.gray
+/** Generic badge */
+function Badge({ label, bg, color, border }: { label: string; bg: string; color: string; border: string }) {
   return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: c.bg, color: c.text }}>
-      {label}
-    </span>
+    <span className="badge" style={{ background: bg, color, border: `1px solid ${border}` }}>{label}</span>
   )
 }
 
-function EmpAvatar({ name }: { name: string }) {
-  const initials = name.split(' ').slice(0, 2).map((n) => n[0]).join('').toUpperCase()
-  const colors = ['#E8622A', '#1565C0', '#16A34A', '#7C3AED', '#BE185D', '#0369A1', '#B45309']
-  const idx = name.charCodeAt(0) % colors.length
+/* ─────────────────────────────────────────────────────────────
+   PAYROLL STEPPER  — white background version for card context
+───────────────────────────────────────────────────────────── */
+function PayrollStepper() {
+  const steps = [
+    { label: 'Attendance\nFinalized', done: true  },
+    { label: 'Leave\nAdjusted',       done: true  },
+    { label: 'Reimbursements\nAdded', done: true  },
+    { label: 'Salary\nComputed',      done: false },
+    { label: 'HR\nApproval',          done: false },
+    { label: 'Payslips\nGenerated',   done: false },
+  ]
   return (
-    <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ background: colors[idx] }}>
-      {initials}
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      {steps.map((s, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: s.done ? '#15803d' : 'var(--color-gray-100)',
+              border: s.done ? 'none' : '1.5px solid var(--color-gray-300)',
+              color: s.done ? '#fff' : 'var(--color-gray-400)',
+              fontSize: '0.75rem', fontWeight: 700, flexShrink: 0,
+            }}>
+              {s.done ? <Check size={13} /> : i + 1}
+            </div>
+            <span style={{
+              fontSize: '0.65rem', marginTop: 4, textAlign: 'center',
+              color: s.done ? '#15803d' : 'var(--color-gray-400)',
+              maxWidth: 64, lineHeight: 1.2, whiteSpace: 'pre-line',
+            }}>
+              {s.label}
+            </span>
+          </div>
+          {i < steps.length - 1 && (
+            <div style={{
+              width: 24, height: 2, marginBottom: 16, margin: '0 4px 16px',
+              background: s.done ? '#15803d' : 'var(--color-gray-200)',
+              borderRadius: 99, flexShrink: 0,
+            }} />
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -123,59 +173,56 @@ function PayrollRunModal({ onClose }: { onClose: () => void }) {
     { label: 'Salary computation in progress',      done: false, note: 'Computing for 87 employees…' },
     { label: 'Pending HR approval',                 done: false, note: 'Awaiting final approval from HR Head' },
   ]
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 backdrop-blur-sm">
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #E2E8F0' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" style={{ boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+        <div className="flex items-start justify-between px-6 py-5" style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
           <div>
-            <h2 className="text-lg font-bold text-gray-900">Run Payroll — March 2026</h2>
-            <p className="text-sm text-gray-500 mt-0.5">87 employees · Estimated Net: <span className="font-semibold text-green-700">₹42,09,800</span></p>
+            <h2 style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0 }}>Run Payroll — March 2026</h2>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-400)', marginTop: 2 }}>
+              87 employees · Estimated Net: <span style={{ fontWeight: 700, color: '#15803d' }}>₹42,09,800</span>
+            </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
-            <X size={18} className="text-gray-500" />
-          </button>
+          <button onClick={onClose} className="btn btn-ghost btn-sm btn-icon"><X size={15} /></button>
         </div>
 
-        <div className="px-6 py-5 space-y-2.5">
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {steps.map((s, i) => (
-            <div key={i} className="flex items-start gap-3 p-3.5 rounded-xl transition-all"
-              style={{ background: s.done ? '#F0FDF4' : '#FAFAFA', border: `1px solid ${s.done ? '#BBF7D0' : '#E2E8F0'}` }}>
-              <div className="flex-shrink-0 mt-0.5">
+            <div key={i} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px', borderRadius: 10,
+              background: s.done ? '#f0fdf4' : '#fafafa',
+              border: `1px solid ${s.done ? '#bbf7d0' : 'var(--color-gray-200)'}`,
+            }}>
+              <div style={{ flexShrink: 0, marginTop: 1 }}>
                 {s.done
-                  ? <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: '#16A34A' }}><Check size={11} color="#fff" /></div>
-                  : <div className="w-5 h-5 rounded-full flex items-center justify-center border-2 border-amber-400"><Clock size={10} style={{ color: '#F59E0B' }} /></div>
+                  ? <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#15803d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={11} color="#fff" /></div>
+                  : <div style={{ width: 20, height: 20, borderRadius: '50%', border: '1.5px solid #fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Clock size={10} style={{ color: '#f59e0b' }} /></div>
                 }
               </div>
-              <div>
-                <p className="text-sm font-semibold" style={{ color: s.done ? '#15803D' : '#92400E' }}>{s.label}</p>
-                <p className="text-xs mt-0.5" style={{ color: s.done ? '#166534' : '#B45309' }}>{s.note}</p>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: s.done ? '#15803d' : '#92400e', margin: 0 }}>{s.label}</p>
+                <p style={{ fontSize: '0.75rem', color: s.done ? '#166534' : '#b45309', marginTop: 2 }}>{s.note}</p>
               </div>
-              {s.done && <div className="ml-auto flex-shrink-0"><span className="text-xs text-green-600 font-semibold">✓ Done</span></div>}
             </div>
           ))}
         </div>
 
-        <div className="px-6 pb-6">
-          <div className="p-3 rounded-xl mb-4" style={{ background: '#FFF7ED', border: '1px solid #FED7AA' }}>
-            <p className="text-xs text-orange-700">
-              <strong>Note:</strong> Once confirmed, salary computation will begin. Payslips will be generated after HR approval. This action cannot be undone for the current month.
+        <div style={{ padding: '0 24px 24px' }}>
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', marginBottom: 16 }}>
+            <p style={{ fontSize: '0.75rem', color: '#c2410c' }}>
+              <strong>Note:</strong> Once confirmed, salary computation will begin. This action cannot be undone for the current month.
             </p>
           </div>
           {confirmed ? (
-            <div className="flex items-center gap-2 justify-center p-3 rounded-xl" style={{ background: '#DCFCE7' }}>
-              <CheckCircle2 size={18} style={{ color: '#16A34A' }} />
-              <span className="text-sm font-semibold text-green-700">Payroll computation initiated!</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', borderRadius: 8, background: '#f0fdf4' }}>
+              <CheckCircle2 size={18} style={{ color: '#15803d' }} />
+              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#15803d' }}>Payroll computation initiated!</span>
             </div>
           ) : (
-            <div className="flex gap-3">
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">
-                Cancel
-              </button>
-              <button onClick={() => setConfirmed(true)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
-                style={{ background: 'linear-gradient(135deg, #E8622A, #F59E0B)' }}>
-                Confirm & Run Payroll
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={onClose} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+              <button onClick={() => setConfirmed(true)} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
+                Confirm &amp; Run Payroll
               </button>
             </div>
           )}
@@ -190,134 +237,133 @@ function PayrollRunModal({ onClose }: { onClose: () => void }) {
 ───────────────────────────────────────────────────────────── */
 function PayslipModal({ emp, onClose }: { emp: Payslip; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-3 sticky top-0 bg-white z-10" style={{ borderBottom: '1px solid #E2E8F0' }}>
-          <h2 className="text-sm font-bold text-gray-900">Payslip — March 2026</h2>
-          <div className="flex items-center gap-2">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90" style={{ background: '#E8622A' }}>
-              <Download size={13} /> PDF
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
-              <Mail size={13} /> Email
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
-              <Printer size={13} /> Print
-            </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-              <X size={16} className="text-gray-500" />
-            </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" style={{ boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 sticky top-0 bg-white" style={{ borderBottom: '1px solid var(--color-gray-100)', zIndex: 10 }}>
+          <p style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0 }}>Payslip — March 2026</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn btn-primary btn-sm"><Download size={13} /> PDF</button>
+            <button className="btn btn-outline btn-sm"><Mail size={13} /> Email</button>
+            <button className="btn btn-outline btn-sm"><Printer size={13} /> Print</button>
+            <button onClick={onClose} className="btn btn-ghost btn-sm btn-icon"><X size={15} /></button>
           </div>
         </div>
 
-        <div className="p-6">
-          {/* Company Header */}
-          <div className="text-center mb-5 pb-4" style={{ borderBottom: '2px solid #E8622A' }}>
-            <div className="inline-flex items-center gap-2 mb-1">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold" style={{ background: '#E8622A' }}>IH</div>
-              <span className="text-xl font-extrabold text-gray-900">Imperia HRMS</span>
+        <div style={{ padding: '24px' }}>
+          {/* Company header */}
+          <div style={{ textAlign: 'center', marginBottom: 20, paddingBottom: 16, borderBottom: '2px solid #E8622A' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: '#E8622A', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.875rem', fontWeight: 700 }}>IH</div>
+              <span style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--color-gray-900)' }}>Imperial Healthcare</span>
             </div>
-            <p className="text-xs text-gray-500">123 Business Park, Whitefield, Bengaluru – 560066 · CIN: U72900KA2020PTC123456</p>
-            <div className="mt-2 inline-flex px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest" style={{ background: '#FFF7ED', color: '#EA580C', border: '1px solid #FED7AA' }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>123 Business Park, Whitefield, Bengaluru – 560066</p>
+            <span className="badge" style={{ marginTop: 8, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', display: 'inline-flex' }}>
               Payslip · March 2026
-            </div>
+            </span>
           </div>
 
-          {/* Employee Info */}
-          <div className="grid grid-cols-2 gap-4 mb-5 p-4 rounded-xl" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-            <div className="space-y-1.5">
-              {[['Employee Name', emp.name], ['Employee ID', emp.empId], ['Designation', emp.designation], ['Department', emp.department], ['Location', emp.location]].map(([k, v]) => (
-                <div key={k} className="flex gap-2">
-                  <span className="text-xs text-gray-400 w-28 flex-shrink-0">{k}</span>
-                  <span className="text-xs font-semibold text-gray-800">{v}</span>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-1.5">
-              {[['Bank Account', emp.bankAccount], ['IFSC Code', emp.ifsc], ['PAN', emp.pan], ['PF Account', emp.pf], ['Pay Period', 'March 2026']].map(([k, v]) => (
-                <div key={k} className="flex gap-2">
-                  <span className="text-xs text-gray-400 w-28 flex-shrink-0">{k}</span>
-                  <span className="text-xs font-semibold text-gray-800 font-mono">{v}</span>
-                </div>
-              ))}
-            </div>
+          {/* Employee info grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20, padding: '16px', borderRadius: 8, background: 'var(--color-gray-50)', border: '1px solid var(--color-gray-200)' }}>
+            {[
+              [['Employee Name', emp.name], ['Employee ID', emp.empId], ['Designation', emp.designation]],
+              [['Department', emp.department], ['Bank Account', emp.bankAccount], ['PAN', emp.pan]],
+            ].map((col, ci) => (
+              <div key={ci} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {col.map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', width: 110, flexShrink: 0 }}>{k}</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-gray-800)' }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
 
-          {/* Attendance Summary */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
-            {[{ label: 'Working Days', value: emp.workingDays, color: '#1D4ED8' }, { label: 'Days Present', value: emp.presentDays, color: '#15803D' }, { label: 'LOP Days', value: emp.lopDays, color: emp.lopDays > 0 ? '#DC2626' : '#94A3B8' }].map((item) => (
-              <div key={item.label} className="text-center p-3 rounded-xl" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                <p className="text-2xl font-extrabold" style={{ color: item.color }}>{item.value}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
+          {/* Attendance summary */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+            {[
+              { label: 'Working Days', value: emp.workingDays, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+              { label: 'Days Present',  value: emp.presentDays, color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+              { label: 'LOP Days',      value: emp.lopDays,     color: emp.lopDays > 0 ? '#dc2626' : '#6b7280', bg: emp.lopDays > 0 ? '#fef2f2' : '#f9fafb', border: emp.lopDays > 0 ? '#fecaca' : '#e5e7eb' },
+            ].map((item) => (
+              <div key={item.label} style={{ textAlign: 'center', padding: '12px', borderRadius: 8, background: item.bg, border: `1px solid ${item.border}` }}>
+                <p style={{ fontSize: '1.5rem', fontWeight: 800, color: item.color, margin: 0, lineHeight: 1 }}>{item.value}</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-500)', marginTop: 4 }}>{item.label}</p>
               </div>
             ))}
           </div>
 
           {/* Earnings & Deductions */}
-          <div className="grid grid-cols-2 gap-4 mb-5">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+            {/* Earnings */}
             <div>
-              <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 pb-1.5 flex items-center gap-1.5" style={{ borderBottom: '2px solid #16A34A' }}>
-                <span className="w-2 h-2 rounded-full bg-green-600" /> Earnings
-              </h3>
-              <table className="w-full text-xs">
-                <tbody className="divide-y divide-gray-100">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, paddingBottom: 8, borderBottom: '2px solid #15803d' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#15803d', flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-gray-700)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Earnings</span>
+              </div>
+              <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+                <tbody>
                   {[['Basic Salary', '₹25,000'], ['HRA', '₹12,500'], ['Conveyance', '₹1,600'], ['Medical Allowance', '₹1,250'], ['Special Allowance', '₹8,500']].map(([label, amount]) => (
-                    <tr key={label}>
-                      <td className="py-1.5 text-gray-600">{label}</td>
-                      <td className="py-1.5 text-right font-semibold text-gray-800">{amount}</td>
+                    <tr key={label} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
+                      <td style={{ padding: '6px 0', color: 'var(--color-gray-600)' }}>{label}</td>
+                      <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: 'var(--color-gray-800)' }}>{amount}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: '2px solid #E2E8F0' }}>
-                    <td className="pt-2 font-bold text-gray-900">Gross Earnings</td>
-                    <td className="pt-2 text-right font-extrabold text-green-700">₹48,850</td>
+                  <tr style={{ borderTop: '2px solid var(--color-gray-200)' }}>
+                    <td style={{ paddingTop: 8, fontWeight: 700, color: 'var(--color-gray-900)' }}>Gross Earnings</td>
+                    <td style={{ paddingTop: 8, textAlign: 'right', fontWeight: 800, color: '#15803d' }}>₹48,850</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
+
+            {/* Deductions */}
             <div>
-              <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 pb-1.5 flex items-center gap-1.5" style={{ borderBottom: '2px solid #DC2626' }}>
-                <span className="w-2 h-2 rounded-full bg-red-600" /> Deductions
-              </h3>
-              <table className="w-full text-xs">
-                <tbody className="divide-y divide-gray-100">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, paddingBottom: 8, borderBottom: '2px solid #dc2626' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc2626', flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-gray-700)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Deductions</span>
+              </div>
+              <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+                <tbody>
                   {[['PF (Employee 12%)', '₹3,000'], ['ESIC', '₹0 (N/A)'], ['Professional Tax', '₹200'], ['TDS (Income Tax)', '₹1,500'], ['LOP Deduction', '₹0']].map(([label, amount]) => (
-                    <tr key={label}>
-                      <td className="py-1.5 text-gray-600">{label}</td>
-                      <td className="py-1.5 text-right font-semibold text-gray-800">{amount}</td>
+                    <tr key={label} style={{ borderBottom: '1px solid var(--color-gray-100)' }}>
+                      <td style={{ padding: '6px 0', color: 'var(--color-gray-600)' }}>{label}</td>
+                      <td style={{ padding: '6px 0', textAlign: 'right', fontWeight: 600, color: 'var(--color-gray-800)' }}>{amount}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: '2px solid #E2E8F0' }}>
-                    <td className="pt-2 font-bold text-gray-900">Total Deductions</td>
-                    <td className="pt-2 text-right font-extrabold text-red-600">₹4,700</td>
+                  <tr style={{ borderTop: '2px solid var(--color-gray-200)' }}>
+                    <td style={{ paddingTop: 8, fontWeight: 700, color: 'var(--color-gray-900)' }}>Total Deductions</td>
+                    <td style={{ paddingTop: 8, textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>₹4,700</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
           </div>
 
-          {/* Net Salary */}
-          <div className="text-center py-5 rounded-xl mb-4" style={{ background: 'linear-gradient(135deg, #F0FDF4, #DCFCE7)', border: '1.5px solid #BBF7D0' }}>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Net Salary (Take Home)</p>
-            <p className="text-4xl font-extrabold text-green-700">₹44,150</p>
-            <p className="text-xs text-gray-500 mt-1">Forty Four Thousand One Hundred and Fifty Rupees Only</p>
+          {/* Net salary */}
+          <div style={{ textAlign: 'center', padding: '20px', borderRadius: 10, background: '#f0fdf4', border: '1.5px solid #bbf7d0', marginBottom: 16 }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Net Salary (Take Home)</p>
+            <p style={{ fontSize: '2.25rem', fontWeight: 800, color: '#15803d', margin: '4px 0' }}>₹44,150</p>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', margin: 0 }}>Forty Four Thousand One Hundred and Fifty Rupees Only</p>
           </div>
 
-          {/* Employer Contributions */}
-          <div className="p-3.5 rounded-xl" style={{ background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
-            <p className="text-xs font-bold text-blue-800 mb-2">Employer Contributions (Not deducted from salary)</p>
-            <div className="flex gap-6 flex-wrap">
-              <span className="text-xs text-blue-700">EPF (Employer 12%): <strong>₹3,000</strong></span>
-              <span className="text-xs text-blue-700">ESIC (Employer): <strong>₹0 (N/A)</strong></span>
-              <span className="text-xs text-blue-700">Gratuity Provision: <strong>₹1,202</strong></span>
+          {/* Employer contributions */}
+          <div style={{ padding: '12px 16px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+            <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1d4ed8', margin: '0 0 6px' }}>Employer Contributions (not deducted from salary)</p>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {[['EPF (Employer 12%)', '₹3,000'], ['ESIC (Employer)', '₹0 (N/A)'], ['Gratuity Provision', '₹1,202']].map(([k, v]) => (
+                <span key={k} style={{ fontSize: '0.75rem', color: '#1d4ed8' }}>{k}: <strong>{v}</strong></span>
+              ))}
             </div>
           </div>
 
-          <p className="text-center text-xs text-gray-400 mt-4">
-            This is a computer-generated payslip and does not require a signature. For queries contact payroll@imperia.in
+          <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-gray-400)', marginTop: 16 }}>
+            Computer-generated payslip. For queries: payroll@imperial.in
           </p>
         </div>
       </div>
@@ -331,51 +377,49 @@ function PayslipModal({ emp, onClose }: { emp: Payslip; onClose: () => void }) {
 function TabPayrollRuns({ onRunPayroll }: { onRunPayroll: () => void }) {
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">Last 6 payroll cycles</p>
-        <button onClick={onRunPayroll}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-          style={{ background: 'linear-gradient(135deg, #E8622A, #F59E0B)' }}>
-          <Play size={14} /> Run Payroll
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--color-gray-100)' }}>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', margin: 0 }}>Last 6 payroll cycles</p>
+        <button onClick={onRunPayroll} className="btn btn-primary btn-sm">
+          <Play size={13} /> Run Payroll
         </button>
       </div>
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
-        <table className="w-full text-sm">
+      <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
+        <table className="data-table">
           <thead>
-            <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              {['Period', 'Employees', 'Gross Amount', 'Deductions', 'Net Amount', 'Status', 'Run Date', ''].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-              ))}
+            <tr>
+              <th style={{ minWidth: 160 }}>Period</th>
+              <th style={{ minWidth: 120 }}>Employees</th>
+              <th style={{ minWidth: 150 }}>Gross Amount</th>
+              <th style={{ minWidth: 140 }}>Deductions</th>
+              <th style={{ minWidth: 150 }}>Net Amount</th>
+              <th style={{ minWidth: 120 }}>Status</th>
+              <th style={{ minWidth: 130 }}>Run Date</th>
+              <th style={{ minWidth: 120, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {PAYROLL_RUNS.map((run, i) => (
-              <tr key={run.id} className="transition-colors hover:bg-orange-50/40"
-                style={{ borderBottom: i < PAYROLL_RUNS.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
-                <td className="px-4 py-3.5">
-                  <p className="font-semibold text-gray-900">{run.period}</p>
-                  {run.status === 'Draft' && <p className="text-xs text-amber-600 font-medium mt-0.5">In preparation</p>}
+            {PAYROLL_RUNS.map((run) => (
+              <tr key={run.id}>
+                <td>
+                  <p style={{ fontWeight: 600, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{run.period}</p>
+                  {run.status === 'Draft' && <p style={{ fontSize: '0.75rem', color: '#b45309', marginTop: 2, fontWeight: 500 }}>In preparation</p>}
                 </td>
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-1.5 text-gray-600">
-                    <Users size={13} className="text-gray-400" />
-                    {run.employees}
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Users size={13} style={{ color: 'var(--color-gray-400)' }} />
+                    <span style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{run.employees}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3.5 font-semibold text-gray-800">{run.gross}</td>
-                <td className="px-4 py-3.5 text-red-600 font-medium">{run.deductions}</td>
-                <td className="px-4 py-3.5 text-green-700 font-bold">{run.net}</td>
-                <td className="px-4 py-3.5"><StatusBadge status={run.status} /></td>
-                <td className="px-4 py-3.5 text-gray-400 text-xs">{run.runDate}</td>
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-1.5">
-                    <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
-                      <Eye size={11} /> View
-                    </button>
+                <td style={{ fontWeight: 600, color: 'var(--color-gray-800)', fontSize: '0.875rem' }}>{run.gross}</td>
+                <td style={{ fontWeight: 500, color: '#dc2626', fontSize: '0.875rem' }}>{run.deductions}</td>
+                <td style={{ fontWeight: 700, color: '#15803d', fontSize: '0.875rem' }}>{run.net}</td>
+                <td><StatusBadge status={run.status} /></td>
+                <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>{run.runDate}</td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                    <button className="btn btn-ghost btn-sm btn-icon" title="View"><Eye size={15} /></button>
                     {run.status === 'Paid' && (
-                      <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors">
-                        <Download size={11} /> Download
-                      </button>
+                      <button className="btn btn-ghost btn-sm btn-icon" title="Download"><Download size={15} /></button>
                     )}
                   </div>
                 </td>
@@ -402,74 +446,93 @@ function TabPayslips() {
   return (
     <div>
       {selectedEmp && <PayslipModal emp={selectedEmp} onClose={() => setSelectedEmp(null)} />}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white">
-          <Calendar size={13} className="text-gray-400" />
-          <select className="text-sm text-gray-700 bg-transparent outline-none">
-            <option>March 2026</option>
-            <option>February 2026</option>
-            <option>January 2026</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white flex-1 max-w-xs">
-          <span className="text-gray-400 text-xs">🔍</span>
-          <input type="text" placeholder="Search employee or ID…" value={search} onChange={(e) => setSearch(e.target.value)}
-            className="text-sm text-gray-700 bg-transparent outline-none w-full" />
-        </div>
-        <div className="ml-auto">
-          <button className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
+
+      {/* Filter bar — same pattern as Employee page */}
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-gray-100)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{
+            flex: '1 1 240px', display: 'flex', alignItems: 'center', gap: 8,
+            border: '1.5px solid var(--color-gray-200)', borderRadius: 'var(--radius-md)',
+            padding: '8px 12px', background: 'var(--color-gray-50)',
+          }}>
+            <Search size={15} style={{ color: 'var(--color-gray-400)', flexShrink: 0 }} />
+            <input
+              type="text"
+              placeholder="Search employee or ID…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '0.875rem', color: 'var(--color-gray-800)' }}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', display: 'flex' }}>
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1.5px solid var(--color-gray-200)', borderRadius: 'var(--radius-md)', padding: '8px 12px', background: 'var(--color-gray-50)' }}>
+            <Calendar size={14} style={{ color: 'var(--color-gray-400)' }} />
+            <select className="form-select" style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '0.875rem', color: 'var(--color-gray-800)', padding: 0 }}>
+              <option>March 2026</option>
+              <option>February 2026</option>
+              <option>January 2026</option>
+            </select>
+          </div>
+
+          <button className="btn btn-outline btn-sm" style={{ marginLeft: 'auto' }}>
             <Download size={13} /> Export All
           </button>
+
+          <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            <Filter size={13} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
+            {filtered.length} employees
+          </span>
         </div>
-        <div className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-lg">{filtered.length} employees</div>
       </div>
 
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
-        <table className="w-full text-sm">
+      <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
+        <table className="data-table">
           <thead>
-            <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              {['Employee', 'Dept', 'Days', 'LOP', 'Gross', 'Deductions', 'Net Salary', ''].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-              ))}
+            <tr>
+              <th style={{ minWidth: 220 }}>Employee</th>
+              <th style={{ minWidth: 170 }}>Department</th>
+              <th style={{ minWidth: 100 }}>Days Present</th>
+              <th style={{ minWidth: 90 }}>LOP</th>
+              <th style={{ minWidth: 130 }}>Gross</th>
+              <th style={{ minWidth: 130 }}>Deductions</th>
+              <th style={{ minWidth: 130 }}>Net Salary</th>
+              <th style={{ minWidth: 110, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((emp, i) => (
-              <tr key={emp.id} className="transition-colors hover:bg-orange-50/40"
-                style={{ borderBottom: i < filtered.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    <EmpAvatar name={emp.name} />
+            {filtered.map((emp) => (
+              <tr key={emp.id}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                    <Avatar name={emp.name} size={36} />
                     <div>
-                      <p className="font-semibold text-gray-900">{emp.name}</p>
-                      <p className="text-xs text-gray-400 font-mono">{emp.empId}</p>
+                      <p style={{ fontWeight: 600, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{emp.name}</p>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--color-imperial-blue)', fontFamily: 'monospace', marginTop: 2, fontWeight: 500 }}>{emp.empId}</p>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3.5 text-gray-600 text-sm">{emp.department}</td>
-                <td className="px-4 py-3.5">
-                  <span className="text-green-700 font-semibold">{emp.presentDays}</span>
-                  <span className="text-gray-400">/{emp.workingDays}</span>
+                <td style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{emp.department}</td>
+                <td>
+                  <span style={{ fontWeight: 600, color: '#15803d' }}>{emp.presentDays}</span>
+                  <span style={{ color: 'var(--color-gray-400)' }}>/{emp.workingDays}</span>
                 </td>
-                <td className="px-4 py-3.5">
+                <td>
                   {emp.lopDays > 0
-                    ? <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: '#FEE2E2', color: '#DC2626' }}>{emp.lopDays} days</span>
-                    : <span className="text-gray-400 text-xs">—</span>}
+                    ? <span className="badge" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>{emp.lopDays} days</span>
+                    : <span style={{ color: 'var(--color-gray-300)', fontSize: '0.875rem' }}>—</span>}
                 </td>
-                <td className="px-4 py-3.5 font-semibold text-gray-800">{emp.gross}</td>
-                <td className="px-4 py-3.5 text-red-600 font-medium">{emp.deductions}</td>
-                <td className="px-4 py-3.5">
-                  <span className="font-extrabold text-green-700">{emp.net}</span>
-                </td>
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => setSelectedEmp(emp)}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
-                      <Eye size={11} /> View
-                    </button>
-                    <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors">
-                      <Mail size={11} /> Email
-                    </button>
+                <td style={{ fontWeight: 600, color: 'var(--color-gray-800)', fontSize: '0.875rem' }}>{emp.gross}</td>
+                <td style={{ fontWeight: 500, color: '#dc2626', fontSize: '0.875rem' }}>{emp.deductions}</td>
+                <td style={{ fontWeight: 700, color: '#15803d', fontSize: '0.875rem' }}>{emp.net}</td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                    <button onClick={() => setSelectedEmp(emp)} className="btn btn-ghost btn-sm btn-icon" title="View payslip"><Eye size={15} /></button>
+                    <button className="btn btn-ghost btn-sm btn-icon" title="Email payslip"><Mail size={15} /></button>
                   </div>
                 </td>
               </tr>
@@ -485,56 +548,77 @@ function TabPayslips() {
    TAB: SALARY STRUCTURES
 ───────────────────────────────────────────────────────────── */
 function TabSalaryStructures() {
+  const METROS = ['Mumbai', 'Delhi', 'Chennai', 'Kolkata']
   return (
     <div>
-      <div className="flex items-start gap-3 p-4 rounded-xl mb-4" style={{ background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
-        <span className="text-blue-500 flex-shrink-0 text-base mt-0.5">ℹ️</span>
+      {/* Info banner */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', margin: '16px 20px' }}>
+        <span style={{ color: '#1d4ed8', fontSize: '1rem', flexShrink: 0 }}>ℹ️</span>
         <div>
-          <p className="text-sm font-semibold text-blue-800">India Salary Structure — HRA Calculation Rule</p>
-          <p className="text-xs text-blue-700 mt-0.5">
-            HRA is <strong>50% of Basic</strong> for metro cities (Mumbai, Delhi, Kolkata, Chennai) and <strong>40% of Basic</strong> for non-metro cities as per the Income Tax Act. ESIC is applicable for employees with gross salary ≤ ₹21,000/month.
+          <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#1d4ed8', margin: 0 }}>India Salary Structure — HRA Calculation Rule</p>
+          <p style={{ fontSize: '0.75rem', color: '#1d4ed8', marginTop: 3, opacity: 0.85 }}>
+            HRA is <strong>50% of Basic</strong> for metro cities and <strong>40% of Basic</strong> for non-metro cities. ESIC applies for gross salary ≤ ₹21,000/month.
           </p>
         </div>
       </div>
 
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #E2E8F0' }}>
-        <table className="w-full text-sm">
+      <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
+        <table className="data-table">
           <thead>
-            <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              {['Employee', 'Annual CTC', 'Basic', 'HRA', 'Special Allow.', 'EPF', 'ESIC', 'Effective', ''].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-              ))}
+            <tr>
+              <th style={{ minWidth: 220 }}>Employee</th>
+              <th style={{ minWidth: 140 }}>Annual CTC</th>
+              <th style={{ minWidth: 110 }}>Basic</th>
+              <th style={{ minWidth: 120 }}>HRA</th>
+              <th style={{ minWidth: 140 }}>Special Allow.</th>
+              <th style={{ minWidth: 90 }}>EPF</th>
+              <th style={{ minWidth: 90 }}>ESIC</th>
+              <th style={{ minWidth: 130 }}>Effective From</th>
+              <th style={{ minWidth: 80, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {SALARY_STRUCTURES.map((s, i) => (
-              <tr key={s.id} className="transition-colors hover:bg-orange-50/40"
-                style={{ borderBottom: i < SALARY_STRUCTURES.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    <EmpAvatar name={s.name} />
+            {SALARY_STRUCTURES.map((s) => (
+              <tr key={s.id}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                    <Avatar name={s.name} size={36} />
                     <div>
-                      <p className="font-semibold text-gray-900">{s.name}</p>
-                      <p className="text-xs text-gray-400">{s.department}</p>
+                      <p style={{ fontWeight: 600, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{s.name}</p>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{s.department}</p>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3.5 font-bold text-gray-900">{s.annualCTC}</td>
-                <td className="px-4 py-3.5 text-gray-700">{s.basic}</td>
-                <td className="px-4 py-3.5">
-                  <p className="text-gray-700">{s.hra}</p>
-                  <p className="text-xs mt-0.5" style={{ color: ['Mumbai', 'Delhi', 'Chennai', 'Kolkata'].includes(s.location) ? '#1D4ED8' : '#6D28D9' }}>
-                    {['Mumbai', 'Delhi', 'Chennai', 'Kolkata'].includes(s.location) ? '50% (metro)' : '40% (non-metro)'}
+                <td style={{ fontWeight: 700, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{s.annualCTC}</td>
+                <td style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{s.basic}</td>
+                <td>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{s.hra}</p>
+                  <p style={{ fontSize: '0.7rem', color: METROS.includes(s.location) ? '#1d4ed8' : '#6d28d9', marginTop: 2, fontWeight: 500 }}>
+                    {METROS.includes(s.location) ? '50% metro' : '40% non-metro'}
                   </p>
                 </td>
-                <td className="px-4 py-3.5 text-gray-700">{s.specialAllowance}</td>
-                <td className="px-4 py-3.5"><Pill label={s.epfApplicable ? 'Yes' : 'No'} color={s.epfApplicable ? 'green' : 'gray'} /></td>
-                <td className="px-4 py-3.5"><Pill label={s.esicApplicable ? 'Yes' : 'No'} color={s.esicApplicable ? 'amber' : 'gray'} /></td>
-                <td className="px-4 py-3.5 text-gray-400 text-xs">{s.effectiveFrom}</td>
-                <td className="px-4 py-3.5">
-                  <button className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-orange-600 hover:bg-orange-50 transition-colors">
-                    <Edit size={11} /> Edit
-                  </button>
+                <td style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{s.specialAllowance}</td>
+                <td>
+                  <Badge
+                    label={s.epfApplicable ? 'Yes' : 'No'}
+                    bg={s.epfApplicable ? '#f0fdf4' : '#f9fafb'}
+                    color={s.epfApplicable ? '#15803d' : '#6b7280'}
+                    border={s.epfApplicable ? '#bbf7d0' : '#e5e7eb'}
+                  />
+                </td>
+                <td>
+                  <Badge
+                    label={s.esicApplicable ? 'Yes' : 'No'}
+                    bg={s.esicApplicable ? '#fffbeb' : '#f9fafb'}
+                    color={s.esicApplicable ? '#b45309' : '#6b7280'}
+                    border={s.esicApplicable ? '#fde68a' : '#e5e7eb'}
+                  />
+                </td>
+                <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>{s.effectiveFrom}</td>
+                <td>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button className="btn btn-ghost btn-sm btn-icon" title="Edit structure"><Edit size={15} /></button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -550,89 +634,52 @@ function TabSalaryStructures() {
 ───────────────────────────────────────────────────────────── */
 function TabStatutoryReports() {
   const reports = [
-    { name: 'EPF Monthly Contribution', form: 'Form 12A / ECR',   frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#1D4ED8', bg: '#DBEAFE', icon: '🏦', description: 'Employee Provident Fund monthly challan for 87 employees' },
-    { name: 'ESIC Contribution',        form: 'Form 5',           frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#059669', bg: '#D1FAE5', icon: '🏥', description: 'Employee State Insurance Corporation monthly return' },
-    { name: 'Professional Tax',         form: 'PT Challan',       frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#6D28D9', bg: '#EDE9FE', icon: '📋', description: 'State-wise Professional Tax challan for all employees' },
-    { name: 'TDS on Salary',            form: 'Form 24Q',         frequency: 'Quarterly', lastGenerated: '15 Jan 2026', type: 'download', color: '#DC2626', bg: '#FEE2E2', icon: '💸', description: 'Quarterly TDS return for Q3 FY 2025-26 (Oct–Dec 2025)' },
-    { name: 'Annual TDS Certificate',   form: 'Form 16',          frequency: 'Annual',    lastGenerated: '15 Jun 2025', type: 'generate', color: '#B45309', bg: '#FEF3C7', icon: '📄', description: 'Income Tax Form 16 for FY 2024-25 — 84 employees' },
-    { name: 'PF Electronic Challan',    form: 'PF ECR',           frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#0891B2', bg: '#CFFAFE', icon: '💼', description: 'Electronic Challan cum Return for PF remittance' },
+    { name: 'EPF Monthly Contribution', form: 'Form 12A / ECR',   frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', description: 'Employee Provident Fund monthly challan for 87 employees' },
+    { name: 'ESIC Contribution',        form: 'Form 5',           frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', description: 'Employee State Insurance Corporation monthly return' },
+    { name: 'Professional Tax',         form: 'PT Challan',       frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe', description: 'State-wise Professional Tax challan for all employees' },
+    { name: 'TDS on Salary',            form: 'Form 24Q',         frequency: 'Quarterly', lastGenerated: '15 Jan 2026', type: 'download', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', description: 'Quarterly TDS return for Q3 FY 2025-26 (Oct–Dec 2025)' },
+    { name: 'Annual TDS Certificate',   form: 'Form 16',          frequency: 'Annual',    lastGenerated: '15 Jun 2025', type: 'generate', color: '#b45309', bg: '#fffbeb', border: '#fde68a', description: 'Income Tax Form 16 for FY 2024-25 — 84 employees' },
+    { name: 'PF Electronic Challan',    form: 'PF ECR',           frequency: 'Monthly',   lastGenerated: '05 Mar 2026', type: 'download', color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', description: 'Electronic Challan cum Return for PF remittance' },
   ]
 
   return (
     <div>
-      <div className="flex items-center gap-3 p-4 rounded-xl mb-5" style={{ background: '#FFFBEB', border: '1px solid #FCD34D' }}>
-        <AlertTriangle size={18} style={{ color: '#D97706', flexShrink: 0 }} />
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-amber-800">EPF & ESIC Filing Due Soon</p>
-          <p className="text-xs text-amber-700 mt-0.5">
-            EPF challan for March 2026 must be filed by <strong>15 April 2026</strong> (13 days remaining). ESIC contribution also due by <strong>15 April 2026</strong>.
+      {/* Filing alert */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', margin: '16px 20px' }}>
+        <AlertTriangle size={16} style={{ color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+        <div style={{ flex: 1 }}>
+          <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#92400e', margin: 0 }}>EPF &amp; ESIC Filing Due Soon</p>
+          <p style={{ fontSize: '0.75rem', color: '#b45309', marginTop: 2 }}>
+            EPF challan for March 2026 must be filed by <strong>15 April 2026</strong> (13 days remaining). ESIC contribution also due.
           </p>
         </div>
-        <button className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-all hover:opacity-90 flex-shrink-0" style={{ background: '#D97706' }}>
-          File Now
-        </button>
+        <button className="btn btn-sm" style={{ background: '#d97706', color: '#fff', flexShrink: 0 }}>File Now</button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, padding: '0 20px 20px' }}>
         {reports.map((r) => (
-          <div key={r.name} className="p-5 rounded-2xl bg-white transition-all hover:shadow-md" style={{ border: '1px solid #E2E8F0' }}>
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0" style={{ background: r.bg }}>
-                {r.icon}
+          <div key={r.name} className="card card-interactive" style={{ padding: '18px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: r.bg, border: `1px solid ${r.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <FileText size={16} style={{ color: r.color }} />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-bold text-gray-900 text-sm leading-tight">{r.name}</p>
-                <p className="text-xs font-semibold mt-0.5" style={{ color: r.color }}>{r.form}</p>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0, lineHeight: 1.3 }}>{r.name}</p>
+                <p style={{ fontSize: '0.75rem', fontWeight: 600, color: r.color, marginTop: 2 }}>{r.form}</p>
               </div>
-              <span className="text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: r.bg, color: r.color }}>
-                {r.frequency}
-              </span>
+              <span className="badge" style={{ background: r.bg, color: r.color, border: `1px solid ${r.border}`, flexShrink: 0 }}>{r.frequency}</span>
             </div>
-            <p className="text-xs text-gray-500 mb-3 leading-relaxed">{r.description}</p>
-            <div className="flex items-center justify-between pt-3" style={{ borderTop: '1px solid #F1F5F9' }}>
-              <span className="text-xs text-gray-400">Last: {r.lastGenerated}</span>
-              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90" style={{ background: r.color }}>
-                {r.type === 'generate' ? <><FileText size={12} /> Generate</> : <><Download size={12} /> Download</>}
-              </button>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-500)', lineHeight: 1.5, marginBottom: 12 }}>{r.description}</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid var(--color-gray-100)' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>Last: {r.lastGenerated}</span>
+              {r.type === 'generate'
+                ? <button className="btn btn-outline btn-sm"><FileText size={12} /> Generate</button>
+                : <button className="btn btn-outline btn-sm"><Download size={12} /> Download</button>
+              }
             </div>
           </div>
         ))}
       </div>
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────
-   PROGRESS STEPPER
-───────────────────────────────────────────────────────────── */
-function PayrollStepper() {
-  const steps = [
-    { label: 'Attendance Finalized', done: true  },
-    { label: 'Leave Adjusted',       done: true  },
-    { label: 'Reimbursements Added', done: true  },
-    { label: 'Salary Computed',      done: false },
-    { label: 'HR Approval',          done: false },
-    { label: 'Payslips Generated',   done: false },
-  ]
-  return (
-    <div className="flex items-center">
-      {steps.map((s, i) => (
-        <div key={i} className="flex items-center">
-          <div className="flex flex-col items-center">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
-              style={{ background: s.done ? '#16A34A' : 'rgba(255,255,255,0.15)', color: s.done ? '#fff' : 'rgba(255,255,255,0.5)', border: s.done ? 'none' : '1.5px solid rgba(255,255,255,0.2)' }}>
-              {s.done ? <Check size={13} /> : i + 1}
-            </div>
-            <span className="text-[10px] mt-1 text-center whitespace-nowrap" style={{ color: s.done ? '#86EFAC' : 'rgba(255,255,255,0.35)', maxWidth: '68px', lineHeight: 1.2 }}>
-              {s.label}
-            </span>
-          </div>
-          {i < steps.length - 1 && (
-            <div className="w-8 h-0.5 mb-4 mx-1 flex-shrink-0 rounded-full"
-              style={{ background: s.done ? '#16A34A' : 'rgba(255,255,255,0.15)' }} />
-          )}
-        </div>
-      ))}
     </div>
   )
 }
@@ -644,11 +691,11 @@ export default function PayrollPage() {
   const [activeTab, setActiveTab] = useState<Tab>('runs')
   const [showRunModal, setShowRunModal] = useState(false)
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'runs',       label: 'Payroll Runs' },
-    { key: 'payslips',   label: 'Payslips' },
-    { key: 'structures', label: 'Salary Structures' },
-    { key: 'statutory',  label: 'Statutory Reports' },
+  const tabs: { key: Tab; label: string; count: number }[] = [
+    { key: 'runs',       label: 'Payroll Runs',      count: PAYROLL_RUNS.length },
+    { key: 'payslips',   label: 'Payslips',           count: PAYSLIPS.length },
+    { key: 'structures', label: 'Salary Structures',  count: SALARY_STRUCTURES.length },
+    { key: 'statutory',  label: 'Statutory Reports',  count: 6 },
   ]
 
   return (
@@ -660,110 +707,116 @@ export default function PayrollPage() {
         subtitle="India-compliant payroll processing & compliance"
         notificationCount={2}
         actions={
-          <div className="flex items-center gap-2">
-            <button className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-colors hover:bg-orange-50" style={{ borderColor: '#E8622A', color: '#E8622A' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn btn-outline btn-sm">
               <FileText size={14} /> Form 16
             </button>
-            <button onClick={() => setShowRunModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-              style={{ background: 'linear-gradient(135deg, #E8622A, #F59E0B)' }}>
+            <button onClick={() => setShowRunModal(true)} className="btn btn-primary btn-sm">
               <Play size={14} /> Run Payroll
             </button>
           </div>
         }
       />
 
-      <div className="p-6 space-y-5" style={{ background: '#F1F4F9', minHeight: '100vh' }}>
+      <div style={{ padding: '28px 28px 56px' }}>
 
-        {/* ── STATUS BANNER ── */}
-        <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #1E293B 0%, #0F172A 100%)' }}>
-          {/* Decorative orb */}
-          <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, #E8622A, transparent)' }} />
-          <div className="absolute -bottom-8 -left-8 w-32 h-32 rounded-full opacity-5" style={{ background: 'radial-gradient(circle, #F59E0B, transparent)' }} />
-
-          <div className="relative flex flex-col lg:flex-row lg:items-center gap-6">
-            <div className="flex-shrink-0">
-              <div className="flex items-center gap-3 mb-1.5">
-                <span className="text-white font-extrabold text-xl">March 2026 Payroll</span>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold"
-                  style={{ background: 'rgba(245,158,11,0.15)', color: '#FCD34D', border: '1px solid rgba(245,158,11,0.3)' }}>
-                  Draft
-                </span>
-              </div>
-              <p className="text-slate-400 text-sm">87 employees · Target pay date: <span className="text-slate-300 font-medium">31 March 2026</span></p>
-              <div className="flex items-center gap-3 mt-3">
-                <div className="text-center">
-                  <p className="text-xs text-slate-500">Net Payable</p>
-                  <p className="text-lg font-extrabold text-green-400">₹42.1L</p>
-                </div>
-                <div className="w-px h-8 bg-slate-700" />
-                <div className="text-center">
-                  <p className="text-xs text-slate-500">Gross</p>
-                  <p className="text-lg font-extrabold text-slate-200">₹48.3L</p>
-                </div>
-                <div className="w-px h-8 bg-slate-700" />
-                <div className="text-center">
-                  <p className="text-xs text-slate-500">Deductions</p>
-                  <p className="text-lg font-extrabold text-red-400">₹6.2L</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex-1 overflow-x-auto">
-              <PayrollStepper />
-            </div>
-            <button onClick={() => setShowRunModal(true)}
-              className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
-              style={{ background: 'linear-gradient(135deg, #E8622A, #F59E0B)' }}>
-              <Play size={15} /> Process Now
-            </button>
-          </div>
-        </div>
-
-        {/* ── STAT CARDS ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* ── KPI Cards — same exact structure as Employee page ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 24 }}>
           {[
-            { label: 'Total Gross Pay',      value: '₹48,25,000', sub: '87 employees · March 2026', color: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE', iconBg: '#DBEAFE', icon: <IndianRupee size={17} />, trend: '+0.9%' },
-            { label: 'Total Deductions',     value: '₹6,15,200',  sub: 'PF + TDS + PT + ESIC',      color: '#DC2626', bg: '#FEF2F2', border: '#FECACA', iconBg: '#FEE2E2', icon: <span className="text-sm font-extrabold">−</span>, trend: '' },
-            { label: 'Net Payable',          value: '₹42,09,800', sub: 'After all deductions',       color: '#15803D', bg: '#F0FDF4', border: '#BBF7D0', iconBg: '#DCFCE7', icon: <IndianRupee size={17} />, trend: '+1.0%' },
-            { label: 'Employer EPF',         value: '₹2,16,000',  sub: '12% employer contribution',  color: '#EA580C', bg: '#FFF7ED', border: '#FED7AA', iconBg: '#FFEDD5', icon: <Shield size={17} />,       trend: '' },
-            { label: 'Total TDS',            value: '₹1,45,000',  sub: 'Income tax withheld',        color: '#6D28D9', bg: '#FAF5FF', border: '#E9D5FF', iconBg: '#F3E8FF', icon: <BarChart3 size={17} />,    trend: '' },
-          ].map((card) => (
-            <div key={card.label} className="rounded-2xl p-4 transition-all hover:shadow-md"
-              style={{ background: card.bg, border: `1px solid ${card.border}` }}>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider leading-tight">{card.label}</span>
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: card.iconBg, color: card.color }}>
-                  {card.icon}
-                </div>
-              </div>
-              <p className="text-xl font-extrabold" style={{ color: card.color }}>{card.value}</p>
-              <div className="flex items-center gap-1 mt-1">
-                {card.trend && <span className="text-[10px] font-bold text-green-600 flex items-center gap-0.5"><ArrowUpRight size={10} />{card.trend}</span>}
-                <p className="text-[10px] text-gray-500">{card.sub}</p>
-              </div>
+            { label: 'Total Gross Pay',  value: '₹48.3L', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+            { label: 'Total Deductions', value: '₹6.2L',  color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+            { label: 'Net Payable',      value: '₹42.1L', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+            { label: 'Employer EPF',     value: '₹2.2L',  color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
+            { label: 'Total TDS',        value: '₹1.5L',  color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe' },
+          ].map((s) => (
+            <div key={s.label} className="card card-interactive" style={{ padding: '16px 18px', borderColor: s.border, textAlign: 'center' }}>
+              <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1.75rem', fontWeight: 700, color: s.color, lineHeight: 1.1 }}>
+                {s.value}
+              </p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 4, fontWeight: 500 }}>
+                {s.label}
+              </p>
             </div>
           ))}
         </div>
 
-        {/* ── TAB NAV + CONTENT ── */}
-        <div className="bg-white rounded-2xl overflow-hidden" style={{ border: '1px solid #E2E8F0', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-          <div className="flex" style={{ borderBottom: '1px solid #E2E8F0' }}>
+        {/* ── Current Payroll Status Card ── */}
+        <div className="card" style={{ padding: '20px 24px', marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+            {/* Left: period info */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0 }}>
+                  March 2026 Payroll
+                </h3>
+                <span className="badge" style={{ background: '#f9fafb', color: '#6b7280', border: '1px solid #e5e7eb' }}>
+                  Draft
+                </span>
+              </div>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-400)', margin: 0 }}>
+                87 employees · Target pay date:
+                <strong style={{ color: 'var(--color-gray-700)', marginLeft: 4 }}>31 March 2026</strong>
+              </p>
+            </div>
+
+            {/* Centre: stepper */}
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'center', overflowX: 'auto' }}>
+              <PayrollStepper />
+            </div>
+
+            {/* Right: action */}
+            <button onClick={() => setShowRunModal(true)} className="btn btn-primary btn-sm" style={{ flexShrink: 0 }}>
+              <Play size={14} /> Process Now
+            </button>
+          </div>
+        </div>
+
+        {/* ── Main Content Card with Tabs ── */}
+        <div className="card" style={{ overflow: 'hidden' }}>
+
+          {/* Tab bar */}
+          <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--color-gray-200)', padding: '0 20px' }}>
             {tabs.map((t) => (
-              <button key={t.key} onClick={() => setActiveTab(t.key)}
-                className="px-6 py-4 text-sm font-semibold transition-colors relative"
-                style={{ color: activeTab === t.key ? '#E8622A' : '#64748B', background: activeTab === t.key ? '#FFF7F5' : 'transparent' }}>
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '14px 16px',
+                  fontSize: '0.875rem',
+                  fontWeight: activeTab === t.key ? 600 : 500,
+                  color: activeTab === t.key ? '#1E3A5F' : 'var(--color-gray-500)',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: `2px solid ${activeTab === t.key ? '#1E3A5F' : 'transparent'}`,
+                  cursor: 'pointer',
+                  transition: 'all 150ms',
+                  marginBottom: -1,
+                  whiteSpace: 'nowrap',
+                  outline: 'none',
+                }}
+              >
                 {t.label}
-                {activeTab === t.key && <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ background: '#E8622A' }} />}
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  minWidth: 20, height: 20, padding: '0 5px', borderRadius: 99,
+                  fontSize: '0.7rem', fontWeight: 700,
+                  background: activeTab === t.key ? '#dbeafe' : 'var(--color-gray-100)',
+                  color:      activeTab === t.key ? '#1d4ed8' : 'var(--color-gray-500)',
+                }}>
+                  {t.count}
+                </span>
               </button>
             ))}
           </div>
-          <div className="p-6">
-            {activeTab === 'runs'       && <TabPayrollRuns onRunPayroll={() => setShowRunModal(true)} />}
-            {activeTab === 'payslips'   && <TabPayslips />}
-            {activeTab === 'structures' && <TabSalaryStructures />}
-            {activeTab === 'statutory'  && <TabStatutoryReports />}
-          </div>
+
+          {/* Tab content */}
+          {activeTab === 'runs'       && <TabPayrollRuns onRunPayroll={() => setShowRunModal(true)} />}
+          {activeTab === 'payslips'   && <TabPayslips />}
+          {activeTab === 'structures' && <TabSalaryStructures />}
+          {activeTab === 'statutory'  && <TabStatutoryReports />}
         </div>
+
       </div>
     </>
   )
