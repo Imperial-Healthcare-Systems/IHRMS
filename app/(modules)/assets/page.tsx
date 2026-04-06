@@ -1,323 +1,308 @@
 'use client'
 
-
 import { useState, useMemo } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
-  Package,
-  UserCheck,
-  Box,
-  Wrench,
-  Search,
-  Plus,
-  X,
-  Edit2,
-  ChevronDown,
-  Filter,
-  Eye,
-  LogOut,
-  RotateCcw,
+  Package, UserCheck, Box, Wrench, Search, Plus, X,
+  Edit2, Eye, LogOut, RotateCcw,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
    TYPES
 ───────────────────────────────────────────────────────────── */
-type AssetStatus = 'Assigned' | 'Available' | 'Maintenance' | 'Disposed'
+type AssetStatus    = 'Assigned' | 'Available' | 'Maintenance' | 'Disposed'
 type AssetCondition = 'Excellent' | 'Good' | 'Fair' | 'Poor'
-type AssetCategory =
-  | 'Laptop'
-  | 'Monitor'
-  | 'Keyboard'
-  | 'Mobile'
-  | 'SIM Card'
-  | 'Headset'
-  | 'Vehicle'
-  | 'Other'
+type AssetCategory  = 'Laptop' | 'Monitor' | 'Keyboard' | 'Mobile' | 'SIM Card' | 'Headset' | 'Vehicle' | 'Other'
 
 interface Asset {
-  code: string
-  name: string
-  category: AssetCategory
-  brand: string
-  serial: string
-  purchaseDate: string
-  purchaseValue: number
-  assignedTo: string | null
-  condition: AssetCondition
-  status: AssetStatus
+  code: string; name: string; category: AssetCategory; brand: string; serial: string
+  purchaseDate: string; purchaseValue: number; assignedTo: string | null
+  condition: AssetCondition; status: AssetStatus
 }
 
 /* ─────────────────────────────────────────────────────────────
    MOCK DATA
 ───────────────────────────────────────────────────────────── */
 const ASSETS: Asset[] = [
-  { code: 'AST/2024/001', name: 'Dell Latitude 5520 Laptop', category: 'Laptop', brand: 'Dell', serial: 'L2024-001', purchaseDate: 'Jan 2024', purchaseValue: 75000, assignedTo: 'Arjun Patel', condition: 'Good', status: 'Assigned' },
-  { code: 'AST/2024/002', name: 'HP EliteBook 840 Laptop', category: 'Laptop', brand: 'HP', serial: 'E2024-002', purchaseDate: 'Jan 2024', purchaseValue: 82000, assignedTo: 'Priya Sharma', condition: 'Good', status: 'Assigned' },
-  { code: 'AST/2024/003', name: 'MacBook Pro 14"', category: 'Laptop', brand: 'Apple', serial: 'M2024-003', purchaseDate: 'Mar 2024', purchaseValue: 165000, assignedTo: 'Rahul Kumar (Manager)', condition: 'Excellent', status: 'Assigned' },
-  { code: 'AST/2024/004', name: 'Dell P2422H Monitor (24")', category: 'Monitor', brand: 'Dell', serial: 'MON-001', purchaseDate: 'Feb 2024', purchaseValue: 18500, assignedTo: null, condition: 'Good', status: 'Available' },
-  { code: 'AST/2024/005', name: 'Dell P2422H Monitor (24")', category: 'Monitor', brand: 'Dell', serial: 'MON-002', purchaseDate: 'Feb 2024', purchaseValue: 18500, assignedTo: 'Vivek Sharma', condition: 'Good', status: 'Assigned' },
-  { code: 'AST/2024/006', name: 'Logitech MX Keys Keyboard', category: 'Keyboard', brand: 'Logitech', serial: 'KB-001', purchaseDate: 'Mar 2024', purchaseValue: 8500, assignedTo: null, condition: 'Excellent', status: 'Available' },
-  { code: 'AST/2024/007', name: 'Lenovo ThinkPad Laptop', category: 'Laptop', brand: 'Lenovo', serial: 'T2024-007', purchaseDate: 'Apr 2024', purchaseValue: 68000, assignedTo: null, condition: 'Fair', status: 'Maintenance' },
-  { code: 'AST/2024/008', name: 'iPhone 13 (Corporate)', category: 'Mobile', brand: 'Apple', serial: 'IP-001', purchaseDate: 'May 2024', purchaseValue: 72000, assignedTo: 'Vikram Nair (Sales Head)', condition: 'Excellent', status: 'Assigned' },
-  { code: 'AST/2024/009', name: 'Airtel SIM Card (Work)', category: 'SIM Card', brand: 'Airtel', serial: 'SIM-001', purchaseDate: 'Jan 2024', purchaseValue: 500, assignedTo: 'Anita Verma', condition: 'Good', status: 'Assigned' },
-  { code: 'AST/2024/010', name: 'Bose QC45 Headset', category: 'Headset', brand: 'Bose', serial: 'BH-001', purchaseDate: 'Jun 2024', purchaseValue: 32000, assignedTo: null, condition: 'Excellent', status: 'Available' },
-  { code: 'AST/2024/011', name: 'Maruti Ertiga (Company Car)', category: 'Vehicle', brand: 'Maruti', serial: 'MH12AB1234', purchaseDate: 'Aug 2023', purchaseValue: 950000, assignedTo: null, condition: 'Good', status: 'Available' },
-  { code: 'AST/2024/012', name: 'Dell Latitude 5530 Laptop', category: 'Laptop', brand: 'Dell', serial: 'L2024-012', purchaseDate: 'Jul 2024', purchaseValue: 78000, assignedTo: 'Deepika Sharma', condition: 'Good', status: 'Assigned' },
-  { code: 'AST/2024/013', name: 'Samsung Galaxy A54 (Work)', category: 'Mobile', brand: 'Samsung', serial: 'SAM-013', purchaseDate: 'Aug 2024', purchaseValue: 35000, assignedTo: 'Rajesh Kumar', condition: 'Fair', status: 'Assigned' },
-  { code: 'AST/2024/014', name: 'Cisco IP Phone 7841', category: 'Other', brand: 'Cisco', serial: 'PHONE-001', purchaseDate: 'Jan 2024', purchaseValue: 12000, assignedTo: null, condition: 'Fair', status: 'Maintenance' },
-  { code: 'AST/2024/015', name: 'External SSD 1TB (WD)', category: 'Other', brand: 'Western Digital', serial: 'SSD-001', purchaseDate: 'Sep 2024', purchaseValue: 7500, assignedTo: null, condition: 'Excellent', status: 'Available' },
+  { code: 'AST/2024/001', name: 'Dell Latitude 5520 Laptop',    category: 'Laptop',   brand: 'Dell',           serial: 'L2024-001',  purchaseDate: 'Jan 2024', purchaseValue: 75000,  assignedTo: 'Arjun Patel',             condition: 'Good',      status: 'Assigned' },
+  { code: 'AST/2024/002', name: 'HP EliteBook 840 Laptop',      category: 'Laptop',   brand: 'HP',             serial: 'E2024-002',  purchaseDate: 'Jan 2024', purchaseValue: 82000,  assignedTo: 'Priya Sharma',            condition: 'Good',      status: 'Assigned' },
+  { code: 'AST/2024/003', name: 'MacBook Pro 14"',              category: 'Laptop',   brand: 'Apple',          serial: 'M2024-003',  purchaseDate: 'Mar 2024', purchaseValue: 165000, assignedTo: 'Rahul Kumar (Manager)',    condition: 'Excellent', status: 'Assigned' },
+  { code: 'AST/2024/004', name: 'Dell P2422H Monitor (24")',    category: 'Monitor',  brand: 'Dell',           serial: 'MON-001',    purchaseDate: 'Feb 2024', purchaseValue: 18500,  assignedTo: null,                      condition: 'Good',      status: 'Available' },
+  { code: 'AST/2024/005', name: 'Dell P2422H Monitor (24")',    category: 'Monitor',  brand: 'Dell',           serial: 'MON-002',    purchaseDate: 'Feb 2024', purchaseValue: 18500,  assignedTo: 'Vivek Sharma',            condition: 'Good',      status: 'Assigned' },
+  { code: 'AST/2024/006', name: 'Logitech MX Keys Keyboard',   category: 'Keyboard', brand: 'Logitech',       serial: 'KB-001',     purchaseDate: 'Mar 2024', purchaseValue: 8500,   assignedTo: null,                      condition: 'Excellent', status: 'Available' },
+  { code: 'AST/2024/007', name: 'Lenovo ThinkPad Laptop',      category: 'Laptop',   brand: 'Lenovo',         serial: 'T2024-007',  purchaseDate: 'Apr 2024', purchaseValue: 68000,  assignedTo: null,                      condition: 'Fair',      status: 'Maintenance' },
+  { code: 'AST/2024/008', name: 'iPhone 13 (Corporate)',        category: 'Mobile',   brand: 'Apple',          serial: 'IP-001',     purchaseDate: 'May 2024', purchaseValue: 72000,  assignedTo: 'Vikram Nair (Sales Head)',condition: 'Excellent', status: 'Assigned' },
+  { code: 'AST/2024/009', name: 'Airtel SIM Card (Work)',      category: 'SIM Card', brand: 'Airtel',         serial: 'SIM-001',    purchaseDate: 'Jan 2024', purchaseValue: 500,    assignedTo: 'Anita Verma',             condition: 'Good',      status: 'Assigned' },
+  { code: 'AST/2024/010', name: 'Bose QC45 Headset',           category: 'Headset',  brand: 'Bose',           serial: 'BH-001',     purchaseDate: 'Jun 2024', purchaseValue: 32000,  assignedTo: null,                      condition: 'Excellent', status: 'Available' },
+  { code: 'AST/2024/011', name: 'Maruti Ertiga (Company Car)', category: 'Vehicle',  brand: 'Maruti',         serial: 'MH12AB1234', purchaseDate: 'Aug 2023', purchaseValue: 950000, assignedTo: null,                      condition: 'Good',      status: 'Available' },
+  { code: 'AST/2024/012', name: 'Dell Latitude 5530 Laptop',   category: 'Laptop',   brand: 'Dell',           serial: 'L2024-012',  purchaseDate: 'Jul 2024', purchaseValue: 78000,  assignedTo: 'Deepika Sharma',          condition: 'Good',      status: 'Assigned' },
+  { code: 'AST/2024/013', name: 'Samsung Galaxy A54 (Work)',   category: 'Mobile',   brand: 'Samsung',        serial: 'SAM-013',    purchaseDate: 'Aug 2024', purchaseValue: 35000,  assignedTo: 'Rajesh Kumar',            condition: 'Fair',      status: 'Assigned' },
+  { code: 'AST/2024/014', name: 'Cisco IP Phone 7841',         category: 'Other',    brand: 'Cisco',          serial: 'PHONE-001',  purchaseDate: 'Jan 2024', purchaseValue: 12000,  assignedTo: null,                      condition: 'Fair',      status: 'Maintenance' },
+  { code: 'AST/2024/015', name: 'External SSD 1TB (WD)',       category: 'Other',    brand: 'Western Digital', serial: 'SSD-001',   purchaseDate: 'Sep 2024', purchaseValue: 7500,   assignedTo: null,                      condition: 'Excellent', status: 'Available' },
 ]
 
 const CATEGORIES: AssetCategory[] = ['Laptop', 'Monitor', 'Keyboard', 'Mobile', 'SIM Card', 'Headset', 'Vehicle', 'Other']
-const STATUSES: AssetStatus[] = ['Assigned', 'Available', 'Maintenance', 'Disposed']
+const STATUSES: AssetStatus[]     = ['Assigned', 'Available', 'Maintenance', 'Disposed']
 const CONDITIONS: AssetCondition[] = ['Excellent', 'Good', 'Fair', 'Poor']
+const EMPLOYEES = ['Arjun Patel', 'Priya Sharma', 'Rahul Kumar', 'Vivek Sharma', 'Anita Verma', 'Vikram Nair', 'Deepika Sharma', 'Rajesh Kumar', 'Sunita Reddy', 'Mohan Das']
 
 /* ─────────────────────────────────────────────────────────────
-   BADGE HELPERS
+   DESIGN TOKENS
 ───────────────────────────────────────────────────────────── */
-function categoryBadge(cat: AssetCategory) {
-  const map: Record<AssetCategory, { bg: string; color: string }> = {
-    Laptop: { bg: '#EFF6FF', color: '#1D4ED8' },
-    Monitor: { bg: '#ECFEFF', color: '#0E7490' },
-    Keyboard: { bg: '#F8FAFC', color: '#475569' },
-    Mobile: { bg: '#F5F3FF', color: '#7C3AED' },
-    'SIM Card': { bg: '#F0FDF4', color: '#15803D' },
-    Headset: { bg: '#FFF7ED', color: '#C2410C' },
-    Vehicle: { bg: '#FFFBEB', color: '#B45309' },
-    Other: { bg: '#F1F5F9', color: '#475569' },
-  }
-  const s = map[cat]
+const PALETTE = ['#1E3A5F', '#E8622A', '#1A7A4A', '#7C3AED', '#0369A1', '#BE185D', '#0F766E', '#B45309']
+
+const CAT_CFG: Record<AssetCategory, { bg: string; color: string; border: string }> = {
+  Laptop:   { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  Monitor:  { bg: '#ecfeff', color: '#0e7490', border: '#a5f3fc' },
+  Keyboard: { bg: '#f9fafb', color: '#475569', border: '#e5e7eb' },
+  Mobile:   { bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe' },
+  'SIM Card': { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  Headset:  { bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
+  Vehicle:  { bg: '#fffbeb', color: '#b45309', border: '#fde68a' },
+  Other:    { bg: '#f1f5f9', color: '#475569', border: '#e2e8f0' },
+}
+
+const STATUS_CFG: Record<AssetStatus, { bg: string; color: string; border: string }> = {
+  Assigned:    { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  Available:   { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  Maintenance: { bg: '#fffbeb', color: '#b45309', border: '#fde68a' },
+  Disposed:    { bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' },
+}
+
+const COND_CFG: Record<AssetCondition, { bg: string; color: string; border: string }> = {
+  Excellent: { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  Good:      { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  Fair:      { bg: '#fffbeb', color: '#b45309', border: '#fde68a' },
+  Poor:      { bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' },
+}
+
+function fmt(n: number) { return '₹' + n.toLocaleString('en-IN') }
+
+const FIELD = {
+  width: '100%', borderRadius: 8, border: '1.5px solid #e5e7eb',
+  padding: '8px 11px', fontSize: '0.8125rem', color: '#111827',
+  background: '#f9fafb', outline: 'none', boxSizing: 'border-box' as const,
+  fontFamily: 'inherit',
+}
+const LBL = {
+  display: 'block', fontSize: '0.7rem', fontWeight: 600 as const,
+  color: '#374151', marginBottom: 5, textTransform: 'uppercase' as const,
+  letterSpacing: '0.05em',
+}
+
+/* ─────────────────────────────────────────────────────────────
+   AVATAR
+───────────────────────────────────────────────────────────── */
+function Avatar({ name, size = 32 }: { name: string; size?: number }) {
+  const idx = (name.charCodeAt(0) + (name.charCodeAt(1) || 0)) % PALETTE.length
+  const initials = name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: s.bg, color: s.color }}>
-      {cat}
-    </span>
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      background: `${PALETTE[idx]}1A`, border: `2px solid ${PALETTE[idx]}35`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.32, fontWeight: 700, color: PALETTE[idx],
+    }}>{initials}</div>
   )
 }
 
-function statusBadge(status: AssetStatus) {
-  const map: Record<AssetStatus, { bg: string; color: string }> = {
-    Assigned: { bg: '#F0FDF4', color: '#15803D' },
-    Available: { bg: '#EFF6FF', color: '#1D4ED8' },
-    Maintenance: { bg: '#FFFBEB', color: '#B45309' },
-    Disposed: { bg: '#FEF2F2', color: '#DC2626' },
-  }
-  const s = map[status]
+/* ─────────────────────────────────────────────────────────────
+   MODAL WRAPPER
+───────────────────────────────────────────────────────────── */
+function Modal({ onClose, title, sub, children }: { onClose: () => void; title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: s.bg, color: s.color }}>
-      {status}
-    </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div className="bg-white flex flex-col" style={{ width: 520, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.18)' }}>
+        <div className="flex items-start justify-between px-6 pt-5 pb-4" style={{ borderBottom: '1.5px solid #f1f5f9' }}>
+          <div>
+            <h2 style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#111827', margin: 0 }}>{title}</h2>
+            {sub && <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '3px 0 0' }}>{sub}</p>}
+          </div>
+          <button onClick={onClose} className="btn btn-ghost btn-sm btn-icon" style={{ marginTop: -2 }}><X size={15} /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5">{children}</div>
+      </div>
+    </div>
   )
-}
-
-function conditionBadge(cond: AssetCondition) {
-  const map: Record<AssetCondition, { bg: string; color: string }> = {
-    Excellent: { bg: '#F0FDF4', color: '#15803D' },
-    Good: { bg: '#EFF6FF', color: '#1D4ED8' },
-    Fair: { bg: '#FFFBEB', color: '#B45309' },
-    Poor: { bg: '#FEF2F2', color: '#DC2626' },
-  }
-  const s = map[cond]
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: s.bg, color: s.color }}>
-      {cond}
-    </span>
-  )
-}
-
-function formatCurrency(n: number) {
-  return '₹' + n.toLocaleString('en-IN')
 }
 
 /* ─────────────────────────────────────────────────────────────
    ADD ASSET MODAL
 ───────────────────────────────────────────────────────────── */
 function AddAssetModal({ onClose }: { onClose: () => void }) {
-  const nextCode = 'AST/2024/016'
-  const [form, setForm] = useState({
-    code: nextCode, name: '', category: 'Laptop', brand: '', model: '', serial: '',
-    purchaseDate: '', purchaseValue: '', condition: 'Good', notes: '',
-  })
+  const [form, setForm] = useState({ code: 'AST/2024/016', name: '', category: 'Laptop', brand: '', model: '', serial: '', purchaseDate: '', purchaseValue: '', condition: 'Good', notes: '' })
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mx-4 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #E2E8F0' }}>
-          <h2 className="text-lg font-bold text-gray-900">Add New Asset</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
-        </div>
-        <div className="px-6 py-4 max-h-[70vh] overflow-y-auto space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Asset Code</label>
-              <input value={form.code} readOnly className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Asset Name *</label>
-              <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Dell Latitude 5520" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Category *</label>
-              <select value={form.category} onChange={e => set('category', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }}>
-                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Brand</label>
-              <input value={form.brand} onChange={e => set('brand', e.target.value)} placeholder="e.g. Dell" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Model</label>
-              <input value={form.model} onChange={e => set('model', e.target.value)} placeholder="Model number" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Serial Number</label>
-              <input value={form.serial} onChange={e => set('serial', e.target.value)} placeholder="e.g. L2024-001" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Purchase Date</label>
-              <input type="date" value={form.purchaseDate} onChange={e => set('purchaseDate', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Purchase Value (₹)</label>
-              <input type="number" value={form.purchaseValue} onChange={e => set('purchaseValue', e.target.value)} placeholder="e.g. 75000" className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Condition</label>
-              <select value={form.condition} onChange={e => set('condition', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }}>
-                {CONDITIONS.map(c => <option key={c}>{c}</option>)}
-              </select>
-            </div>
+    <Modal onClose={onClose} title="Add New Asset" sub="Register a new company-owned asset">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={LBL}>Asset Code</label>
+            <input value={form.code} readOnly style={{ ...FIELD, background: '#f1f5f9', color: '#6b7280' }} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
-            <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={3} placeholder="Any additional notes about this asset..." className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400 resize-none" style={{ borderColor: '#E2E8F0' }} />
+            <label style={LBL}>Asset Name <span style={{ color: '#dc2626' }}>*</span></label>
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Dell Latitude 5520" style={FIELD} />
+          </div>
+          <div>
+            <label style={LBL}>Category <span style={{ color: '#dc2626' }}>*</span></label>
+            <select value={form.category} onChange={e => set('category', e.target.value)} className="form-select" style={{ width: '100%' }}>
+              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={LBL}>Brand</label>
+            <input value={form.brand} onChange={e => set('brand', e.target.value)} placeholder="e.g. Dell" style={FIELD} />
+          </div>
+          <div>
+            <label style={LBL}>Model</label>
+            <input value={form.model} onChange={e => set('model', e.target.value)} placeholder="Model number" style={FIELD} />
+          </div>
+          <div>
+            <label style={LBL}>Serial Number</label>
+            <input value={form.serial} onChange={e => set('serial', e.target.value)} placeholder="e.g. L2024-001" style={FIELD} />
+          </div>
+          <div>
+            <label style={LBL}>Purchase Date</label>
+            <input type="date" value={form.purchaseDate} onChange={e => set('purchaseDate', e.target.value)} style={FIELD} />
+          </div>
+          <div>
+            <label style={LBL}>Purchase Value (₹)</label>
+            <input type="number" value={form.purchaseValue} onChange={e => set('purchaseValue', e.target.value)} placeholder="75000" style={FIELD} />
+          </div>
+          <div>
+            <label style={LBL}>Condition</label>
+            <select value={form.condition} onChange={e => set('condition', e.target.value)} className="form-select" style={{ width: '100%' }}>
+              {CONDITIONS.map(c => <option key={c}>{c}</option>)}
+            </select>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4" style={{ borderTop: '1px solid #E2E8F0' }}>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border hover:bg-gray-50" style={{ borderColor: '#E2E8F0' }}>Cancel</button>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: '#E8622A' }}>Add Asset</button>
+        <div>
+          <label style={LBL}>Notes</label>
+          <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={3}
+            placeholder="Any additional notes about this asset…"
+            style={{ ...FIELD, resize: 'none', lineHeight: 1.55 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
+          <button onClick={onClose} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+          <button onClick={onClose} className="btn btn-primary btn-sm" style={{ flex: 2 }}>Add Asset</button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
 /* ─────────────────────────────────────────────────────────────
-   ASSIGN ASSET MODAL
+   ASSIGN MODAL
 ───────────────────────────────────────────────────────────── */
-const EMPLOYEES = [
-  'Arjun Patel', 'Priya Sharma', 'Rahul Kumar', 'Vivek Sharma', 'Anita Verma',
-  'Vikram Nair', 'Deepika Sharma', 'Rajesh Kumar', 'Sunita Reddy', 'Mohan Das',
-]
-
 function AssignModal({ asset, onClose }: { asset: Asset; onClose: () => void }) {
-  const [search, setSearch] = useState('')
+  const [search, setSearch]   = useState('')
   const [selected, setSelected] = useState('')
-  const [date, setDate] = useState('')
-  const [notes, setNotes] = useState('')
-  const filtered = EMPLOYEES.filter(e => e.toLowerCase().includes(search.toLowerCase()))
+  const [date, setDate]       = useState('')
+  const [notes, setNotes]     = useState('')
+  const filteredEmps = EMPLOYEES.filter(e => e.toLowerCase().includes(search.toLowerCase()))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #E2E8F0' }}>
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">Assign Asset</h2>
-            <p className="text-xs text-gray-500">{asset.code} — {asset.name}</p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X size={18} /></button>
-        </div>
-        <div className="px-6 py-4 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Select Employee *</label>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee..." className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400 mb-1" style={{ borderColor: '#E2E8F0' }} />
-            <div className="border rounded-lg overflow-hidden max-h-40 overflow-y-auto" style={{ borderColor: '#E2E8F0' }}>
-              {filtered.map(e => (
-                <button key={e} onClick={() => { setSelected(e); setSearch(e) }} className={`w-full text-left px-3 py-2 text-sm hover:bg-orange-50 transition-colors ${selected === e ? 'bg-orange-50 font-semibold text-orange-700' : 'text-gray-700'}`}>
-                  {e}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Assignment Date *</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400" style={{ borderColor: '#E2E8F0' }} />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Assignment notes..." className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400 resize-none" style={{ borderColor: '#E2E8F0' }} />
+    <Modal onClose={onClose} title="Assign Asset" sub={`${asset.code} — ${asset.name}`}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+        <div>
+          <label style={LBL}>Select Employee <span style={{ color: '#dc2626' }}>*</span></label>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employee…"
+            style={{ ...FIELD, marginBottom: 6 }} />
+          <div style={{ border: '1.5px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', maxHeight: 160, overflowY: 'auto' }}>
+            {filteredEmps.map(e => (
+              <button key={e} onClick={() => { setSelected(e); setSearch(e) }}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: '0.8125rem',
+                  background: selected === e ? '#fff7ed' : 'transparent',
+                  color: selected === e ? '#E8622A' : '#374151',
+                  fontWeight: selected === e ? 600 : 400,
+                  border: 'none', cursor: 'pointer', borderBottom: '1px solid #f9fafb',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                <Avatar name={e} size={22} />
+                {e}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4" style={{ borderTop: '1px solid #E2E8F0' }}>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border hover:bg-gray-50" style={{ borderColor: '#E2E8F0' }}>Cancel</button>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: '#E8622A' }}>Assign</button>
+        <div>
+          <label style={LBL}>Assignment Date <span style={{ color: '#dc2626' }}>*</span></label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={FIELD} />
+        </div>
+        <div>
+          <label style={LBL}>Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+            placeholder="Assignment notes…" style={{ ...FIELD, resize: 'none', lineHeight: 1.55 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
+          <button onClick={onClose} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+          <button onClick={onClose} className="btn btn-primary btn-sm" style={{ flex: 2 }}>Assign Asset</button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
 /* ─────────────────────────────────────────────────────────────
    TAB 2 — ASSIGNED TO EMPLOYEES
 ───────────────────────────────────────────────────────────── */
-function AssignedToEmployeesTab() {
+const DEPT_MAP: Record<string, string> = {
+  'Arjun Patel': 'Engineering', 'Priya Sharma': 'HR', 'Rahul Kumar (Manager)': 'Management',
+  'Vivek Sharma': 'Finance', 'Vikram Nair (Sales Head)': 'Sales', 'Anita Verma': 'Operations',
+  'Deepika Sharma': 'Engineering', 'Rajesh Kumar': 'Support',
+}
+
+function AssignedTab() {
   const assigned = ASSETS.filter(a => a.assignedTo !== null)
   const grouped = useMemo(() => {
     const map: Record<string, Asset[]> = {}
-    assigned.forEach(a => {
-      const key = a.assignedTo!
-      if (!map[key]) map[key] = []
-      map[key].push(a)
-    })
+    assigned.forEach(a => { const k = a.assignedTo!; if (!map[k]) map[k] = []; map[k].push(a) })
     return map
   }, [assigned])
 
-  const DEPT_MAP: Record<string, string> = {
-    'Arjun Patel': 'Engineering', 'Priya Sharma': 'HR', 'Rahul Kumar (Manager)': 'Management',
-    'Vivek Sharma': 'Finance', 'Vikram Nair (Sales Head)': 'Sales', 'Anita Verma': 'Operations',
-    'Deepika Sharma': 'Engineering', 'Rajesh Kumar': 'Support',
-  }
-
   return (
-    <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid #E2E8F0' }}>
-      <table className="w-full text-sm">
+    <div className="table-wrapper">
+      <table className="data-table">
         <thead>
-          <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-            {['Employee', 'Department', 'Assets Count', 'Asset List', 'Total Value', 'Actions'].map(h => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-            ))}
+          <tr>
+            {['Employee', 'Department', 'Assets', 'Asset List', 'Total Value', 'Actions'].map(h => <th key={h}>{h}</th>)}
           </tr>
         </thead>
         <tbody>
-          {Object.entries(grouped).map(([emp, assets], i) => {
+          {Object.entries(grouped).map(([emp, assets]) => {
             const total = assets.reduce((s, a) => s + a.purchaseValue, 0)
+            const c = CAT_CFG
             return (
-              <tr key={emp} style={{ borderBottom: '1px solid #F1F5F9', background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0" style={{ background: 'linear-gradient(135deg, #E8622A, #F59E0B)' }}>
-                      {emp.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                    </div>
-                    <span className="font-medium text-gray-900">{emp}</span>
+              <tr key={emp}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Avatar name={emp} size={34} />
+                    <span style={{ fontWeight: 600, color: '#111827', fontSize: '0.8125rem' }}>{emp}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-gray-600">{DEPT_MAP[emp] ?? 'General'}</td>
-                <td className="px-4 py-3">
-                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-white" style={{ background: '#E8622A' }}>{assets.length}</span>
+                <td style={{ color: '#374151' }}>{DEPT_MAP[emp] ?? 'General'}</td>
+                <td>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: '50%', background: '#fff7ed', border: '1.5px solid #fed7aa', color: '#E8622A', fontSize: '0.75rem', fontWeight: 700 }}>
+                    {assets.length}
+                  </span>
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {assets.map(a => (
-                      <span key={a.code} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: '#F1F5F9', color: '#334155' }}>
-                        {a.category}
-                      </span>
-                    ))}
+                <td>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {assets.map(a => {
+                      const cfg = c[a.category]
+                      return (
+                        <span key={a.code} className="badge" style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                          {a.category}
+                        </span>
+                      )
+                    })}
                   </div>
                 </td>
-                <td className="px-4 py-3 font-semibold text-gray-800">{formatCurrency(total)}</td>
-                <td className="px-4 py-3">
-                  <button className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-colors" style={{ borderColor: '#E2E8F0', color: '#475569' }}>
+                <td style={{ fontWeight: 700, color: '#111827' }}>{fmt(total)}</td>
+                <td>
+                  <button className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem' }}>
                     <Eye size={12} /> View All
                   </button>
                 </td>
@@ -331,189 +316,214 @@ function AssignedToEmployeesTab() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MAIN PAGE
+   PAGE
 ───────────────────────────────────────────────────────────── */
 export default function AssetsPage() {
-  const [activeTab, setActiveTab] = useState<'inventory' | 'assigned'>('inventory')
-  const [search, setSearch] = useState('')
-  const [catFilter, setCatFilter] = useState<string>('All')
-  const [statusFilter, setStatusFilter] = useState<string>('All')
+  const [activeTab, setActiveTab]     = useState<'inventory' | 'assigned'>('inventory')
+  const [search, setSearch]           = useState('')
+  const [catFilter, setCatFilter]     = useState('All')
+  const [statusFilter, setStatusFilter] = useState('All')
   const [showAddModal, setShowAddModal] = useState(false)
   const [assignAsset, setAssignAsset] = useState<Asset | null>(null)
 
-  const totalAssets = ASSETS.length
-  const assignedCount = ASSETS.filter(a => a.status === 'Assigned').length
-  const availableCount = ASSETS.filter(a => a.status === 'Available').length
+  const totalAssets     = ASSETS.length
+  const assignedCount   = ASSETS.filter(a => a.status === 'Assigned').length
+  const availableCount  = ASSETS.filter(a => a.status === 'Available').length
   const maintenanceCount = ASSETS.filter(a => a.status === 'Maintenance').length
 
-  const filtered = useMemo(() => {
-    return ASSETS.filter(a => {
-      const q = search.toLowerCase()
-      const matchSearch = !q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)
-      const matchCat = catFilter === 'All' || a.category === catFilter
-      const matchStatus = statusFilter === 'All' || a.status === statusFilter
-      return matchSearch && matchCat && matchStatus
-    })
-  }, [search, catFilter, statusFilter])
+  const filtered = useMemo(() => ASSETS.filter(a => {
+    const q = search.toLowerCase()
+    return (!q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)) &&
+      (catFilter === 'All' || a.category === catFilter) &&
+      (statusFilter === 'All' || a.status === statusFilter)
+  }), [search, catFilter, statusFilter])
 
-  const summaryCards = [
-    { label: 'Total Assets', value: totalAssets, color: '#2563EB', bg: '#EFF6FF', icon: Package },
-    { label: 'Assigned', value: assignedCount, color: '#16A34A', bg: '#F0FDF4', icon: UserCheck },
-    { label: 'Available', value: availableCount, color: '#D97706', bg: '#FFFBEB', icon: Box },
-    { label: 'Under Maintenance', value: maintenanceCount, color: '#DC2626', bg: '#FEF2F2', icon: Wrench },
+  const TABS = [
+    { key: 'inventory' as const, label: 'Asset Inventory',      count: ASSETS.length },
+    { key: 'assigned'  as const, label: 'Assigned to Employees', count: assignedCount },
   ]
 
   return (
-    <div className="min-h-screen" style={{ background: '#F8FAFC' }}>
+    <>
+      {showAddModal && <AddAssetModal onClose={() => setShowAddModal(false)} />}
+      {assignAsset  && <AssignModal asset={assignAsset} onClose={() => setAssignAsset(null)} />}
+
       <Topbar
         title="Asset Management"
         subtitle="Track and manage company-owned assets"
-        actions={
-          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95" style={{ background: '#E8622A' }}>
-            <Plus size={16} /> Add Asset
-          </button>
-        }
-      />
+        notificationCount={maintenanceCount}
+      >
+        <button onClick={() => setShowAddModal(true)} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} /> Add Asset
+        </button>
+      </Topbar>
 
-      <div className="p-6 space-y-6">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {summaryCards.map(card => {
-            const Icon = card.icon
-            return (
-              <div key={card.label} className="rounded-xl p-5 flex items-center gap-4" style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: card.bg }}>
-                  <Icon size={22} style={{ color: card.color }} />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-gray-900">{card.value}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{card.label}</p>
-                </div>
+      <div style={{ padding: '28px 28px 56px' }}>
+
+        {/* KPI strip */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+          {([
+            { label: 'Total Assets',      value: totalAssets,     icon: Package,   color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+            { label: 'Assigned',          value: assignedCount,   icon: UserCheck, color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+            { label: 'Available',         value: availableCount,  icon: Box,       color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+            { label: 'Under Maintenance', value: maintenanceCount,icon: Wrench,    color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
+          ] as { label: string; value: number; icon: React.ElementType; color: string; bg: string; border: string }[]).map(({ label, value, icon: Icon, color, bg, border }) => (
+            <div key={label} className="card card-interactive" style={{ padding: '16px 18px', textAlign: 'center' }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: bg, border: `1.5px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}>
+                <Icon size={16} style={{ color }} />
               </div>
-            )
-          })}
-        </div>
-
-        {/* Tab Bar */}
-        <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: '#F1F5F9' }}>
-          {(['inventory', 'assigned'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className="px-5 py-2 rounded-lg text-sm font-semibold transition-all"
-              style={activeTab === tab ? { background: '#FFFFFF', color: '#E8622A', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' } : { color: '#64748B' }}
-            >
-              {tab === 'inventory' ? 'Asset Inventory' : 'Assigned to Employees'}
-            </button>
+              <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1.75rem', fontWeight: 700, color: '#111827', margin: 0, lineHeight: 1 }}>{value}</p>
+              <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '4px 0 0' }}>{label}</p>
+            </div>
           ))}
         </div>
 
-        {/* Tab Content */}
-        {activeTab === 'inventory' ? (
-          <div className="rounded-xl overflow-hidden" style={{ background: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-            {/* Filters */}
-            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: '1px solid #F1F5F9' }}>
-              <div className="flex items-center gap-2 flex-1 min-w-[200px] border rounded-lg px-3 py-2" style={{ borderColor: '#E2E8F0', background: '#F8FAFC' }}>
-                <Search size={14} className="text-gray-400 flex-shrink-0" />
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search asset name or code..." className="bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400 w-full" />
-              </div>
-              <div className="flex items-center gap-2 border rounded-lg px-3 py-2" style={{ borderColor: '#E2E8F0', background: '#F8FAFC' }}>
-                <Filter size={14} className="text-gray-400" />
-                <select value={catFilter} onChange={e => setCatFilter(e.target.value)} className="bg-transparent outline-none text-sm text-gray-700">
+        {/* Main card */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+
+          {/* Tab bar */}
+          <div style={{ display: 'flex', borderBottom: '1.5px solid #f1f5f9', padding: '0 4px' }}>
+            {TABS.map(t => {
+              const active = activeTab === t.key
+              return (
+                <button key={t.key} onClick={() => setActiveTab(t.key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '14px 18px',
+                    fontSize: '0.8125rem', fontWeight: active ? 700 : 500,
+                    color: active ? '#1E3A5F' : '#6b7280', background: 'none', border: 'none', cursor: 'pointer',
+                    borderBottom: active ? '2px solid #1E3A5F' : '2px solid transparent',
+                    marginBottom: -1, transition: 'color 150ms',
+                  }}>
+                  {t.label}
+                  <span style={{
+                    fontSize: '0.7rem', fontWeight: 700, padding: '1px 6px', borderRadius: 20,
+                    background: active ? '#dbeafe' : '#f1f5f9',
+                    color: active ? '#1d4ed8' : '#9ca3af',
+                  }}>{t.count}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Inventory tab */}
+          {activeTab === 'inventory' && (
+            <>
+              {/* Filter bar */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid #f8fafc', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 200, border: '1.5px solid #e5e7eb', borderRadius: 8, padding: '7px 12px', background: '#f9fafb' }}>
+                  <Search size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
+                  <input value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Search asset name or code…"
+                    style={{ background: 'transparent', border: 'none', outline: 'none', fontSize: '0.8125rem', color: '#374151', width: '100%', fontFamily: 'inherit' }} />
+                </div>
+                <select value={catFilter} onChange={e => setCatFilter(e.target.value)} className="form-select">
                   <option value="All">All Categories</option>
                   {CATEGORIES.map(c => <option key={c}>{c}</option>)}
                 </select>
-              </div>
-              <div className="flex items-center gap-2 border rounded-lg px-3 py-2" style={{ borderColor: '#E2E8F0', background: '#F8FAFC' }}>
-                <Filter size={14} className="text-gray-400" />
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="bg-transparent outline-none text-sm text-gray-700">
+                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="form-select">
                   <option value="All">All Status</option>
                   {STATUSES.map(s => <option key={s}>{s}</option>)}
                 </select>
+                <span style={{ fontSize: '0.75rem', color: '#9ca3af', fontWeight: 500 }}>{filtered.length} assets</span>
               </div>
-              <span className="text-xs text-gray-400 font-medium">{filtered.length} assets</span>
-            </div>
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                    {['Asset Code', 'Asset Name', 'Category', 'Brand / Serial', 'Purchase Date', 'Value', 'Assigned To', 'Condition', 'Status', 'Actions'].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((asset, i) => (
-                    <tr key={asset.code} style={{ borderBottom: '1px solid #F1F5F9', background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }} className="hover:bg-orange-50/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs font-semibold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{asset.code}</span>
-                      </td>
-                      <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px]">
-                        <span className="truncate block">{asset.name}</span>
-                      </td>
-                      <td className="px-4 py-3">{categoryBadge(asset.category)}</td>
-                      <td className="px-4 py-3">
-                        <div className="text-gray-800 font-medium">{asset.brand}</div>
-                        <div className="text-xs text-gray-400 font-mono">{asset.serial}</div>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{asset.purchaseDate}</td>
-                      <td className="px-4 py-3 font-semibold text-gray-800 whitespace-nowrap">{formatCurrency(asset.purchaseValue)}</td>
-                      <td className="px-4 py-3">
-                        {asset.assignedTo ? (
-                          <span className="text-gray-800 text-xs font-medium">{asset.assignedTo}</span>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic">Available</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">{conditionBadge(asset.condition)}</td>
-                      <td className="px-4 py-3">{statusBadge(asset.status)}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          {asset.status === 'Available' && (
-                            <button onClick={() => setAssignAsset(asset)} title="Assign" className="p-1.5 rounded-lg hover:bg-green-50 hover:text-green-700 text-gray-400 transition-colors">
-                              <UserCheck size={14} />
-                            </button>
-                          )}
-                          {asset.status === 'Assigned' && (
-                            <button title="Unassign" className="p-1.5 rounded-lg hover:bg-amber-50 hover:text-amber-700 text-gray-400 transition-colors">
-                              <LogOut size={14} />
-                            </button>
-                          )}
-                          {asset.status === 'Maintenance' && (
-                            <button title="Mark Available" className="p-1.5 rounded-lg hover:bg-blue-50 hover:text-blue-700 text-gray-400 transition-colors">
-                              <RotateCcw size={14} />
-                            </button>
-                          )}
-                          <button title="Edit" className="p-1.5 rounded-lg hover:bg-blue-50 hover:text-blue-700 text-gray-400 transition-colors">
-                            <Edit2 size={14} />
-                          </button>
-                          <button title="Retire" className="p-1.5 rounded-lg hover:bg-red-50 hover:text-red-600 text-gray-400 transition-colors">
-                            <X size={14} />
-                          </button>
-                        </div>
-                      </td>
+              {/* Table */}
+              <div className="table-wrapper" style={{ borderRadius: 0 }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      {['Asset Code', 'Asset Name', 'Category', 'Brand / Serial', 'Purchase Date', 'Value', 'Assigned To', 'Condition', 'Status', 'Actions'].map(h => (
+                        <th key={h}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filtered.length === 0 && (
-                <div className="py-16 text-center text-gray-400">
-                  <Package size={40} className="mx-auto mb-3 opacity-30" />
-                  <p className="font-medium">No assets found</p>
-                  <p className="text-xs mt-1">Try adjusting your search or filters</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <AssignedToEmployeesTab />
-        )}
-      </div>
+                  </thead>
+                  <tbody>
+                    {filtered.map(asset => {
+                      const sCfg = STATUS_CFG[asset.status]
+                      const cCfg = COND_CFG[asset.condition]
+                      const catCfg = CAT_CFG[asset.category]
+                      return (
+                        <tr key={asset.code}>
+                          <td>
+                            <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', fontWeight: 600, color: '#6b7280', background: '#f1f5f9', border: '1px solid #e5e7eb', borderRadius: 5, padding: '2px 6px' }}>
+                              {asset.code}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600, color: '#111827', maxWidth: 180 }}>
+                            <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</span>
+                          </td>
+                          <td>
+                            <span className="badge" style={{ background: catCfg.bg, color: catCfg.color, border: `1px solid ${catCfg.border}` }}>{asset.category}</span>
+                          </td>
+                          <td>
+                            <p style={{ fontWeight: 600, color: '#374151', fontSize: '0.8125rem', margin: 0 }}>{asset.brand}</p>
+                            <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: '#9ca3af', margin: 0 }}>{asset.serial}</p>
+                          </td>
+                          <td style={{ color: '#6b7280', whiteSpace: 'nowrap' }}>{asset.purchaseDate}</td>
+                          <td style={{ fontWeight: 700, color: '#111827', whiteSpace: 'nowrap' }}>{fmt(asset.purchaseValue)}</td>
+                          <td>
+                            {asset.assignedTo ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                <Avatar name={asset.assignedTo} size={24} />
+                                <span style={{ fontSize: '0.8rem', fontWeight: 500, color: '#374151' }}>{asset.assignedTo}</span>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: '#9ca3af', fontStyle: 'italic' }}>—</span>
+                            )}
+                          </td>
+                          <td>
+                            <span className="badge" style={{ background: cCfg.bg, color: cCfg.color, border: `1px solid ${cCfg.border}` }}>{asset.condition}</span>
+                          </td>
+                          <td>
+                            <span className="badge badge-dot" style={{ background: sCfg.bg, color: sCfg.color, border: `1px solid ${sCfg.border}` }}>{asset.status}</span>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 2 }}>
+                              {asset.status === 'Available' && (
+                                <button onClick={() => setAssignAsset(asset)} title="Assign" className="btn btn-ghost btn-sm btn-icon" style={{ color: '#15803d' }}>
+                                  <UserCheck size={13} />
+                                </button>
+                              )}
+                              {asset.status === 'Assigned' && (
+                                <button title="Unassign" className="btn btn-ghost btn-sm btn-icon" style={{ color: '#b45309' }}>
+                                  <LogOut size={13} />
+                                </button>
+                              )}
+                              {asset.status === 'Maintenance' && (
+                                <button title="Mark Available" className="btn btn-ghost btn-sm btn-icon" style={{ color: '#1d4ed8' }}>
+                                  <RotateCcw size={13} />
+                                </button>
+                              )}
+                              <button title="Edit" className="btn btn-ghost btn-sm btn-icon">
+                                <Edit2 size={13} />
+                              </button>
+                              <button title="Retire" className="btn btn-ghost btn-sm btn-icon" style={{ color: '#dc2626' }}>
+                                <X size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
 
-      {showAddModal && <AddAssetModal onClose={() => setShowAddModal(false)} />}
-      {assignAsset && <AssignModal asset={assignAsset} onClose={() => setAssignAsset(null)} />}
-    </div>
+                {filtered.length === 0 && (
+                  <div style={{ padding: '48px 24px', textAlign: 'center' }}>
+                    <Package size={32} style={{ color: '#d1d5db', margin: '0 auto 12px' }} />
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#6b7280', margin: '0 0 4px' }}>No assets found</p>
+                    <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: 0 }}>Try adjusting your search or filters</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Assigned tab */}
+          {activeTab === 'assigned' && <AssignedTab />}
+
+        </div>
+      </div>
+    </>
   )
 }

@@ -4,8 +4,7 @@ import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   UserMinus, LogOut, IndianRupee, Clock, X,
-  CheckCircle2, Circle, Eye, Download, FileText,
-  Settings2,
+  CheckCircle2, Circle, Eye, Download, FileText, Settings2,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -219,50 +218,147 @@ export default function ExitPage() {
 
       {/* Initiate Exit */}
       <Modal open={showInitiateModal} onClose={() => setShowInitiateModal(false)} title="Initiate Exit Process" sub="Record a new employee exit or separation">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div>
-            <label style={LABEL_STYLE}>Employee</label>
-            <select value={initEmployee} onChange={e => setInitEmployee(e.target.value)} className="form-select" style={{ width: '100%' }}>
-              <option value="">Select employee…</option>
-              <option>Vivek Sharma (EMP/2024/045)</option>
-              <option>Anita Nair (EMP/2023/012)</option>
-              <option>Kavya Menon (EMP/2024/091)</option>
-              <option>Ravi Shankar (EMP/2026/019)</option>
-            </select>
-          </div>
-          <div>
-            <label style={LABEL_STYLE}>Exit Type</label>
-            <select value={initExitType} onChange={e => setInitExitType(e.target.value as ExitType)} className="form-select" style={{ width: '100%' }}>
-              {(['Resignation','Termination','Retirement','Contract End','Mutual Separation'] as ExitType[]).map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={LABEL_STYLE}>Resignation Date</label>
-              <input type="date" value={initResignDate} onChange={e => setInitResignDate(e.target.value)} style={FIELD_STYLE} />
+        {(() => {
+          const SEL: React.CSSProperties = { ...FIELD_STYLE, appearance: 'none', paddingRight: 32, cursor: 'pointer' }
+          const chevron = (
+            <svg style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          )
+          const exitTypeCfg = EXIT_TYPE_CFG[initExitType]
+          const dateLabel = initExitType === 'Termination' ? 'Termination Date' : initExitType === 'Retirement' ? 'Retirement Date' : 'Resignation Date'
+          const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+          const YEARS  = [2024, 2025, 2026, 2027]
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Employee */}
+              <div>
+                <label style={LABEL_STYLE}>Employee</label>
+                <div style={{ position: 'relative' }}>
+                  <select value={initEmployee} onChange={e => setInitEmployee(e.target.value)} style={SEL}>
+                    <option value="">Select employee…</option>
+                    <option>Vivek Sharma (EMP/2024/045)</option>
+                    <option>Anita Nair (EMP/2023/012)</option>
+                    <option>Kavya Menon (EMP/2024/091)</option>
+                    <option>Ravi Shankar (EMP/2026/019)</option>
+                  </select>
+                  {chevron}
+                </div>
+              </div>
+
+              {/* Exit Type + live badge */}
+              <div>
+                <label style={LABEL_STYLE}>Exit Type</label>
+                <div style={{ position: 'relative' }}>
+                  <select value={initExitType} onChange={e => setInitExitType(e.target.value as ExitType)} style={{ ...SEL, paddingRight: 120 }}>
+                    {(['Resignation','Termination','Retirement','Contract End','Mutual Separation'] as ExitType[]).map(t => <option key={t}>{t}</option>)}
+                  </select>
+                  {chevron}
+                  <span style={{ position: 'absolute', right: 30, top: '50%', transform: 'translateY(-50%)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 9px', borderRadius: 99, background: exitTypeCfg.bg, color: exitTypeCfg.color, border: `1px solid ${exitTypeCfg.border}`, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                    {initExitType}
+                  </span>
+                </div>
+              </div>
+
+              {/* Dates */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={LABEL_STYLE}>{dateLabel}</label>
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <div style={{ position: 'relative', flex: '0 0 68px' }}>
+                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
+                        {MONTHS.map(m => <option key={m}>{m}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div style={{ position: 'relative', flex: '0 0 58px' }}>
+                      <select style={{ ...SEL, padding: '9px 22px 9px 8px' }}>
+                        {Array.from({length: 31}, (_, i) => i + 1).map(d => <option key={d}>{d}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
+                        {YEARS.map(y => <option key={y}>{y}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Last Working Date</label>
+                  <div style={{ display: 'flex', gap: 5 }}>
+                    <div style={{ position: 'relative', flex: '0 0 68px' }}>
+                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
+                        {MONTHS.map(m => <option key={m}>{m}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div style={{ position: 'relative', flex: '0 0 58px' }}>
+                      <select style={{ ...SEL, padding: '9px 22px 9px 8px' }}>
+                        {Array.from({length: 31}, (_, i) => i + 1).map(d => <option key={d}>{d}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
+                        {YEARS.map(y => <option key={y}>{y}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notice Period */}
+              <div>
+                <label style={LABEL_STYLE}>Notice Period</label>
+                <div style={{ display: 'flex', borderRadius: 8, border: '1.5px solid #e5e7eb', overflow: 'hidden', background: '#f9fafb' }}>
+                  <input
+                    type="number" value={initNoticePeriod}
+                    onChange={e => setInitNoticePeriod(e.target.value)}
+                    placeholder="30"
+                    style={{ flex: 1, border: 'none', outline: 'none', padding: '9px 12px', fontSize: '0.875rem', color: '#111827', background: 'transparent', fontFamily: 'inherit' }}
+                  />
+                  <div style={{ padding: '9px 14px', background: '#f1f5f9', borderLeft: '1.5px solid #e5e7eb', fontSize: '0.8rem', fontWeight: 600, color: '#6b7280', display: 'flex', alignItems: 'center', flexShrink: 0 }}>days</div>
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                  <label style={{ ...LABEL_STYLE, marginBottom: 0 }}>Reason for Exit</label>
+                  <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>Required</span>
+                </div>
+                <textarea
+                  rows={3} value={initReason} onChange={e => setInitReason(e.target.value)}
+                  placeholder={initExitType === 'Resignation' ? 'e.g. Better opportunity, relocation, personal reasons…' : 'Describe the circumstances leading to exit…'}
+                  style={{ ...FIELD_STYLE, resize: 'none', lineHeight: 1.6, padding: '9px 12px' }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 10, paddingTop: 14, borderTop: '1.5px solid #f1f5f9', marginTop: 2 }}>
+                <button onClick={() => setShowInitiateModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+                <button
+                  className="btn btn-sm"
+                  disabled={!initEmployee || !initReason}
+                  style={{
+                    flex: 2, background: initEmployee && initReason ? `linear-gradient(135deg, ${exitTypeCfg.color} 0%, ${exitTypeCfg.color}cc 100%)` : '#e5e7eb',
+                    color: initEmployee && initReason ? 'white' : '#9ca3af',
+                    border: 'none', borderRadius: 9, fontWeight: 700, fontSize: '0.8375rem',
+                    cursor: initEmployee && initReason ? 'pointer' : 'not-allowed',
+                    padding: '9px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    boxShadow: initEmployee && initReason ? `0 2px 8px ${exitTypeCfg.color}40` : 'none',
+                    transition: 'all 150ms',
+                  }}
+                >
+                  Initiate Exit
+                </button>
+              </div>
             </div>
-            <div>
-              <label style={LABEL_STYLE}>Last Working Date</label>
-              <input type="date" value={initLastDate} onChange={e => setInitLastDate(e.target.value)} style={FIELD_STYLE} />
-            </div>
-          </div>
-          <div>
-            <label style={LABEL_STYLE}>Notice Period (days)</label>
-            <input type="number" value={initNoticePeriod} onChange={e => setInitNoticePeriod(e.target.value)} placeholder="30" style={FIELD_STYLE} />
-          </div>
-          <div>
-            <label style={LABEL_STYLE}>Reason</label>
-            <textarea
-              rows={3} value={initReason} onChange={e => setInitReason(e.target.value)}
-              placeholder="Enter reason for exit…"
-              style={{ ...FIELD_STYLE, resize: 'none', lineHeight: 1.5 }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
-            <button onClick={() => setShowInitiateModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
-            <button className="btn btn-primary btn-sm" style={{ flex: 2 }}>Initiate Exit</button>
-          </div>
-        </div>
+          )
+        })()}
       </Modal>
 
       {/* Manage Exit / Clearance */}

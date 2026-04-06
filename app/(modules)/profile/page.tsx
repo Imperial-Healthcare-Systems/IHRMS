@@ -292,22 +292,22 @@ export default function ProfilePage() {
                   <div className="space-y-3">
                     {[
                       {
-                        icon: Mail, title: 'Google Account (SSO)',
-                        desc: `Signed in via Google · ${email}`,
-                        status: 'Connected', statusColor: '#15803D', statusBg: '#DCFCE7',
+                        icon: Mail, title: 'Email OTP Sign-In',
+                        desc: `Verification codes are delivered to ${email}`,
+                        status: 'Enabled', statusColor: '#15803D', statusBg: '#DCFCE7',
                         action: null,
                       },
                       {
-                        icon: Key, title: 'Password',
-                        desc: 'Managed by Google SSO — no separate password needed',
-                        status: 'SSO Managed', statusColor: '#1D4ED8', statusBg: '#DBEAFE',
+                        icon: Key, title: 'Passwordless Access',
+                        desc: 'Password login is disabled. Every sign-in requires a fresh OTP.',
+                        status: 'OTP Only', statusColor: '#1D4ED8', statusBg: '#DBEAFE',
                         action: null,
                       },
                       {
                         icon: Lock, title: 'Two-Factor Authentication',
-                        desc: 'Add an extra layer of security to your account',
-                        status: 'Not Enabled', statusColor: '#B45309', statusBg: '#FEF3C7',
-                        action: 'Enable 2FA',
+                        desc: 'Email OTP is required at every login for account verification',
+                        status: 'Protected', statusColor: '#B45309', statusBg: '#FEF3C7',
+                        action: null,
                       },
                     ].map((row, i) => (
                       <div key={i} className="flex items-center gap-4 p-4 rounded-xl border border-gray-100 bg-gray-50">

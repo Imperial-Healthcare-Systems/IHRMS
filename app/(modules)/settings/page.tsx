@@ -19,8 +19,6 @@ import {
   XCircle,
   ChevronDown,
   Upload,
-  Wifi,
-  WifiOff,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -189,23 +187,8 @@ function NoteBlock({ text }: { text: string }) {
 
 function SaveButton({ label = 'Save Changes', onClick }: { label?: string; onClick?: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        background: '#2563eb',
-        color: '#fff',
-        border: 'none',
-        borderRadius: 8,
-        padding: '9px 18px',
-        fontSize: '0.875rem',
-        fontWeight: 500,
-        cursor: 'pointer',
-      }}
-    >
-      <Save style={{ width: 15, height: 15 }} />
+    <button onClick={onClick} className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+      <Save size={14} />
       {label}
     </button>
   )
@@ -352,7 +335,7 @@ function CompanyProfilePanel() {
               background: 'var(--color-gray-50)',
               transition: 'border-color 0.2s',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#2563eb')}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#1E3A5F')}
             onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-gray-300)')}
           >
             <Upload style={{ width: 28, height: 28, color: 'var(--color-gray-400)', margin: '0 auto 8px' }} />
@@ -388,23 +371,8 @@ function LeaveConfigPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <SectionHeader title="Leave Configuration" description="Configure leave types, entitlements and policies" />
-        <button
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            background: '#2563eb',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            padding: '8px 14px',
-            fontSize: '0.8125rem',
-            fontWeight: 500,
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          <Plus style={{ width: 14, height: 14 }} />
+        <button className="btn btn-primary btn-sm" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} />
           Add Leave Type
         </button>
       </div>
@@ -422,7 +390,7 @@ function LeaveConfigPanel() {
             {LEAVE_TYPES.map((lt, i) => (
               <tr key={lt.code} style={{ borderBottom: i < LEAVE_TYPES.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
                 <td style={{ padding: '12px 16px' }}>
-                  <span style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: 6, fontWeight: 600, fontSize: '0.75rem' }}>{lt.code}</span>
+                  <span style={{ background: '#eff6ff', color: '#1E3A5F', padding: '2px 8px', borderRadius: 6, fontWeight: 600, fontSize: '0.75rem' }}>{lt.code}</span>
                 </td>
                 <td style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--color-gray-900)' }}>{lt.name}</td>
                 <td style={{ padding: '12px 16px', color: 'var(--color-gray-700)' }}>{lt.days}</td>
@@ -435,7 +403,7 @@ function LeaveConfigPanel() {
                   <span style={{ color: lt.encashable === 'Yes' ? '#16a34a' : '#6b7280', fontWeight: 500 }}>{lt.encashable}</span>
                 </td>
                 <td style={{ padding: '12px 16px' }}>
-                  <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, padding: '4px 8px', borderRadius: 6 }}>
+                  <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, padding: '4px 8px', borderRadius: 6 }}>
                     <Edit2 style={{ width: 13, height: 13 }} /> Edit
                   </button>
                 </td>
@@ -486,7 +454,7 @@ function PayrollSettingsPanel() {
             <div style={{ display: 'flex', gap: 16 }}>
               {['Monthly', 'Bi-weekly', 'Weekly'].map((c) => (
                 <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>
-                  <input type="radio" name="payCycle" value={c} checked={payCycle === c} onChange={() => setPayCycle(c)} style={{ accentColor: '#2563eb' }} />
+                  <input type="radio" name="payCycle" value={c} checked={payCycle === c} onChange={() => setPayCycle(c)} style={{ accentColor: '#1E3A5F' }} />
                   {c}
                 </label>
               ))}
@@ -509,7 +477,7 @@ function PayrollSettingsPanel() {
                 { label: 'Physical Copy', val: deliveryPhysical, set: setDeliveryPhysical },
               ].map(({ label, val, set }) => (
                 <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>
-                  <input type="checkbox" checked={val} onChange={(e) => set(e.target.checked)} style={{ accentColor: '#2563eb', width: 15, height: 15 }} />
+                  <input type="checkbox" checked={val} onChange={(e) => set(e.target.checked)} style={{ accentColor: '#1E3A5F', width: 15, height: 15 }} />
                   {label}
                 </label>
               ))}
@@ -553,7 +521,7 @@ function PayrollSettingsPanel() {
           <FieldLabel>Metro Cities</FieldLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, background: '#fff', minHeight: 42 }}>
             {metroCities.map((c) => (
-              <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#eff6ff', color: '#2563eb', padding: '2px 10px', borderRadius: 20, fontSize: '0.8125rem', fontWeight: 500 }}>
+              <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#eff6ff', color: '#1E3A5F', padding: '2px 10px', borderRadius: 20, fontSize: '0.8125rem', fontWeight: 500 }}>
                 {c}
                 <button onClick={() => removeCity(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#6b7280', lineHeight: 1 }}>×</button>
               </span>
@@ -686,8 +654,8 @@ function WorkingHoursPanel() {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-800)', margin: 0 }}>Configured Shifts</h4>
-          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: '0.8125rem', fontWeight: 500, cursor: 'pointer' }}>
-            <Plus style={{ width: 13, height: 13 }} /> Add Shift
+          <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={13} /> Add Shift
           </button>
         </div>
         <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
@@ -712,7 +680,7 @@ function WorkingHoursPanel() {
                   <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.days}</td>
                   <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.grace}</td>
                   <td style={{ padding: '11px 14px' }}>
-                    <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
+                    <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
                       <Edit2 style={{ width: 13, height: 13 }} /> Edit
                     </button>
                   </td>
@@ -759,7 +727,7 @@ function ApprovalWorkflowsPanel() {
               <tr key={w.type} style={{ borderBottom: i < WORKFLOWS.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
                 <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-gray-900)' }}>{w.type}</td>
                 <td style={{ padding: '12px 16px' }}>
-                  <span style={{ background: '#eff6ff', color: '#2563eb', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.l1}</span>
+                  <span style={{ background: '#eff6ff', color: '#1E3A5F', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.l1}</span>
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   {w.l2 !== 'N/A' ? (
@@ -773,7 +741,7 @@ function ApprovalWorkflowsPanel() {
                   <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.override}</span>
                 </td>
                 <td style={{ padding: '12px 16px' }}>
-                  <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
+                  <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
                     <Edit2 style={{ width: 13, height: 13 }} /> Edit
                   </button>
                 </td>
@@ -849,9 +817,9 @@ function NotificationsPanel() {
 ───────────────────────────────────────────────────────────── */
 const ADMIN_USERS = [
   { name: 'Deepa Srinivas', empId: 'EMP/2022/001', role: 'Super Admin', roleColor: '#dc2626', roleBg: '#fef2f2', dept: 'HR', lastLogin: '2 hours ago', status: 'Active', canDeactivate: true },
-  { name: 'Anita Verma', empId: 'EMP/2022/005', role: 'HR Admin', roleColor: '#2563eb', roleBg: '#eff6ff', dept: 'HR', lastLogin: '1 day ago', status: 'Active', canDeactivate: false },
+  { name: 'Anita Verma', empId: 'EMP/2022/005', role: 'HR Admin', roleColor: '#1E3A5F', roleBg: '#eff6ff', dept: 'HR', lastLogin: '1 day ago', status: 'Active', canDeactivate: false },
   { name: 'Kiran Reddy', empId: 'EMP/2023/012', role: 'Manager', roleColor: '#16a34a', roleBg: '#f0fdf4', dept: 'Engineering', lastLogin: '3 hours ago', status: 'Active', canDeactivate: false },
-  { name: 'Ritu Sharma', empId: 'EMP/2023/019', role: 'HR Admin', roleColor: '#2563eb', roleBg: '#eff6ff', dept: 'HR', lastLogin: '5 hours ago', status: 'Active', canDeactivate: false },
+  { name: 'Ritu Sharma', empId: 'EMP/2023/019', role: 'HR Admin', roleColor: '#1E3A5F', roleBg: '#eff6ff', dept: 'HR', lastLogin: '5 hours ago', status: 'Active', canDeactivate: false },
   { name: 'Pradeep Nair', empId: 'EMP/2023/045', role: 'Manager', roleColor: '#16a34a', roleBg: '#f0fdf4', dept: 'Sales', lastLogin: '2 days ago', status: 'Active', canDeactivate: false },
 ]
 
@@ -874,8 +842,8 @@ function UserManagementPanel() {
       <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-800)', margin: 0 }}>Admin Users</h4>
-          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: '0.8125rem', fontWeight: 500, cursor: 'pointer' }}>
-            <Plus style={{ width: 13, height: 13 }} /> Add User
+          <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={13} /> Add User
           </button>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
@@ -911,7 +879,7 @@ function UserManagementPanel() {
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <button style={{ color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                       <Edit2 style={{ width: 13, height: 13 }} /> Edit
                     </button>
                     {u.canDeactivate && (
@@ -1027,7 +995,7 @@ const INTEGRATIONS: IntegCard[] = [
     connected: false,
     description: 'Send HR notifications to Teams/Slack channels',
     buttons: [
-      { label: 'Connect Teams', variant: 'primary', color: '#2563eb' },
+      { label: 'Connect Teams', variant: 'primary', color: '#1E3A5F' },
       { label: 'Connect Slack', variant: 'primary', color: '#7c3aed' },
     ],
   },
@@ -1077,7 +1045,7 @@ function IntegrationsPanel() {
                     fontWeight: 500,
                     cursor: 'pointer',
                     border: btn.variant === 'outline' ? '1px solid var(--color-gray-300)' : 'none',
-                    background: btn.variant === 'outline' ? '#fff' : (btn.color ?? '#2563eb'),
+                    background: btn.variant === 'outline' ? '#fff' : (btn.color ?? '#1E3A5F'),
                     color: btn.variant === 'outline' ? 'var(--color-gray-700)' : '#fff',
                   }}
                 >
@@ -1112,29 +1080,20 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <Topbar title="Settings" subtitle="System Configuration">
-        <button
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            background: '#2563eb',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            padding: '9px 18px',
-            fontSize: '0.875rem',
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
-        >
-          <Save style={{ width: 15, height: 15 }} />
-          Save Changes
-        </button>
-      </Topbar>
+    <>
+      <Topbar
+        title="Settings"
+        subtitle="System configuration and preferences"
+        notificationCount={0}
+        actions={
+          <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <Save size={14} />
+            Save Changes
+          </button>
+        }
+      />
 
-      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+      <div style={{ padding: '28px 28px 56px', display: 'flex', gap: 24, alignItems: 'flex-start' }}>
         {/* Left Nav */}
         <nav
           style={{
@@ -1163,8 +1122,8 @@ export default function SettingsPage() {
                     borderRadius: 8,
                     border: 'none',
                     cursor: 'pointer',
-                    background: active ? '#eff6ff' : 'transparent',
-                    color: active ? '#2563eb' : 'var(--color-gray-600)',
+                    background: active ? '#f0f4ff' : 'transparent',
+                    color: active ? '#1E3A5F' : 'var(--color-gray-600)',
                     fontWeight: active ? 600 : 500,
                     fontSize: '0.875rem',
                     textAlign: 'left',
@@ -1187,6 +1146,6 @@ export default function SettingsPage() {
           {renderPanel()}
         </div>
       </div>
-    </div>
+    </>
   )
 }
