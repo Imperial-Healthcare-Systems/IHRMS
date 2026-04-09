@@ -220,7 +220,7 @@ export default function ExitPage() {
           noticePeriod: e.notice_period_days ?? 30,
           clearanceCleared: 0,
           clearanceTotal: 5,
-          fnfStatus: (e.fnf_status?.charAt(0).toUpperCase() + e.fnf_status?.slice(1) ?? 'Pending') as FnFStatus,
+          fnfStatus: (e.fnf_status ? e.fnf_status.charAt(0).toUpperCase() + e.fnf_status.slice(1) : 'Pending') as FnFStatus,
         }))
         setExitRecords(adapted)
       }
@@ -270,7 +270,7 @@ export default function ExitPage() {
             noticePeriod: e.notice_period_days ?? 30,
             clearanceCleared: 0,
             clearanceTotal: 5,
-            fnfStatus: (e.fnf_status?.charAt(0).toUpperCase() + e.fnf_status?.slice(1) ?? 'Pending') as FnFStatus,
+            fnfStatus: (e.fnf_status ? e.fnf_status.charAt(0).toUpperCase() + e.fnf_status.slice(1) : 'Pending') as FnFStatus,
           })))
         }
       }).catch(() => {})
