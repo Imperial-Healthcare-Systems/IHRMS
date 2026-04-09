@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { reportsApi } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Users, Clock, IndianRupee, CalendarDays, BarChart3, Shield,
   Download, Bell, Play, X, Check, Edit, Trash2,
@@ -155,7 +157,27 @@ export default function ReportsPage() {
   const toggleField = (id: string) =>
     setSelectedFields(prev => prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id])
 
+  const [generating, setGenerating] = useState(false)
+
   const openGenerate = (name: string) => { setSelectedReport(name); setShowGenerateModal(true) }
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      await reportsApi.generate({
+        type: selectedReport || reportType.toLowerCase(),
+        from: dateFrom || undefined,
+        to: dateTo || undefined,
+        format: outputFormat.toLowerCase(),
+      })
+      toast.success('Report generated successfully')
+      setShowGenerateModal(false)
+    } catch {
+      toast.error('Failed to generate report')
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   /* ── Format Toggle reused in modals ── */
   function FormatToggle() {
@@ -201,9 +223,9 @@ export default function ReportsPage() {
               <FormatToggle />
             </div>
             <div style={{ display: 'flex', gap: 10, paddingTop: 8, borderTop: '1.5px solid #f1f5f9', marginTop: 4 }}>
-              <button onClick={() => setShowGenerateModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
-              <button className="btn btn-primary btn-sm" style={{ flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <Download size={13} /> Generate &amp; Download
+              <button onClick={() => setShowGenerateModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }} disabled={generating}>Cancel</button>
+              <button onClick={handleGenerate} disabled={generating} className="btn btn-primary btn-sm" style={{ flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <Download size={13} /> {generating ? 'Generating…' : 'Generate & Download'}
               </button>
             </div>
           </div>
@@ -478,8 +500,8 @@ export default function ReportsPage() {
             </div>
 
             <div style={{ display: 'flex', gap: 10, paddingTop: 18, borderTop: '1.5px solid #f1f5f9' }}>
-              <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Play size={13} /> Generate Custom Report
+              <button onClick={handleGenerate} disabled={generating} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Play size={13} /> {generating ? 'Generating…' : 'Generate Custom Report'}
               </button>
               <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Bell size={13} /> Save as Template

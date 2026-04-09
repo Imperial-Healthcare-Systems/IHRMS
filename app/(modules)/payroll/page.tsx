@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { payrollApi, type PayrollRun as ApiPayrollRun } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Download, FileText, Eye, Mail, CheckCircle2,
   Clock, AlertTriangle, X, Printer,
@@ -164,8 +166,24 @@ function PayrollStepper() {
 /* ─────────────────────────────────────────────────────────────
    PAYROLL RUN MODAL
 ───────────────────────────────────────────────────────────── */
-function PayrollRunModal({ onClose }: { onClose: () => void }) {
+function PayrollRunModal({ onClose, onSuccess }: { onClose: () => void; onSuccess?: () => void }) {
   const [confirmed, setConfirmed] = useState(false)
+  const [running, setRunning] = useState(false)
+  const now = new Date()
+  const month = now.getMonth() + 1
+  const year = now.getFullYear()
+
+  async function handleRunPayroll() {
+    setRunning(true)
+    try {
+      await payrollApi.create({ month, year })
+      setConfirmed(true)
+      toast.success(`Payroll run initiated for ${now.toLocaleString('en-IN', { month: 'long' })} ${year}`)
+      onSuccess?.()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to initiate payroll run')
+    } finally { setRunning(false) }
+  }
   const steps = [
     { label: 'Attendance data locked (March 1–31)', done: true,  note: 'All 87 employees attendance captured' },
     { label: 'Leave adjustments applied',           done: true,  note: '2 LOP deductions applied' },
@@ -221,8 +239,8 @@ function PayrollRunModal({ onClose }: { onClose: () => void }) {
           ) : (
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={onClose} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
-              <button onClick={() => setConfirmed(true)} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
-                Confirm &amp; Run Payroll
+              <button onClick={handleRunPayroll} disabled={running} className="btn btn-primary btn-sm" style={{ flex: 1 }}>
+                {running ? 'Running…' : 'Confirm & Run Payroll'}
               </button>
             </div>
           )}
@@ -690,17 +708,35 @@ function TabStatutoryReports() {
 export default function PayrollPage() {
   const [activeTab, setActiveTab] = useState<Tab>('runs')
   const [showRunModal, setShowRunModal] = useState(false)
+  const [apiRuns, setApiRuns] = useState<ApiPayrollRun[]>([])
+  const [loadingRuns, setLoadingRuns] = useState(true)
+
+  const fetchRuns = () => {
+    setLoadingRuns(true)
+    payrollApi.list({ limit: 24 })
+      .then(r => setApiRuns(r.data))
+      .catch(console.error)
+      .finally(() => setLoadingRuns(false))
+  }
+
+  useEffect(() => { fetchRuns() }, [])
+
+  /* Latest run for KPI cards */
+  const latestRun = apiRuns[0]
+  const fmt = (n?: number) => n != null ? `₹${(n / 100000).toFixed(1)}L` : '—'
 
   const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: 'runs',       label: 'Payroll Runs',      count: PAYROLL_RUNS.length },
+    { key: 'runs',       label: 'Payroll Runs',      count: apiRuns.length || PAYROLL_RUNS.length },
     { key: 'payslips',   label: 'Payslips',           count: PAYSLIPS.length },
     { key: 'structures', label: 'Salary Structures',  count: SALARY_STRUCTURES.length },
     { key: 'statutory',  label: 'Statutory Reports',  count: 6 },
   ]
 
+  void loadingRuns
+
   return (
     <>
-      {showRunModal && <PayrollRunModal onClose={() => setShowRunModal(false)} />}
+      {showRunModal && <PayrollRunModal onClose={() => setShowRunModal(false)} onSuccess={fetchRuns} />}
 
       <Topbar
         title="Payroll Management"
@@ -723,11 +759,11 @@ export default function PayrollPage() {
         {/* ── KPI Cards — same exact structure as Employee page ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 24 }}>
           {[
-            { label: 'Total Gross Pay',  value: '₹48.3L', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
-            { label: 'Total Deductions', value: '₹6.2L',  color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
-            { label: 'Net Payable',      value: '₹42.1L', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
-            { label: 'Employer EPF',     value: '₹2.2L',  color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
-            { label: 'Total TDS',        value: '₹1.5L',  color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe' },
+            { label: 'Total Gross Pay',  value: fmt(latestRun?.total_gross),        color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+            { label: 'Total Deductions', value: fmt(latestRun?.total_deductions),   color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+            { label: 'Net Payable',      value: fmt(latestRun?.total_net),          color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+            { label: 'Employer EPF',     value: fmt(latestRun?.total_employer_pf),  color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
+            { label: 'Employees',        value: String(latestRun?.total_employees ?? '—'), color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe' },
           ].map((s) => (
             <div key={s.label} className="card card-interactive" style={{ padding: '16px 18px', borderColor: s.border, textAlign: 'center' }}>
               <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1.75rem', fontWeight: 700, color: s.color, lineHeight: 1.1 }}>

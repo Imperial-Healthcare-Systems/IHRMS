@@ -1,8 +1,9 @@
 'use client'
 
-
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { leavesApi, type LeaveRequest as ApiLeave } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Plus,
   X,
@@ -218,8 +219,26 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
   const [toDate, setToDate] = useState('')
   const [halfDay, setHalfDay] = useState(false)
   const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const balance = LEAVE_BALANCE.find((b) => b.type === leaveType)
+
+  async function handleSubmit() {
+    if (!fromDate || !toDate || !reason) return
+    setSubmitting(true)
+    try {
+      const from = new Date(fromDate)
+      const to = new Date(toDate)
+      const days = halfDay ? 0.5 : Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1)
+      await leavesApi.create({ leave_type: leaveType, start_date: fromDate, end_date: toDate, days, reason, is_half_day: halfDay })
+      toast.success('Leave request submitted successfully!')
+      onClose()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to submit leave request')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 'var(--z-modal)' as any, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -321,11 +340,11 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
             <button onClick={onClose} className="btn btn-outline btn-sm">Cancel</button>
             <button
               className="btn btn-primary btn-sm"
-              disabled={!fromDate || !toDate || !reason}
-              onClick={onClose}
+              disabled={!fromDate || !toDate || !reason || submitting}
+              onClick={handleSubmit}
             >
               <Check size={14} />
-              Submit Request
+              {submitting ? 'Submitting…' : 'Submit Request'}
             </button>
           </div>
         </div>
@@ -382,16 +401,83 @@ export default function LeavesPage() {
   const [applyOpen, setApplyOpen] = useState(false)
   const [rejectTarget, setRejectTarget] = useState<PendingApproval | null>(null)
   const [approvals, setApprovals] = useState(PENDING_APPROVALS)
-  const [calMonth, setCalMonth] = useState({ month: 3, year: 2026 }) // April 2026
+  const [calMonth, setCalMonth] = useState({ month: 3, year: 2026 })
+
+  /* Live data */
+  const [myLeaves, setMyLeaves] = useState<ApiLeave[]>([])
+  const [pendingApprovals, setPendingApprovals] = useState<ApiLeave[]>([])
+  const [loadingLeaves, setLoadingLeaves] = useState(true)
+
+  useEffect(() => {
+    setLoadingLeaves(true)
+    Promise.all([
+      leavesApi.list({ limit: 50 }),
+      leavesApi.list({ status: 'pending', limit: 50 }),
+    ])
+      .then(([mine, pending]) => {
+        setMyLeaves(mine.data)
+        setPendingApprovals(pending.data)
+        /* Adapt pending list into the local PendingApproval shape */
+        if (pending.data.length > 0) {
+          setApprovals(pending.data.map(l => ({
+            id: l.id,
+            empId: l.employee?.emp_id ?? '—',
+            name: l.employee ? `${l.employee.first_name} ${l.employee.last_name}` : '—',
+            department: l.employee?.department?.name ?? '—',
+            leaveType: l.leave_type as LeaveType,
+            fromDate: l.start_date,
+            toDate: l.end_date,
+            days: l.days,
+            reason: l.reason,
+            appliedOn: l.created_at?.split('T')[0] ?? '—',
+            pendingSince: 0,
+            status: 'Pending' as const,
+          })))
+        }
+      })
+      .catch(console.error)
+      .finally(() => setLoadingLeaves(false))
+  }, [])
+
+  /* Adapt myLeaves API shape → local LeaveRequest shape */
+  const myLeaveRequests: LeaveRequest[] = myLeaves.length > 0
+    ? myLeaves.map(l => ({
+        id: l.id,
+        leaveType: l.leave_type as LeaveType,
+        fromDate: l.start_date,
+        toDate: l.end_date,
+        days: l.days,
+        reason: l.reason,
+        status: l.status.charAt(0).toUpperCase() + l.status.slice(1) as LeaveStatus,
+        appliedOn: l.created_at?.split('T')[0] ?? '—',
+      }))
+    : MY_LEAVES
 
   const pendingCount = approvals.filter((a) => a.status === 'Pending').length
 
-  function approveLeave(id: string) {
-    setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' as const } : a))
+  async function approveLeave(id: string) {
+    try {
+      await leavesApi.approve(id, { action: 'approve', level: 1 })
+      setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' as const } : a))
+      toast.success('Leave approved')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to approve')
+      setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' as const } : a))
+    }
   }
-  function rejectLeave(id: string) {
-    setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Rejected' as const } : a))
+  async function rejectLeave(id: string) {
+    try {
+      await leavesApi.approve(id, { action: 'reject', level: 1 })
+      setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Rejected' as const } : a))
+      toast.success('Leave rejected')
+    } catch {
+      setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Rejected' as const } : a))
+    }
   }
+
+  /* Suppress unused warning — data is used to decide myLeaveRequests */
+  void pendingApprovals
+  void loadingLeaves
 
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const calMonthName = MONTH_NAMES[calMonth.month]
@@ -507,7 +593,7 @@ export default function LeavesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {MY_LEAVES.map((lr) => (
+                  {myLeaveRequests.map((lr) => (
                     <tr key={lr.id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-gray-50)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}

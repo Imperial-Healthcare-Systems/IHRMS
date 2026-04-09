@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { reimbursementsApi, type ExpenseClaim } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Clock, CheckCircle, XCircle, IndianRupee, X, Eye, Edit,
   Trash2, Check, AlertTriangle, Upload, Info, Filter, Plus,
@@ -166,6 +168,7 @@ export default function ReimbursementsPage() {
   const [submitModal, setSubmitModal] = useState(false)
   const [newClaim, setNewClaim] = useState({ month: '', category: '', description: '', amount: '' })
   const [uploadedFile, setUploadedFile] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const [viewModal, setViewModal] = useState<{ open: boolean; claim: Claim | null }>({ open: false, claim: null })
   const [rejectModal, setRejectModal] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
@@ -174,28 +177,66 @@ export default function ReimbursementsPage() {
   const [teamMonthFilter,  setTeamMonthFilter]  = useState('All')
   const [teamStatusFilter, setTeamStatusFilter] = useState('All')
 
-  function handleSubmitClaim() {
-    setMyClaims((prev) => [{
-      id: `CLM/2026/0${prev.length + 11}`,
-      month: newClaim.month || 'April 2026',
-      category: newClaim.category || 'Other',
-      description: newClaim.description,
-      amount: Number(newClaim.amount) || 0,
-      receipt: !!uploadedFile,
-      status: 'Pending',
-      submittedOn: 'Apr 1, 2026',
-    }, ...prev])
-    setNewClaim({ month: '', category: '', description: '', amount: '' })
-    setUploadedFile(null)
-    setSubmitModal(false)
+  // Fetch live data
+  const [apiClaims, setApiClaims] = useState<ExpenseClaim[]>([])
+  useEffect(() => {
+    reimbursementsApi.list({ limit: 50 })
+      .then(r => {
+        setApiClaims(r.data)
+        if (r.data.length > 0) {
+          setMyClaims(r.data.map(c => ({
+            id: c.id,
+            month: c.expense_date ? new Date(c.expense_date).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : '—',
+            category: c.category,
+            description: c.description ?? '—',
+            amount: c.amount,
+            receipt: !!c.receipt_url,
+            status: c.status.charAt(0).toUpperCase() + c.status.slice(1) as Claim['status'],
+            submittedOn: c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+          })))
+        }
+      })
+      .catch(console.error)
+  }, [])
+
+  void apiClaims
+
+  async function handleSubmitClaim() {
+    if (!newClaim.description || !newClaim.amount) return
+    setSubmitting(true)
+    try {
+      const now = new Date()
+      await reimbursementsApi.create({
+        title: newClaim.description.slice(0, 80),
+        category: newClaim.category || 'Other',
+        amount: Number(newClaim.amount),
+        expense_date: now.toISOString().split('T')[0],
+        description: newClaim.description,
+        status: 'submitted',
+      } as Partial<ExpenseClaim>)
+      toast.success('Claim submitted successfully!')
+      setNewClaim({ month: '', category: '', description: '', amount: '' })
+      setUploadedFile(null)
+      setSubmitModal(false)
+      reimbursementsApi.list({ limit: 50 }).then(r => setApiClaims(r.data)).catch(console.error)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to submit claim')
+    } finally { setSubmitting(false) }
   }
 
-  function handleApprove(id: string) {
-    setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' } : a))
+  async function handleApprove(id: string) {
+    try {
+      await reimbursementsApi.update(id, { status: 'approved' } as Partial<ExpenseClaim>)
+      setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' } : a))
+      toast.success('Claim approved')
+    } catch { setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' } : a)) }
   }
 
-  function handleReject() {
+  async function handleReject() {
     if (!rejectModal.id) return
+    try {
+      await reimbursementsApi.update(rejectModal.id, { status: 'rejected' } as Partial<ExpenseClaim>)
+    } catch { /* optimistic */ }
     setApprovals((prev) => prev.map((a) => a.id === rejectModal.id ? { ...a, status: 'Rejected' } : a))
     setRejectModal({ open: false, id: null })
     setRejectReason('')
@@ -328,11 +369,11 @@ export default function ReimbursementsPage() {
             <button onClick={() => setSubmitModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
             <button
               onClick={handleSubmitClaim}
-              disabled={!newClaim.description.trim() || !newClaim.amount}
+              disabled={!newClaim.description.trim() || !newClaim.amount || submitting}
               className="btn btn-primary btn-sm"
               style={{ flex: 2, opacity: (!newClaim.description.trim() || !newClaim.amount) ? 0.55 : 1, cursor: (!newClaim.description.trim() || !newClaim.amount) ? 'not-allowed' : 'pointer' }}
             >
-              Submit Claim
+              {submitting ? 'Submitting…' : 'Submit Claim'}
             </button>
           </div>
         </div>

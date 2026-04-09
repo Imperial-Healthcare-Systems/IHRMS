@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         *,
         department:departments(*),
         designation:designations(*),
-        reporting_manager:employees!reporting_manager_id(id, first_name, last_name, emp_id, email)
+        reporting_manager:employees!manager_id(id, first_name, last_name, emp_id)
       `)
       .eq('id', id)
       .single()

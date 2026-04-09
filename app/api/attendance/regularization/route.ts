@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
         *,
         employee:employees(id, first_name, last_name, emp_id,
           department:departments(name),
-          reporting_manager:employees!reporting_manager_id(id, first_name, last_name))
+          reporting_manager:employees!manager_id(id, first_name, last_name))
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
 

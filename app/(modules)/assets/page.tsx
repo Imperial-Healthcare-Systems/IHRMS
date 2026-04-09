@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { assetsApi, type Asset as ApiAsset } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Package, UserCheck, Box, Wrench, Search, Plus, X,
   Edit2, Eye, LogOut, RotateCcw,
@@ -129,9 +131,37 @@ function Modal({ onClose, title, sub, children }: { onClose: () => void; title: 
 /* ─────────────────────────────────────────────────────────────
    ADD ASSET MODAL
 ───────────────────────────────────────────────────────────── */
-function AddAssetModal({ onClose }: { onClose: () => void }) {
+function AddAssetModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ code: 'AST/2024/016', name: '', category: 'Laptop', brand: '', model: '', serial: '', purchaseDate: '', purchaseValue: '', condition: 'Good', notes: '' })
+  const [saving, setSaving] = useState(false)
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleAdd = async () => {
+    if (!form.name.trim()) { toast.error('Asset name is required'); return }
+    setSaving(true)
+    try {
+      await assetsApi.create({
+        name: form.name,
+        asset_code: form.code,
+        category: form.category,
+        brand: form.brand || null,
+        model: form.model || null,
+        serial_number: form.serial || null,
+        purchase_date: form.purchaseDate || null,
+        purchase_cost: form.purchaseValue ? parseFloat(form.purchaseValue) : null,
+        condition: form.condition.toLowerCase(),
+        status: 'available',
+        notes: form.notes || null,
+      })
+      toast.success('Asset added successfully')
+      onSuccess()
+      onClose()
+    } catch {
+      toast.error('Failed to add asset')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Modal onClose={onClose} title="Add New Asset" sub="Register a new company-owned asset">
@@ -185,8 +215,8 @@ function AddAssetModal({ onClose }: { onClose: () => void }) {
             style={{ ...FIELD, resize: 'none', lineHeight: 1.55 }} />
         </div>
         <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
-          <button onClick={onClose} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
-          <button onClick={onClose} className="btn btn-primary btn-sm" style={{ flex: 2 }}>Add Asset</button>
+          <button onClick={onClose} className="btn btn-outline btn-sm" style={{ flex: 1 }} disabled={saving}>Cancel</button>
+          <button onClick={handleAdd} className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={saving}>{saving ? 'Adding…' : 'Add Asset'}</button>
         </div>
       </div>
     </Modal>
@@ -254,8 +284,8 @@ const DEPT_MAP: Record<string, string> = {
   'Deepika Sharma': 'Engineering', 'Rajesh Kumar': 'Support',
 }
 
-function AssignedTab() {
-  const assigned = ASSETS.filter(a => a.assignedTo !== null)
+function AssignedTab({ assets }: { assets: Asset[] }) {
+  const assigned = assets.filter(a => a.assignedTo !== null)
   const grouped = useMemo(() => {
     const map: Record<string, Asset[]> = {}
     assigned.forEach(a => { const k = a.assignedTo!; if (!map[k]) map[k] = []; map[k].push(a) })
@@ -325,27 +355,52 @@ export default function AssetsPage() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [showAddModal, setShowAddModal] = useState(false)
   const [assignAsset, setAssignAsset] = useState<Asset | null>(null)
+  const [allAssets, setAllAssets]     = useState<Asset[]>(ASSETS)
 
-  const totalAssets     = ASSETS.length
-  const assignedCount   = ASSETS.filter(a => a.status === 'Assigned').length
-  const availableCount  = ASSETS.filter(a => a.status === 'Available').length
-  const maintenanceCount = ASSETS.filter(a => a.status === 'Maintenance').length
+  const fetchAssets = () => {
+    assetsApi.list({ limit: 200 }).then(res => {
+      if (res.data.length > 0) {
+        const adapted: Asset[] = (res.data as ApiAsset[]).map(a => ({
+          code: a.asset_code ?? a.id,
+          name: a.name,
+          category: (a.category as Asset['category']) ?? 'Other',
+          brand: a.brand ?? '',
+          serial: a.serial_number ?? '',
+          purchaseDate: a.purchase_date ?? '',
+          purchaseValue: a.purchase_cost ?? 0,
+          assignedTo: a.assigned_employee
+            ? `${a.assigned_employee.first_name} ${a.assigned_employee.last_name}`
+            : null,
+          condition: (a.condition ? a.condition.charAt(0).toUpperCase() + a.condition.slice(1) : 'Good') as Asset['condition'],
+          status: (a.status ? a.status.charAt(0).toUpperCase() + a.status.slice(1) : 'Available') as Asset['status'],
+        }))
+        setAllAssets(adapted)
+      }
+    }).catch(() => {/* keep mock */})
+  }
 
-  const filtered = useMemo(() => ASSETS.filter(a => {
+  useEffect(() => { fetchAssets() }, [])
+
+  const totalAssets     = allAssets.length
+  const assignedCount   = allAssets.filter(a => a.status === 'Assigned').length
+  const availableCount  = allAssets.filter(a => a.status === 'Available').length
+  const maintenanceCount = allAssets.filter(a => a.status === 'Maintenance').length
+
+  const filtered = useMemo(() => allAssets.filter(a => {
     const q = search.toLowerCase()
     return (!q || a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q)) &&
       (catFilter === 'All' || a.category === catFilter) &&
       (statusFilter === 'All' || a.status === statusFilter)
-  }), [search, catFilter, statusFilter])
+  }), [allAssets, search, catFilter, statusFilter])
 
   const TABS = [
-    { key: 'inventory' as const, label: 'Asset Inventory',      count: ASSETS.length },
+    { key: 'inventory' as const, label: 'Asset Inventory',      count: allAssets.length },
     { key: 'assigned'  as const, label: 'Assigned to Employees', count: assignedCount },
   ]
 
   return (
     <>
-      {showAddModal && <AddAssetModal onClose={() => setShowAddModal(false)} />}
+      {showAddModal && <AddAssetModal onClose={() => setShowAddModal(false)} onSuccess={fetchAssets} />}
       {assignAsset  && <AssignModal asset={assignAsset} onClose={() => setAssignAsset(null)} />}
 
       <Topbar
@@ -520,7 +575,7 @@ export default function AssetsPage() {
           )}
 
           {/* Assigned tab */}
-          {activeTab === 'assigned' && <AssignedTab />}
+          {activeTab === 'assigned' && <AssignedTab assets={allAssets} />}
 
         </div>
       </div>

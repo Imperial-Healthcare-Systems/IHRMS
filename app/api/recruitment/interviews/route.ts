@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -13,7 +22,7 @@ export async function GET(req: NextRequest) {
     const status       = searchParams.get('status')    // maps to result field in schema
     const date_from    = searchParams.get('date_from')
     const date_to      = searchParams.get('date_to')
-    const limit        = parseInt(searchParams.get('limit') ?? '50')
+    const limit        = Math.min(parseInt(searchParams.get('limit') ?? '50'), 500)
     const offset       = parseInt(searchParams.get('offset') ?? '0')
 
     let query = supabaseAdmin
@@ -21,15 +30,11 @@ export async function GET(req: NextRequest) {
       .select(`
         id, round_number, round_name, scheduled_at, duration_minutes,
         mode, location, meeting_link, interviewers, result, remarks,
-        candidate:candidates!interview_schedules_candidate_id_fkey(
-          id, first_name, last_name, email, phone, status,
-          requisition:job_requisitions!candidates_requisition_id_fkey(id, title)
-        ),
-        requisition:job_requisitions!interview_schedules_requisition_id_fkey(id, title),
+        candidate:candidates!candidate_id(id, first_name, last_name, email, phone, status),
+        requisition:job_requisitions!requisition_id(id, title),
         created_at, updated_at
       `, { count: 'exact' })
       .order('scheduled_at', { ascending: true })
-      .limit(limit)
       .range(offset, offset + limit - 1)
 
     if (candidate_id) query = query.eq('candidate_id', candidate_id)
@@ -38,11 +43,15 @@ export async function GET(req: NextRequest) {
     if (date_to)      query = query.lte('scheduled_at', date_to)
 
     const { data, error, count } = await query
-    if (error) throw error
+    if (error) {
+      console.error('[interviews GET]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
-    return NextResponse.json({ data, count, limit, offset })
+    return NextResponse.json({ data: data ?? [], count, limit, offset })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[interviews GET] catch:', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -89,17 +98,21 @@ export async function POST(req: NextRequest) {
         location: location ?? null,
         meeting_link: meeting_link ?? null,
         interviewers,
-        result: null, // status = 'scheduled' conceptually; result is set after interview
+        result: null,
         remarks: null,
       })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[interviews POST]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
     return NextResponse.json({ data, status: 'scheduled' }, { status: 201 })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[interviews POST] catch:', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -134,11 +147,13 @@ export async function PATCH(req: NextRequest) {
 
     if (error) {
       if (error.code === 'PGRST116') return NextResponse.json({ error: 'Interview not found' }, { status: 404 })
-      throw error
+      console.error('[interviews PATCH]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
 
     return NextResponse.json({ data })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[interviews PATCH] catch:', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

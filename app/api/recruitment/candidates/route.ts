@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -12,7 +21,7 @@ export async function GET(req: NextRequest) {
     const requisition_id = searchParams.get('requisition_id')
     const stage          = searchParams.get('stage')
     const search         = searchParams.get('search')
-    const limit          = parseInt(searchParams.get('limit') ?? '50')
+    const limit          = Math.min(parseInt(searchParams.get('limit') ?? '50'), 500)
     const offset         = parseInt(searchParams.get('offset') ?? '0')
 
     let query = supabaseAdmin
@@ -22,12 +31,11 @@ export async function GET(req: NextRequest) {
         current_company, current_designation, current_ctc, expected_ctc,
         notice_period_days, total_experience, skills, resume_url, linkedin_url,
         source, status, rejection_reason, notes,
-        requisition:job_requisitions!candidates_requisition_id_fkey(id, title),
-        referred_by:employees!candidates_referred_by_fkey(id, first_name, last_name, emp_id),
+        requisition:job_requisitions(id, title),
+        referred_by:employees!referred_by(id, first_name, last_name, emp_id),
         created_at, updated_at
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
-      .limit(limit)
       .range(offset, offset + limit - 1)
 
     if (requisition_id) query = query.eq('requisition_id', requisition_id)
@@ -39,11 +47,15 @@ export async function GET(req: NextRequest) {
     }
 
     const { data, error, count } = await query
-    if (error) throw error
+    if (error) {
+      console.error('[candidates GET]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
-    return NextResponse.json({ data, count, limit, offset })
+    return NextResponse.json({ data: data ?? [], count, limit, offset })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[candidates GET] catch:', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -110,10 +122,14 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[candidates POST]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[candidates POST] catch:', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

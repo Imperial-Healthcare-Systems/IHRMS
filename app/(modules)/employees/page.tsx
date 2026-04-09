@@ -1,8 +1,9 @@
 'use client'
 
-
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { employeesApi, type Employee as ApiEmployee, type Department } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Users,
   UserPlus,
@@ -40,58 +41,7 @@ interface Employee {
   hireDate: string
 }
 
-/* ─────────────────────────────────────────────────────────────
-   MOCK DATA — 15 employees
-───────────────────────────────────────────────────────────── */
-const EMPLOYEES: Employee[] = [
-  {
-    id: '1',  empId: 'EMP/2024/001', name: 'Rajesh Kumar',      email: 'rajesh.kumar@company.in',      phone: '+91 98765 43210', department: 'Engineering',        designation: 'Senior Software Engineer',  location: 'Bengaluru',   employmentType: 'Full-time', status: 'Active',        hireDate: '12 Jan 2024',
-  },
-  {
-    id: '2',  empId: 'EMP/2024/002', name: 'Priya Sharma',      email: 'priya.sharma@company.in',      phone: '+91 98765 43211', department: 'Human Resources',    designation: 'HR Manager',                location: 'Mumbai',      employmentType: 'Full-time', status: 'Active',        hireDate: '15 Jan 2024',
-  },
-  {
-    id: '3',  empId: 'EMP/2024/003', name: 'Amit Patel',        email: 'amit.patel@company.in',        phone: '+91 98765 43212', department: 'Finance',            designation: 'Finance Manager',           location: 'Ahmedabad',   employmentType: 'Full-time', status: 'Active',        hireDate: '22 Jan 2024',
-  },
-  {
-    id: '4',  empId: 'EMP/2024/004', name: 'Sneha Gupta',       email: 'sneha.gupta@company.in',       phone: '+91 98765 43213', department: 'Sales',              designation: 'Sales Executive',           location: 'Delhi',       employmentType: 'Full-time', status: 'On Leave',      hireDate: '5 Feb 2024',
-  },
-  {
-    id: '5',  empId: 'EMP/2024/005', name: 'Rahul Mehta',       email: 'rahul.mehta@company.in',       phone: '+91 98765 43214', department: 'Operations',         designation: 'Operations Lead',           location: 'Pune',        employmentType: 'Full-time', status: 'Active',        hireDate: '10 Feb 2024',
-  },
-  {
-    id: '6',  empId: 'EMP/2024/006', name: 'Deepika Nair',      email: 'deepika.nair@company.in',      phone: '+91 98765 43215', department: 'Marketing',          designation: 'Marketing Manager',         location: 'Chennai',     employmentType: 'Full-time', status: 'Active',        hireDate: '18 Feb 2024',
-  },
-  {
-    id: '7',  empId: 'EMP/2024/007', name: 'Vikram Singh',      email: 'vikram.singh@company.in',      phone: '+91 98765 43216', department: 'Engineering',        designation: 'DevOps Engineer',           location: 'Hyderabad',   employmentType: 'Full-time', status: 'Active',        hireDate: '1 Mar 2024',
-  },
-  {
-    id: '8',  empId: 'EMP/2024/008', name: 'Kavitha Reddy',     email: 'kavitha.reddy@company.in',     phone: '+91 98765 43217', department: 'Customer Support',   designation: 'Support Lead',              location: 'Bengaluru',   employmentType: 'Full-time', status: 'Active',        hireDate: '5 Mar 2024',
-  },
-  {
-    id: '9',  empId: 'EMP/2024/009', name: 'Suresh Babu',       email: 'suresh.babu@company.in',       phone: '+91 98765 43218', department: 'Sales',              designation: 'Sales Manager',             location: 'Mumbai',      employmentType: 'Full-time', status: 'Notice Period', hireDate: '12 Mar 2024',
-  },
-  {
-    id: '10', empId: 'EMP/2024/010', name: 'Pooja Agarwal',     email: 'pooja.agarwal@company.in',     phone: '+91 98765 43219', department: 'Finance',            designation: 'Senior Accountant',         location: 'Delhi',       employmentType: 'Full-time', status: 'Active',        hireDate: '20 Mar 2024',
-  },
-  {
-    id: '11', empId: 'EMP/2024/011', name: 'Kiran Rao',         email: 'kiran.rao@company.in',         phone: '+91 98765 43220', department: 'Engineering',        designation: 'Product Manager',           location: 'Bengaluru',   employmentType: 'Full-time', status: 'Active',        hireDate: '2 Apr 2024',
-  },
-  {
-    id: '12', empId: 'EMP/2024/012', name: 'Ananya Krishnan',   email: 'ananya.krishnan@company.in',   phone: '+91 98765 43221', department: 'Human Resources',    designation: 'HR Executive',              location: 'Chennai',     employmentType: 'Full-time', status: 'Probation',     hireDate: '15 Sep 2025',
-  },
-  {
-    id: '13', empId: 'EMP/2025/013', name: 'Mohammed Farouk',   email: 'mohammed.farouk@company.in',   phone: '+91 98765 43222', department: 'Engineering',        designation: 'Software Engineer',         location: 'Hyderabad',   employmentType: 'Full-time', status: 'Probation',     hireDate: '1 Oct 2025',
-  },
-  {
-    id: '14', empId: 'EMP/2025/014', name: 'Ritu Verma',        email: 'ritu.verma@company.in',        phone: '+91 98765 43223', department: 'Marketing',          designation: 'Content Strategist',        location: 'Delhi',       employmentType: 'Contract',  status: 'Active',        hireDate: '15 Nov 2025',
-  },
-  {
-    id: '15', empId: 'EMP/2026/015', name: 'Arjun Krishnan',    email: 'arjun.krishnan@company.in',    phone: '+91 98765 43224', department: 'Engineering',        designation: 'SDE-II',                    location: 'Bengaluru',   employmentType: 'Full-time', status: 'Probation',     hireDate: '28 Mar 2026',
-  },
-]
-
-const DEPARTMENTS = ['All Departments', 'Engineering', 'Human Resources', 'Sales', 'Finance', 'Operations', 'Marketing', 'Customer Support']
+// Employee data is fetched live from /api/employees
 const STATUSES: ['All Status', ...EmployeeStatus[]] = ['All Status', 'Active', 'Probation', 'On Leave', 'Notice Period', 'Inactive']
 const EMP_TYPES: ['All Types', ...EmploymentType[]] = ['All Types', 'Full-time', 'Part-time', 'Contract', 'Intern']
 
@@ -205,33 +155,78 @@ function MoreMenu({ empName }: { empName: string }) {
    MAIN COMPONENT
 ───────────────────────────────────────────────────────────── */
 export default function EmployeesPage() {
-  const [search, setSearch] = useState('')
-  const [deptFilter, setDeptFilter] = useState('All Departments')
+  const [search, setSearch]           = useState('')
+  const [deptFilter, setDeptFilter]   = useState('All Departments')
   const [statusFilter, setStatusFilter] = useState('All Status')
-  const [typeFilter, setTypeFilter] = useState('All Types')
+  const [typeFilter, setTypeFilter]   = useState('All Types')
   const [currentPage, setCurrentPage] = useState(1)
 
-  const PAGE_SIZE = 15
+  /* Live data */
+  const [employees, setEmployees]     = useState<ApiEmployee[]>([])
+  const [totalCount, setTotalCount]   = useState(0)
+  const [loading, setLoading]         = useState(true)
+  const [departments, setDepartments] = useState<Department[]>([])
 
-  /* Filter logic */
-  const filtered = useMemo(() => {
-    return EMPLOYEES.filter((emp) => {
-      const q = search.toLowerCase()
-      const matchSearch =
-        !q ||
-        emp.name.toLowerCase().includes(q) ||
-        emp.empId.toLowerCase().includes(q) ||
-        emp.email.toLowerCase().includes(q) ||
-        emp.designation.toLowerCase().includes(q)
-      const matchDept   = deptFilter   === 'All Departments' || emp.department      === deptFilter
-      const matchStatus = statusFilter === 'All Status'      || emp.status          === statusFilter
-      const matchType   = typeFilter   === 'All Types'       || emp.employmentType  === typeFilter
-      return matchSearch && matchDept && matchStatus && matchType
-    })
-  }, [search, deptFilter, statusFilter, typeFilter])
+  /* Add Employee modal */
+  const [showAdd, setShowAdd]         = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [form, setForm]               = useState({
+    first_name: '', last_name: '', email: '', phone: '',
+    department_id: '', designation_id: '', employment_type: 'full_time',
+    hire_date: '', work_location: '', role: 'employee',
+  })
 
-  const totalFiltered = filtered.length + 233 // simulate 248 total
-  const paginated = filtered // Show all 15 from mock; pagination is simulated below
+  const PAGE_SIZE = 50
+
+  const fetchEmployees = useCallback(async () => {
+    setLoading(true)
+    try {
+      const statusMap: Record<string, string> = {
+        'Active': 'active', 'Probation': 'probation',
+        'On Leave': 'on_leave', 'Notice Period': 'notice_period', 'Inactive': 'inactive',
+      }
+      const typeMap: Record<string, string> = {
+        'Full-time': 'full_time', 'Part-time': 'part_time', 'Contract': 'contract', 'Intern': 'intern',
+      }
+      const { data, count } = await employeesApi.list({
+        search: search || undefined,
+        status: statusFilter !== 'All Status' ? statusMap[statusFilter] : undefined,
+        employment_type: typeFilter !== 'All Types' ? typeMap[typeFilter] : undefined,
+        department_id: deptFilter !== 'All Departments' ? departments.find(d => d.name === deptFilter)?.id : undefined,
+        limit: PAGE_SIZE,
+        offset: (currentPage - 1) * PAGE_SIZE,
+      })
+      setEmployees(data)
+      setTotalCount(count)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [search, statusFilter, typeFilter, deptFilter, currentPage, departments])
+
+  useEffect(() => { employeesApi.departments().then(r => setDepartments(r.data)).catch(console.error) }, [])
+  useEffect(() => { fetchEmployees() }, [fetchEmployees])
+
+  /* Adapt API shape → local shape for existing UI */
+  const adapted = useMemo(() => employees.map(e => ({
+    id: e.id,
+    empId: e.emp_id,
+    name: `${e.first_name} ${e.last_name}`,
+    email: e.email,
+    phone: e.phone ?? '—',
+    department: e.department?.name ?? '—',
+    designation: e.designation?.title ?? '—',
+    location: e.work_location ?? '—',
+    employmentType: ({ full_time: 'Full-time', part_time: 'Part-time', contract: 'Contract', intern: 'Intern' } as Record<string, string>)[e.employment_type] ?? e.employment_type,
+    status: ({ active: 'Active', probation: 'Probation', on_leave: 'On Leave', notice_period: 'Notice Period', inactive: 'Inactive', terminated: 'Inactive' } as Record<string, string>)[e.status] ?? e.status,
+    hireDate: e.hire_date ? new Date(e.hire_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+  })), [employees])
+
+  /* Local filter for department name (server already filters the rest) */
+  const filtered = useMemo(() => adapted, [adapted])
+  const paginated = filtered
+  const totalFiltered = totalCount
 
   const hasActiveFilters = deptFilter !== 'All Departments' || statusFilter !== 'All Status' || typeFilter !== 'All Types' || search
 
@@ -242,6 +237,32 @@ export default function EmployeesPage() {
     setTypeFilter('All Types')
     setCurrentPage(1)
   }
+
+  async function handleAddEmployee(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await employeesApi.create({
+        first_name: form.first_name, last_name: form.last_name,
+        email: form.email, phone: form.phone || undefined,
+        department_id: form.department_id, designation_id: form.designation_id || undefined,
+        employment_type: form.employment_type, hire_date: form.hire_date,
+        work_location: form.work_location || undefined, role: form.role,
+      })
+      toast.success('Employee added successfully')
+      setShowAdd(false)
+      setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', role: 'employee' })
+      fetchEmployees()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add employee')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const LBL: React.CSSProperties = { display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }
+  const FLD: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1.5px solid #e5e7eb', padding: '8px 11px', fontSize: '0.875rem', color: '#111827', background: '#f9fafb', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }
+  const SEL: React.CSSProperties = { ...FLD, appearance: 'none', cursor: 'pointer' }
 
   return (
     <>
@@ -259,7 +280,7 @@ export default function EmployeesPage() {
               <Download size={14} />
               Export
             </button>
-            <button className="btn btn-primary btn-sm">
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
               <UserPlus size={14} />
               Add Employee
             </button>
@@ -279,11 +300,11 @@ export default function EmployeesPage() {
           }}
         >
           {[
-            { label: 'Total Employees', value: '248', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
-            { label: 'Active',          value: '220', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
-            { label: 'Probation',       value: '15',  color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
-            { label: 'On Leave',        value: '8',   color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-            { label: 'Notice Period',   value: '5',   color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
+            { label: 'Total Employees', value: String(totalCount || employees.length), color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+            { label: 'Active',          value: String(employees.filter(e => e.status === 'active').length),         color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+            { label: 'Probation',       value: String(employees.filter(e => e.status === 'probation').length),      color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+            { label: 'On Leave',        value: String(employees.filter(e => e.status === 'on_leave').length),       color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+            { label: 'Notice Period',   value: String(employees.filter(e => e.status === 'notice_period').length),  color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
           ].map((s) => (
             <div
               key={s.label}
@@ -370,7 +391,8 @@ export default function EmployeesPage() {
               className="form-select"
               style={{ width: 'auto', minWidth: 170, flex: '0 1 auto', fontSize: '0.875rem' }}
             >
-              {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
+              <option value="All Departments">All Departments</option>
+              {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
             </select>
 
             {/* Status Filter */}
@@ -451,8 +473,8 @@ export default function EmployeesPage() {
                 </tr>
               ) : (
                 paginated.map((emp) => {
-                  const sc = STATUS_CONFIG[emp.status]
-                  const tc = EMP_TYPE_CONFIG[emp.employmentType]
+                  const sc = STATUS_CONFIG[emp.status as EmployeeStatus] ?? STATUS_CONFIG['Inactive']
+                  const tc = EMP_TYPE_CONFIG[emp.employmentType as EmploymentType] ?? EMP_TYPE_CONFIG['Full-time']
                   return (
                     <tr key={emp.id}>
                       {/* Employee */}
@@ -579,13 +601,15 @@ export default function EmployeesPage() {
           }}
         >
           <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>
-            Showing{' '}
-            <strong style={{ color: 'var(--color-gray-800)' }}>
-              {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, 248)}
-            </strong>{' '}
-            of{' '}
-            <strong style={{ color: 'var(--color-gray-800)' }}>248</strong>{' '}
-            employees
+            {loading ? 'Loading…' : <>
+              Showing{' '}
+              <strong style={{ color: 'var(--color-gray-800)' }}>
+                {Math.min((currentPage - 1) * PAGE_SIZE + 1, totalFiltered)}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)}
+              </strong>{' '}
+              of{' '}
+              <strong style={{ color: 'var(--color-gray-800)' }}>{totalFiltered}</strong>{' '}
+              employees
+            </>}
           </p>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -634,8 +658,8 @@ export default function EmployeesPage() {
 
             <button
               className="btn btn-outline btn-sm"
-              disabled={currentPage === 17}
-              onClick={() => setCurrentPage((p) => Math.min(17, p + 1))}
+              disabled={currentPage * PAGE_SIZE >= totalFiltered}
+              onClick={() => setCurrentPage((p) => p + 1)}
               style={{ padding: '6px 12px' }}
             >
               Next
@@ -645,6 +669,97 @@ export default function EmployeesPage() {
         </div>
 
       </div>
+
+      {/* ── Add Employee Modal ── */}
+      {showAdd && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 560, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '18px 22px 16px', borderBottom: '1.5px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Add New Employee</h2>
+                <p style={{ fontSize: '0.775rem', color: '#9ca3af', margin: '3px 0 0' }}>Fill in the details to onboard a new team member</p>
+              </div>
+              <button onClick={() => setShowAdd(false)} className="btn btn-ghost btn-sm btn-icon"><X size={15} /></button>
+            </div>
+            <form onSubmit={handleAddEmployee} style={{ overflowY: 'auto', flex: 1 }}>
+              <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
+                    <label style={LBL}>First Name *</label>
+                    <input required value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} style={FLD} placeholder="e.g. Rahul" />
+                  </div>
+                  <div>
+                    <label style={LBL}>Last Name *</label>
+                    <input required value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} style={FLD} placeholder="e.g. Sharma" />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
+                    <label style={LBL}>Work Email *</label>
+                    <input required type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} style={FLD} placeholder="rahul@company.in" />
+                  </div>
+                  <div>
+                    <label style={LBL}>Phone</label>
+                    <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} style={FLD} placeholder="+91 98765 43210" />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
+                    <label style={LBL}>Department *</label>
+                    <div style={{ position: 'relative' }}>
+                      <select required value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))} style={SEL}>
+                        <option value="">Select department…</option>
+                        {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={LBL}>Employment Type</label>
+                    <div style={{ position: 'relative' }}>
+                      <select value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))} style={SEL}>
+                        <option value="full_time">Full-time</option>
+                        <option value="part_time">Part-time</option>
+                        <option value="contract">Contract</option>
+                        <option value="intern">Intern</option>
+                      </select>
+                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div>
+                    <label style={LBL}>Hire Date *</label>
+                    <input required type="date" value={form.hire_date} onChange={e => setForm(f => ({ ...f, hire_date: e.target.value }))} style={FLD} />
+                  </div>
+                  <div>
+                    <label style={LBL}>Work Location</label>
+                    <input value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} style={FLD} placeholder="e.g. Bengaluru, Remote" />
+                  </div>
+                </div>
+                <div>
+                  <label style={LBL}>Role</label>
+                  <div style={{ position: 'relative' }}>
+                    <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={SEL}>
+                      <option value="employee">Employee</option>
+                      <option value="manager">Manager</option>
+                      <option value="hr_admin">HR Admin</option>
+                      <option value="operations_head">Operations Head</option>
+                    </select>
+                    <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: '14px 22px 20px', borderTop: '1.5px solid #f1f5f9', display: 'flex', gap: 10 }}>
+                <button type="button" onClick={() => setShowAdd(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+                <button type="submit" disabled={saving} className="btn btn-primary btn-sm" style={{ flex: 2 }}>
+                  {saving ? 'Adding…' : <><UserPlus size={14} /> Add Employee</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   )
 }

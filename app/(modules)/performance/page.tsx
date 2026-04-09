@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { performanceApi, type PerformanceReview as ApiPerformanceReview } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   RefreshCw,
   Clock,
@@ -214,6 +216,52 @@ export default function PerformancePage() {
   const [cycleType, setCycleType] = useState('Annual')
   const [cycleDesc, setCycleDesc] = useState('')
 
+  const [teamReviews, setTeamReviews] = useState<TeamReview[]>(TEAM_REVIEWS)
+  const [submittingReview, setSubmittingReview] = useState(false)
+
+  useEffect(() => {
+    performanceApi.list({ limit: 100 }).then(res => {
+      if (res.data.length > 0) {
+        const adapted: TeamReview[] = res.data.map((r: ApiPerformanceReview, idx: number) => ({
+          id: idx + 1,
+          employee: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
+          department: r.employee?.department?.name ?? 'Unknown',
+          period: r.review_period ?? 'Current',
+          selfAssessment: r.status === 'submitted' || r.status === 'completed' ? 'Submitted' : 'Not Started',
+          managerReview: r.reviewer_id ? 'Submitted' : 'Pending',
+          rating: r.rating ? `${r.rating}` : '—',
+          status: r.status === 'completed' ? 'Completed' : r.status === 'submitted' ? 'Submitted' : 'Draft' as AppraisalStatus,
+        }))
+        setTeamReviews(adapted)
+      }
+    }).catch(() => {/* keep mock */})
+  }, [])
+
+  const handleSubmitReview = async () => {
+    if (!selectedReview) return
+    setSubmittingReview(true)
+    try {
+      const overallScore = Object.values(kraRatings).length
+        ? Object.values(kraRatings).reduce((a, b) => a + b, 0) / Object.values(kraRatings).length
+        : null
+      await performanceApi.create({
+        review_period: selectedReview.period,
+        review_type: 'Annual',
+        rating: overallRating,
+        overall_score: overallScore,
+        comments: managerComments,
+        status: 'completed',
+      })
+      toast.success('Review submitted successfully')
+      setShowReviewModal(false)
+      setOverallRating(''); setManagerComments(''); setKraRatings({}); setKraComments({})
+    } catch {
+      toast.error('Failed to submit review')
+    } finally {
+      setSubmittingReview(false)
+    }
+  }
+
   const TABS: { key: Tab; label: string }[] = [
     { key: 'cycles', label: 'Review Cycles' },
     { key: 'teamreviews', label: 'My Team Reviews' },
@@ -330,7 +378,7 @@ export default function PerformancePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {TEAM_REVIEWS.map((r, i) => (
+                      {teamReviews.map((r, i) => (
                         <tr key={r.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
                           <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{r.employee}</td>
                           <td style={{ padding: '12px 14px', color: '#6b7280' }}>{r.department}</td>
@@ -636,7 +684,7 @@ export default function PerformancePage() {
             <ModalFooter>
               <button onClick={() => setShowReviewModal(false)} style={btnOutline}>Cancel</button>
               <button style={{ ...btnOutline, borderColor: '#d97706', color: '#d97706' }}>Save as Draft</button>
-              <button onClick={() => setShowReviewModal(false)} style={btnPrimary}>Submit Review</button>
+              <button onClick={handleSubmitReview} disabled={submittingReview} style={btnPrimary}>{submittingReview ? 'Submitting…' : 'Submit Review'}</button>
             </ModalFooter>
           </div>
         </ModalOverlay>

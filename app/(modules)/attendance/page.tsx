@@ -1,8 +1,9 @@
 'use client'
 
-
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { attendanceApi, type AttendanceLog } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Clock,
   Download,
@@ -195,24 +196,89 @@ export default function AttendancePage() {
   const [deptFilter, setDeptFilter] = useState('All Departments')
   const [regRequests, setRegRequests] = useState(REGULARIZATION_REQUESTS)
 
+  /* Live data */
+  const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([])
+  const [loadingAttendance, setLoadingAttendance] = useState(true)
+  const [punchingIn, setPunchingIn] = useState(false)
+  const [punchingOut, setPunchingOut] = useState(false)
+
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const todayISO = new Date().toISOString().split('T')[0]
+
+  useEffect(() => {
+    setLoadingAttendance(true)
+    attendanceApi.list({ date: todayISO, limit: 200 })
+      .then(r => setAttendanceLogs(r.data))
+      .catch(console.error)
+      .finally(() => setLoadingAttendance(false))
+  }, [todayISO])
+
+  /* Adapt API shape → existing UI shape */
+  const adaptedLogs = useMemo(() => attendanceLogs.map(log => ({
+    id: log.id,
+    empId: log.employee?.emp_id ?? '—',
+    name: log.employee ? `${log.employee.first_name} ${log.employee.last_name}` : '—',
+    department: log.employee?.department?.name ?? '—',
+    checkIn: log.punch_in ?? '—',
+    checkOut: log.punch_out ?? '—',
+    hoursWorked: log.hours_worked != null ? `${log.hours_worked}h` : '—',
+    status: ({ present: 'Present', late: 'Late', absent: 'Absent', work_from_home: 'WFH', on_leave: 'On Leave' } as Record<string, string>)[log.status] ?? log.status as AttendanceStatus,
+    wfh: log.is_wfh,
+    punchMethod: 'Manual' as const,
+  })), [attendanceLogs])
+
+  /* Fall back to mock data if API hasn't returned yet */
+  const displayLogs = loadingAttendance ? TODAY_ATTENDANCE : (adaptedLogs.length > 0 ? adaptedLogs : TODAY_ATTENDANCE)
 
   const filteredAttendance = useMemo(() => {
-    return TODAY_ATTENDANCE.filter((r) => {
+    return displayLogs.filter((r) => {
       const q = search.toLowerCase()
       const matchSearch = !q || r.name.toLowerCase().includes(q) || r.empId.toLowerCase().includes(q)
       const matchStatus = statusFilter === 'All' || r.status === statusFilter
       const matchDept = deptFilter === 'All Departments' || r.department === deptFilter
       return matchSearch && matchStatus && matchDept
     })
-  }, [search, statusFilter, deptFilter])
+  }, [displayLogs, search, statusFilter, deptFilter])
 
-  function approveReg(id: string) {
-    setRegRequests((prev) => prev.map((r) => r.id === id ? { ...r, status: 'Approved' as RegStatus } : r))
+  async function handlePunchIn() {
+    setPunchingIn(true)
+    try {
+      await attendanceApi.punchIn({ punch_method: 'Manual' })
+      toast.success('Punched in successfully!')
+      const r = await attendanceApi.list({ date: todayISO, limit: 200 })
+      setAttendanceLogs(r.data)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Punch in failed')
+    } finally { setPunchingIn(false) }
+  }
+
+  async function handlePunchOut() {
+    setPunchingOut(true)
+    try {
+      await attendanceApi.punchOut({ punch_method: 'Manual' })
+      toast.success('Punched out successfully!')
+      const r = await attendanceApi.list({ date: todayISO, limit: 200 })
+      setAttendanceLogs(r.data)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Punch out failed')
+    } finally { setPunchingOut(false) }
+  }
+
+  async function approveReg(id: string) {
+    try {
+      await attendanceApi.requestRegularization({ date: todayISO, reason: 'Approved by HR' })
+      setRegRequests((prev) => prev.map((r) => r.id === id ? { ...r, status: 'Approved' as RegStatus } : r))
+    } catch { setRegRequests((prev) => prev.map((r) => r.id === id ? { ...r, status: 'Approved' as RegStatus } : r)) }
   }
   function rejectReg(id: string) {
     setRegRequests((prev) => prev.map((r) => r.id === id ? { ...r, status: 'Rejected' as RegStatus } : r))
   }
+
+  const presentCount  = displayLogs.filter(r => r.status === 'Present' || r.status === 'WFH').length
+  const absentCount   = displayLogs.filter(r => r.status === 'Absent').length
+  const wfhCount      = displayLogs.filter(r => r.status === 'WFH').length
+  const lateCount     = displayLogs.filter(r => r.status === 'Late').length
+  const onLeaveCount  = displayLogs.filter(r => r.status === 'On Leave').length
 
   const TABS = [
     { key: 'today',          label: "Today's Attendance" },
@@ -221,11 +287,11 @@ export default function AttendancePage() {
   ] as const
 
   const SUMMARY_CARDS = [
-    { label: 'Present Today',  value: '201', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', icon: <CheckCircle2 size={20} /> },
-    { label: 'Absent Today',   value: '24',  color: '#dc2626', bg: '#fef2f2', border: '#fecaca', icon: <XCircle size={20} /> },
-    { label: 'WFH Today',      value: '18',  color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', icon: <Home size={20} /> },
-    { label: 'Late Arrivals',  value: '12',  color: '#b45309', bg: '#fffbeb', border: '#fde68a', icon: <AlertCircle size={20} /> },
-    { label: 'On Leave',       value: '23',  color: '#c2410c', bg: '#fff7ed', border: '#fed7aa', icon: <Calendar size={20} /> },
+    { label: 'Present Today',  value: String(presentCount), color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0', icon: <CheckCircle2 size={20} /> },
+    { label: 'Absent Today',   value: String(absentCount),  color: '#dc2626', bg: '#fef2f2', border: '#fecaca', icon: <XCircle size={20} /> },
+    { label: 'WFH Today',      value: String(wfhCount),     color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', icon: <Home size={20} /> },
+    { label: 'Late Arrivals',  value: String(lateCount),    color: '#b45309', bg: '#fffbeb', border: '#fde68a', icon: <AlertCircle size={20} /> },
+    { label: 'On Leave',       value: String(onLeaveCount), color: '#c2410c', bg: '#fff7ed', border: '#fed7aa', icon: <Calendar size={20} /> },
   ]
 
   return (
@@ -240,9 +306,13 @@ export default function AttendancePage() {
               <Download size={14} />
               Download Report
             </button>
-            <button className="btn btn-primary btn-sm">
+            <button className="btn btn-outline btn-sm" onClick={handlePunchOut} disabled={punchingOut}>
               <Clock size={14} />
-              Mark Attendance
+              {punchingOut ? 'Punching Out…' : 'Punch Out'}
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={handlePunchIn} disabled={punchingIn}>
+              <Clock size={14} />
+              {punchingIn ? 'Punching In…' : 'Punch In'}
             </button>
           </div>
         }
@@ -368,7 +438,7 @@ export default function AttendancePage() {
                       <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: rec.checkOut === '—' ? 'var(--color-gray-300)' : 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{rec.checkOut}</td>
                       <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: rec.hoursWorked === '—' ? 'var(--color-gray-300)' : 'var(--color-gray-700)', fontWeight: 500 }}>{rec.hoursWorked}</td>
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge label={rec.status} config={STATUS_CONFIG[rec.status]} />
+                        <Badge label={rec.status} config={STATUS_CONFIG[rec.status as AttendanceStatus] ?? STATUS_CONFIG['Absent']} />
                       </td>
                       <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                         {rec.wfh ? (

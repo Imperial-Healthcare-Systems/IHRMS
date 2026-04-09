@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   Users, UserCheck, Calendar, Briefcase, Clock, IndianRupee,
@@ -7,6 +8,7 @@ import {
   ChevronRight, Star, ArrowUpRight, ArrowDownRight, Minus,
   Activity, Zap, Target, Shield,
 } from 'lucide-react'
+import { dashboardApi, type DashboardStats } from '@/lib/api-client'
 
 /* ─────────────────────────────────────────────────────────────
    TYPES & DATA
@@ -177,12 +179,31 @@ function StatCard({
    PAGE
 ───────────────────────────────────────────── */
 export default function DashboardPage() {
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+
+  useEffect(() => {
+    dashboardApi.stats().then(setStats).catch(console.error)
+  }, [])
+
+  const totalStaff  = stats?.headcount.total              ?? 248
+  const presentToday = stats?.today.present               ?? 201
+  const onLeave     = stats?.today.on_leave               ?? 23
+  const wfhToday    = stats?.today.wfh                    ?? 18
+  const openPositions = stats?.recruitment.open_positions ?? 12
+  const attendanceRate = stats?.today.attendance_rate     ?? 81
+  const pendingLeaves  = stats?.pending.leaves            ?? 5
+  const pendingExpenses = stats?.pending.expenses         ?? 2
+  const pendingRegs    = stats?.pending.regularizations   ?? 3
+  const payrollPeriod  = stats?.payroll.current_period    ?? 'Apr 2026'
+  const payrollNet     = stats?.payroll.total_net ? `₹${(stats.payroll.total_net / 100000).toFixed(1)}L` : '₹42.5L'
+  const newJoiners     = stats?.headcount.new_joiners_this_month ?? 12
+
   return (
     <>
       <Topbar
         title="HR Dashboard"
-        subtitle="Welcome back — April 2026"
-        notificationCount={18}
+        subtitle={`Welcome back — ${payrollPeriod}`}
+        notificationCount={pendingLeaves + pendingExpenses + pendingRegs}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
@@ -218,13 +239,13 @@ export default function DashboardPage() {
           marginBottom: 20,
         }}>
           {[
-            { label: 'Total Staff', value: '248', delta: '↑12', up: true },
-            { label: 'Present Today', value: '201', delta: '81%', up: true },
-            { label: 'On Leave', value: '23', delta: '9.3%', up: false },
-            { label: 'WFH Today', value: '18', delta: '7.3%', up: null },
-            { label: 'Open Positions', value: '12', delta: 'hiring', up: null },
-            { label: 'Monthly Payroll', value: '₹42.5L', delta: 'Apr 2026', up: null },
-            { label: 'Compliance Score', value: '98%', delta: '↑2%', up: true },
+            { label: 'Total Staff',      value: String(totalStaff),    delta: `↑${newJoiners}`,                          up: true  },
+            { label: 'Present Today',    value: String(presentToday),  delta: `${attendanceRate}%`,                      up: true  },
+            { label: 'On Leave',         value: String(onLeave),       delta: `${totalStaff ? ((onLeave/totalStaff)*100).toFixed(1) : 0}%`, up: false },
+            { label: 'WFH Today',        value: String(wfhToday),      delta: `${totalStaff ? ((wfhToday/totalStaff)*100).toFixed(1) : 0}%`, up: null  },
+            { label: 'Open Positions',   value: String(openPositions), delta: 'hiring',                                  up: null  },
+            { label: 'Monthly Payroll',  value: payrollNet,            delta: payrollPeriod ?? 'Current',                up: null  },
+            { label: 'Pending Actions',  value: String(pendingLeaves + pendingExpenses + pendingRegs), delta: 'to review', up: null },
           ].map((item, i) => (
             <div key={i} style={{
               padding: '14px 16px', textAlign: 'center',
@@ -252,17 +273,17 @@ export default function DashboardPage() {
 
         {/* ── 6-card Stat Grid ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 14, marginBottom: 20 }}>
-          <StatCard label="Total Employees" value="248" icon={Users} subtext="↑ 12 this month" trendDir="up"
+          <StatCard label="Total Employees" value={String(totalStaff)} icon={Users} subtext={`↑ ${newJoiners} this month`} trendDir="up"
             color={{ bg: '#EFF6FF', icon: '#2563EB', border: '#BFDBFE', glow: 'rgba(37,99,235,0.12)' }} />
-          <StatCard label="Present Today" value="201" icon={UserCheck} subtext="81% attendance" trendDir="up"
+          <StatCard label="Present Today" value={String(presentToday)} icon={UserCheck} subtext={`${attendanceRate}% attendance`} trendDir="up"
             color={{ bg: '#F0FDF4', icon: '#16A34A', border: '#BBF7D0', glow: 'rgba(22,163,74,0.12)' }} />
-          <StatCard label="On Leave Today" value="23" icon={Calendar} subtext="9.3% of workforce" trendDir="flat"
+          <StatCard label="On Leave Today" value={String(onLeave)} icon={Calendar} subtext={`${totalStaff ? ((onLeave/totalStaff)*100).toFixed(1) : 0}% of workforce`} trendDir="flat"
             color={{ bg: '#FFFBEB', icon: '#D97706', border: '#FDE68A', glow: 'rgba(217,119,6,0.12)' }} />
-          <StatCard label="Open Positions" value="12" icon={Briefcase} subtext="Actively hiring" trendDir="flat"
+          <StatCard label="Open Positions" value={String(openPositions)} icon={Briefcase} subtext="Actively hiring" trendDir="flat"
             color={{ bg: '#FFF7ED', icon: '#EA580C', border: '#FED7AA', glow: 'rgba(234,88,12,0.12)' }} />
-          <StatCard label="Pending Approvals" value="18" icon={Clock} subtext="Action required" trendDir="down"
+          <StatCard label="Pending Approvals" value={String(pendingLeaves + pendingExpenses + pendingRegs)} icon={Clock} subtext="Action required" trendDir="down"
             color={{ bg: '#FEF2F2', icon: '#DC2626', border: '#FECACA', glow: 'rgba(220,38,38,0.12)' }} />
-          <StatCard label="This Month Payroll" value="₹42.5L" icon={IndianRupee} subtext="April 2026" trendDir="up"
+          <StatCard label="This Month Payroll" value={payrollNet} icon={IndianRupee} subtext={payrollPeriod ?? 'Current'} trendDir="up"
             color={{ bg: '#F5F3FF', icon: '#7C3AED', border: '#DDD6FE', glow: 'rgba(124,58,237,0.12)' }} />
         </div>
 

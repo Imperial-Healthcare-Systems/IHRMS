@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     // Get employee info for approver
     const { data: emp } = await supabaseAdmin
       .from('employees')
-      .select('reporting_manager_id, status')
+      .select('manager_id, status')
       .eq('id', targetEmployee)
       .single()
 
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
         employee_id: targetEmployee, leave_type, start_date, end_date,
         days: days ?? 1, reason, is_half_day: is_half_day ?? false,
         half_day_session, status: 'pending',
-        level1_approver_id: emp?.reporting_manager_id ?? null,
+        level1_approver_id: emp?.manager_id ?? null,
         level1_status: 'pending',
       })
       .select()

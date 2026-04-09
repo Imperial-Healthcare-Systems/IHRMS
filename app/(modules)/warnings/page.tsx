@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { warningsApi, employeesApi, type WarningLetter, type Employee as ApiEmployee } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   AlertTriangle,
   Award,
@@ -194,6 +196,7 @@ export default function WarningsPage() {
   const [warnSubject, setWarnSubject] = useState('')
   const [incidentDate, setIncidentDate] = useState('')
   const [warnDesc, setWarnDesc] = useState('')
+  const [savingWarn, setSavingWarn] = useState(false)
 
   // Appreciation form
   const [apprecEmployee, setApprecEmployee] = useState('')
@@ -206,6 +209,40 @@ export default function WarningsPage() {
   const [ruleToggles, setRuleToggles] = useState<Record<number, boolean>>(
     Object.fromEntries(AUTO_RULES.map(r => [r.id, r.active]))
   )
+
+  // Live data
+  const [apiWarnings, setApiWarnings] = useState<WarningLetter[]>([])
+  const [employees, setEmployees] = useState<ApiEmployee[]>([])
+
+  useEffect(() => {
+    warningsApi.list({ limit: 50 }).then(r => setApiWarnings(r.data)).catch(console.error)
+    employeesApi.list({ limit: 100 }).then(r => setEmployees(r.data)).catch(console.error)
+  }, [])
+
+  async function handleIssueWarning() {
+    if (!warnEmployee || !warnSubject || !warnDesc) return
+    setSavingWarn(true)
+    try {
+      await warningsApi.create({
+        warning_type: warnLevel,
+        severity: warnLevel.includes('Final') ? 'critical' : warnLevel.includes('2nd') ? 'major' : 'minor',
+        incident_date: incidentDate || new Date().toISOString().split('T')[0],
+        issued_date: warnDate || new Date().toISOString().split('T')[0],
+        subject: warnSubject,
+        description: warnDesc,
+        acknowledgement_required: true,
+        status: 'issued',
+      } as Partial<WarningLetter>)
+      toast.success('Warning letter issued successfully')
+      setShowWarnModal(false)
+      setWarnEmployee(''); setWarnSubject(''); setWarnDesc(''); setWarnDate(''); setIncidentDate('')
+      warningsApi.list({ limit: 50 }).then(r => setApiWarnings(r.data)).catch(console.error)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to issue warning')
+    } finally { setSavingWarn(false) }
+  }
+
+  void apiWarnings; void employees
 
   const publicAppreciations = APPRECIATIONS.filter(a => a.isPublic).slice(0, 3)
 
@@ -605,7 +642,7 @@ export default function WarningsPage() {
               <button style={btnOutline} onClick={() => setShowWarnModal(false)}>Cancel</button>
               <button style={{ ...btnOutline, borderColor: '#bfdbfe', color: '#2563eb' }}>Preview Letter</button>
               <button style={{ ...btnOutline, borderColor: '#fde68a', color: '#d97706' }}>Save Draft</button>
-              <button onClick={() => setShowWarnModal(false)} style={{ ...btnPrimary, background: '#dc2626' }}>Issue Warning</button>
+              <button onClick={handleIssueWarning} disabled={savingWarn || !warnEmployee || !warnSubject || !warnDesc} style={{ ...btnPrimary, background: '#dc2626', opacity: (!warnEmployee || !warnSubject || !warnDesc) ? 0.6 : 1 }}>{savingWarn ? 'Issuing…' : 'Issue Warning'}</button>
             </ModalFooter>
           </div>
         </ModalOverlay>

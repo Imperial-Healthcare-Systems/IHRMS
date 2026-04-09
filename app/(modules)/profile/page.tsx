@@ -7,7 +7,8 @@ import {
   Edit, Camera, Building2, Clock, Award, FileText,
   CheckCircle2, AlertCircle, Download, Key, Bell, Lock,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { employeesApi, type Employee as ApiEmployee } from '@/lib/api-client'
 
 /* ─────────────────────────────────────────────────────────────
    MOCK PROFILE DATA
@@ -51,8 +52,26 @@ const STATS = [
 ───────────────────────────────────────────────────────────── */
 export default function ProfilePage() {
   const { data: session } = useSession()
-  const name     = session?.user?.name  ?? PROFILE.name
-  const email    = session?.user?.email ?? PROFILE.email
+  const [empProfile, setEmpProfile] = useState<ApiEmployee | null>(null)
+
+  useEffect(() => {
+    if (session?.user?.email) {
+      employeesApi.list({ search: session.user.email, limit: 1 }).then(res => {
+        if (res.data.length > 0) setEmpProfile(res.data[0])
+      }).catch(() => {})
+    }
+  }, [session?.user?.email])
+
+  const name        = empProfile ? `${empProfile.first_name} ${empProfile.last_name}` : (session?.user?.name  ?? PROFILE.name)
+  const email       = session?.user?.email ?? PROFILE.email
+  const phone       = empProfile?.phone       ?? PROFILE.phone
+  const designation = empProfile?.designation?.title ?? PROFILE.designation
+  const department  = empProfile?.department?.name   ?? PROFILE.department
+  const empId       = empProfile?.emp_id      ?? PROFILE.empId
+  const location    = empProfile?.work_location ?? PROFILE.location
+  const joinDate    = empProfile?.hire_date ? new Date(empProfile.hire_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : PROFILE.joinDate
+  const reportingTo = empProfile?.reporting_manager ? `${empProfile.reporting_manager.first_name} ${empProfile.reporting_manager.last_name} (${empProfile.reporting_manager.emp_id})` : PROFILE.reportingTo
+  const role        = empProfile?.role ?? PROFILE.role
   const image    = session?.user?.image
 
   const [activeTab, setActiveTab] = useState<'overview' | 'activity' | 'security'>('overview')
@@ -106,16 +125,16 @@ export default function ProfilePage() {
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div>
                 <h2 className="text-xl font-extrabold text-gray-900">{name}</h2>
-                <p className="text-sm text-gray-500 mt-0.5">{PROFILE.designation} · {PROFILE.department}</p>
+                <p className="text-sm text-gray-500 mt-0.5">{designation} · {department}</p>
                 <div className="flex items-center gap-3 mt-2 flex-wrap">
                   <span className="flex items-center gap-1 text-xs text-gray-500">
                     <Mail size={11} className="text-gray-400" />{email}
                   </span>
                   <span className="flex items-center gap-1 text-xs text-gray-500">
-                    <MapPin size={11} className="text-gray-400" />{PROFILE.location}
+                    <MapPin size={11} className="text-gray-400" />{location}
                   </span>
                   <span className="flex items-center gap-1 text-xs text-gray-500">
-                    <Briefcase size={11} className="text-gray-400" />{PROFILE.empId}
+                    <Briefcase size={11} className="text-gray-400" />{empId}
                   </span>
                 </div>
               </div>
@@ -124,7 +143,7 @@ export default function ProfilePage() {
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold"
                   style={{ background: 'linear-gradient(135deg,#FFF7ED,#FFEDD5)', color: '#EA580C', border: '1px solid #FED7AA' }}>
-                  <Shield size={11} /> {PROFILE.role}
+                  <Shield size={11} /> {role}
                 </span>
               </div>
             </div>
@@ -172,8 +191,8 @@ export default function ProfilePage() {
                     {[
                       { label: 'Full Name',    value: name,             icon: User },
                       { label: 'Email',        value: email,            icon: Mail },
-                      { label: 'Phone',        value: PROFILE.phone,    icon: Phone },
-                      { label: 'Location',     value: PROFILE.location, icon: MapPin },
+                      { label: 'Phone',        value: phone,    icon: Phone },
+                      { label: 'Location',     value: location, icon: MapPin },
                     ].map((row, i, arr) => (
                       <div key={row.label} className="flex items-center gap-4 px-4 py-3"
                         style={{ background: i % 2 === 0 ? '#FAFAFA' : '#fff', borderBottom: i < arr.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
@@ -195,11 +214,11 @@ export default function ProfilePage() {
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Employment Details</p>
                   <div className="space-y-0 rounded-xl overflow-hidden border border-gray-100">
                     {[
-                      { label: 'Designation',  value: PROFILE.designation,  icon: Briefcase },
-                      { label: 'Department',   value: PROFILE.department,   icon: Building2 },
-                      { label: 'Employee ID',  value: PROFILE.empId,        icon: Award },
-                      { label: 'Joining Date', value: PROFILE.joinDate,     icon: Calendar },
-                      { label: 'Reporting To', value: PROFILE.reportingTo,  icon: User },
+                      { label: 'Designation',  value: designation,  icon: Briefcase },
+                      { label: 'Department',   value: department,   icon: Building2 },
+                      { label: 'Employee ID',  value: empId,        icon: Award },
+                      { label: 'Joining Date', value: joinDate,     icon: Calendar },
+                      { label: 'Reporting To', value: reportingTo,  icon: User },
                       { label: 'Work Mode',    value: PROFILE.workMode,     icon: Clock },
                       { label: 'Shift',        value: PROFILE.shift,        icon: Clock },
                     ].map((row, i, arr) => (

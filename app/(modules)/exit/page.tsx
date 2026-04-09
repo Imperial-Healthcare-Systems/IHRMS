@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { exitApi, employeesApi, type ExitProcess as ApiExitProcess, type Employee as ApiEmployee } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   UserMinus, LogOut, IndianRupee, Clock, X,
   CheckCircle2, Circle, Eye, Download, FileText, Settings2,
@@ -146,7 +148,7 @@ function Modal({ open, onClose, title, sub, wide, children }: {
         <div className="flex items-start justify-between px-6 pt-5 pb-4" style={{ borderBottom: '1.5px solid #f1f5f9' }}>
           <div>
             <h2 style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>{title}</h2>
-            {sub && <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '4px 0 0', fontWeight: 400 }}>{sub}</p>}
+            {sub && <p style={{ fontSize: '0.775rem', color: '#9ca3af', margin: '3px 0 0', fontWeight: 400, letterSpacing: '0.01em' }}>{sub}</p>}
           </div>
           <button onClick={onClose} className="btn btn-ghost btn-sm btn-icon" style={{ marginTop: -2 }}><X size={15} /></button>
         </div>
@@ -184,8 +186,12 @@ export default function ExitPage() {
 
   const [initEmployee, setInitEmployee]       = useState('')
   const [initExitType, setInitExitType]       = useState<ExitType>('Resignation')
-  const [initResignDate, setInitResignDate]   = useState('')
-  const [initLastDate, setInitLastDate]       = useState('')
+  const [initResignMonth, setInitResignMonth] = useState('')
+  const [initResignDay,   setInitResignDay]   = useState('')
+  const [initResignYear,  setInitResignYear]  = useState('')
+  const [initLastMonth,   setInitLastMonth]   = useState('')
+  const [initLastDay,     setInitLastDay]     = useState('')
+  const [initLastYear,    setInitLastYear]    = useState('')
   const [initNoticePeriod, setInitNoticePeriod] = useState('30')
   const [initReason, setInitReason]           = useState('')
 
@@ -195,6 +201,86 @@ export default function ExitPage() {
   const [probRemarks, setProbRemarks]           = useState('')
   const [probEffectiveDate, setProbEffectiveDate] = useState('')
 
+  const [exitRecords, setExitRecords]   = useState<ExitRecord[]>(EXIT_RECORDS)
+  const [apiEmployees, setApiEmployees] = useState<ApiEmployee[]>([])
+  const [submittingExit, setSubmittingExit] = useState(false)
+
+  useEffect(() => {
+    // Fetch exit records
+    exitApi.list({ limit: 100 }).then(res => {
+      if (res.data.length > 0) {
+        const adapted: ExitRecord[] = (res.data as ApiExitProcess[]).map((e, idx) => ({
+          id: idx + 1,
+          name: e.employee ? `${e.employee.first_name} ${e.employee.last_name}` : 'Unknown',
+          empId: e.employee?.emp_id ?? '',
+          department: e.employee?.department?.name ?? 'Unknown',
+          exitType: (e.exit_type?.charAt(0).toUpperCase() + e.exit_type?.slice(1).replace(/_/g, ' ') ?? 'Resignation') as ExitType,
+          resignationDate: e.resignation_date ? new Date(e.resignation_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+          lastWorkingDate: e.last_working_date ? new Date(e.last_working_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+          noticePeriod: e.notice_period_days ?? 30,
+          clearanceCleared: 0,
+          clearanceTotal: 5,
+          fnfStatus: (e.fnf_status?.charAt(0).toUpperCase() + e.fnf_status?.slice(1) ?? 'Pending') as FnFStatus,
+        }))
+        setExitRecords(adapted)
+      }
+    }).catch(() => {/* keep mock */})
+    // Fetch employees for select
+    employeesApi.list({ status: 'active', limit: 500 }).then(res => {
+      setApiEmployees(res.data)
+    }).catch(() => {})
+  }, [])
+
+  const handleInitiateExit = async () => {
+    if (!initEmployee || !initReason) { toast.error('Employee and reason are required'); return }
+    setSubmittingExit(true)
+    try {
+      const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      const toISO = (month: string, day: string, year: string) => {
+        const m = String(MONTHS.indexOf(month) + 1).padStart(2, '0')
+        return `${year}-${m}-${day.padStart(2, '0')}`
+      }
+      await exitApi.create({
+        employee_id: initEmployee,
+        exit_type: initExitType.toLowerCase().replace(/ /g, '_'),
+        resignation_date: toISO(initResignMonth, initResignDay, initResignYear),
+        last_working_date: toISO(initLastMonth, initLastDay, initLastYear),
+        notice_period_days: parseInt(initNoticePeriod) || 30,
+        reason: initReason,
+        fnf_status: 'pending',
+        clearance_status: 'pending',
+        status: 'active',
+      })
+      toast.success('Exit process initiated successfully')
+      setShowInitiateModal(false)
+      setInitEmployee(''); setInitReason(''); setInitNoticePeriod('30')
+      setInitResignMonth(''); setInitResignDay(''); setInitResignYear('')
+      setInitLastMonth(''); setInitLastDay(''); setInitLastYear('')
+      // Refresh
+      exitApi.list({ limit: 100 }).then(res => {
+        if (res.data.length > 0) {
+          setExitRecords((res.data as ApiExitProcess[]).map((e, idx) => ({
+            id: idx + 1,
+            name: e.employee ? `${e.employee.first_name} ${e.employee.last_name}` : 'Unknown',
+            empId: e.employee?.emp_id ?? '',
+            department: e.employee?.department?.name ?? 'Unknown',
+            exitType: (e.exit_type?.charAt(0).toUpperCase() + e.exit_type?.slice(1).replace(/_/g, ' ') ?? 'Resignation') as ExitType,
+            resignationDate: e.resignation_date ? new Date(e.resignation_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+            lastWorkingDate: e.last_working_date ? new Date(e.last_working_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+            noticePeriod: e.notice_period_days ?? 30,
+            clearanceCleared: 0,
+            clearanceTotal: 5,
+            fnfStatus: (e.fnf_status?.charAt(0).toUpperCase() + e.fnf_status?.slice(1) ?? 'Pending') as FnFStatus,
+          })))
+        }
+      }).catch(() => {})
+    } catch {
+      toast.error('Failed to initiate exit process')
+    } finally {
+      setSubmittingExit(false)
+    }
+  }
+
   const toggleClearance = (id: string) =>
     setClearanceItems(prev => prev.map(item => item.id === id ? { ...item, cleared: !item.cleared } : item))
 
@@ -202,12 +288,12 @@ export default function ExitPage() {
   const openFnF    = (fnf: FnFRecord)   => { setSelectedFnF(fnf);   setShowFnFModal(true) }
   const openProbationReview = (emp: ProbationEmployee) => { setSelectedProbation(emp); setShowProbationModal(true) }
 
-  const noticePeriodCount = EXIT_RECORDS.length
+  const noticePeriodCount = exitRecords.length
   const fnfPending = FNF_RECORDS.filter(f => f.status === 'Pending').length
   const overdueCount = PROBATION_EMPLOYEES.filter(p => p.reviewStatus === 'Overdue').length
 
   const TABS: { key: ExitTab; label: string; count: number }[] = [
-    { key: 'exit',      label: 'Exit Management',   count: EXIT_RECORDS.length },
+    { key: 'exit',      label: 'Exit Management',   count: exitRecords.length },
     { key: 'fnf',       label: 'FnF Settlement',     count: FNF_RECORDS.length },
     { key: 'probation', label: 'Probation Tracking', count: PROBATION_EMPLOYEES.length },
   ]
@@ -219,14 +305,81 @@ export default function ExitPage() {
       {/* Initiate Exit */}
       <Modal open={showInitiateModal} onClose={() => setShowInitiateModal(false)} title="Initiate Exit Process" sub="Record a new employee exit or separation">
         {(() => {
-          const SEL: React.CSSProperties = { ...FIELD_STYLE, appearance: 'none', paddingRight: 32, cursor: 'pointer' }
-          const chevron = (
-            <svg style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-          )
           const exitTypeCfg = EXIT_TYPE_CFG[initExitType]
           const dateLabel = initExitType === 'Termination' ? 'Termination Date' : initExitType === 'Retirement' ? 'Retirement Date' : 'Resignation Date'
-          const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-          const YEARS  = [2024, 2025, 2026, 2027]
+          const EXIT_TYPE_DESC: Record<ExitType, string> = {
+            Resignation:        'Employee voluntarily leaving the organisation.',
+            Termination:        'Employment ended by the company.',
+            Retirement:         'Employee reaching superannuation age.',
+            'Contract End':     'Fixed-term contract completing its tenure.',
+            'Mutual Separation':'Both parties agreed to end employment.',
+          }
+          const canSubmit = !!initEmployee && !!initReason && !!initResignMonth && !!initResignDay && !!initResignYear && !!initLastMonth && !!initLastDay && !!initLastYear
+
+          const SEL_BARE: React.CSSProperties = {
+            flex: 1, border: 'none', outline: 'none', background: 'transparent',
+            fontSize: '0.875rem', color: '#111827', fontFamily: 'inherit',
+            cursor: 'pointer', appearance: 'none', padding: '0 20px 0 0', minWidth: 0,
+          }
+          const CHEVRON_SM = (
+            <svg style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          )
+
+          const DateGroup = ({
+            month, onMonth, day, onDay, year, onYear,
+          }: {
+            month: string; onMonth: (v: string) => void
+            day: string;   onDay:   (v: string) => void
+            year: string;  onYear:  (v: string) => void
+          }) => {
+            const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+            const DAYS   = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'))
+            const YEARS  = ['2024','2025','2026','2027']
+            const base: React.CSSProperties = {
+              display: 'flex', alignItems: 'center',
+              border: '1.5px solid #e5e7eb', borderRadius: 8,
+              background: '#f9fafb', overflow: 'hidden',
+            }
+            const seg: React.CSSProperties = {
+              position: 'relative', display: 'flex', alignItems: 'center',
+              padding: '9px 0 9px 12px', flex: 1,
+            }
+            const div: React.CSSProperties = {
+              width: 1, alignSelf: 'stretch', background: '#e5e7eb', flexShrink: 0,
+            }
+            return (
+              <div style={base}>
+                <div style={seg}>
+                  <select value={month} onChange={e => onMonth(e.target.value)} style={SEL_BARE}>
+                    <option value="">Mon</option>
+                    {MONTHS.map(m => <option key={m}>{m}</option>)}
+                  </select>
+                  {CHEVRON_SM}
+                </div>
+                <div style={div} />
+                <div style={{ ...seg, flex: '0 0 72px' }}>
+                  <select value={day} onChange={e => onDay(e.target.value)} style={SEL_BARE}>
+                    <option value="">Day</option>
+                    {DAYS.map(d => <option key={d}>{d}</option>)}
+                  </select>
+                  {CHEVRON_SM}
+                </div>
+                <div style={div} />
+                <div style={{ ...seg, flex: '0 0 88px' }}>
+                  <select value={year} onChange={e => onYear(e.target.value)} style={SEL_BARE}>
+                    <option value="">Year</option>
+                    {YEARS.map(y => <option key={y}>{y}</option>)}
+                  </select>
+                  {CHEVRON_SM}
+                </div>
+              </div>
+            )
+          }
+
+          const SEL: React.CSSProperties = { ...FIELD_STYLE, appearance: 'none', paddingRight: 32, cursor: 'pointer' }
+          const chevron = (
+            <svg style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          )
 
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -237,76 +390,66 @@ export default function ExitPage() {
                 <div style={{ position: 'relative' }}>
                   <select value={initEmployee} onChange={e => setInitEmployee(e.target.value)} style={SEL}>
                     <option value="">Select employee…</option>
-                    <option>Vivek Sharma (EMP/2024/045)</option>
-                    <option>Anita Nair (EMP/2023/012)</option>
-                    <option>Kavya Menon (EMP/2024/091)</option>
-                    <option>Ravi Shankar (EMP/2026/019)</option>
+                    {apiEmployees.length > 0
+                      ? apiEmployees.map(e => (
+                          <option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.emp_id})</option>
+                        ))
+                      : <>
+                          <option>Vivek Sharma (EMP/2024/045)</option>
+                          <option>Anita Nair (EMP/2023/012)</option>
+                          <option>Kavya Menon (EMP/2024/091)</option>
+                          <option>Ravi Shankar (EMP/2026/019)</option>
+                        </>
+                    }
                   </select>
                   {chevron}
                 </div>
               </div>
 
-              {/* Exit Type + live badge */}
+              {/* Exit Type */}
               <div>
                 <label style={LABEL_STYLE}>Exit Type</label>
                 <div style={{ position: 'relative' }}>
-                  <select value={initExitType} onChange={e => setInitExitType(e.target.value as ExitType)} style={{ ...SEL, paddingRight: 120 }}>
+                  <select value={initExitType} onChange={e => setInitExitType(e.target.value as ExitType)} style={SEL}>
                     {(['Resignation','Termination','Retirement','Contract End','Mutual Separation'] as ExitType[]).map(t => <option key={t}>{t}</option>)}
                   </select>
                   {chevron}
-                  <span style={{ position: 'absolute', right: 30, top: '50%', transform: 'translateY(-50%)', fontSize: '0.72rem', fontWeight: 700, padding: '2px 9px', borderRadius: 99, background: exitTypeCfg.bg, color: exitTypeCfg.color, border: `1px solid ${exitTypeCfg.border}`, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                </div>
+                <div style={{
+                  marginTop: 7, padding: '8px 12px', borderRadius: 8,
+                  background: exitTypeCfg.bg, border: `1px solid ${exitTypeCfg.border}`,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', padding: '2px 9px', borderRadius: 99,
+                    fontSize: '0.7rem', fontWeight: 700, background: exitTypeCfg.color + '20',
+                    color: exitTypeCfg.color, border: `1px solid ${exitTypeCfg.border}`, flexShrink: 0,
+                  }}>
                     {initExitType}
+                  </span>
+                  <span style={{ fontSize: '0.775rem', color: exitTypeCfg.color, lineHeight: 1.4 }}>
+                    {EXIT_TYPE_DESC[initExitType]}
                   </span>
                 </div>
               </div>
 
               {/* Dates */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div>
                   <label style={LABEL_STYLE}>{dateLabel}</label>
-                  <div style={{ display: 'flex', gap: 5 }}>
-                    <div style={{ position: 'relative', flex: '0 0 68px' }}>
-                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
-                        {MONTHS.map(m => <option key={m}>{m}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                    <div style={{ position: 'relative', flex: '0 0 58px' }}>
-                      <select style={{ ...SEL, padding: '9px 22px 9px 8px' }}>
-                        {Array.from({length: 31}, (_, i) => i + 1).map(d => <option key={d}>{d}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
-                        {YEARS.map(y => <option key={y}>{y}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                  </div>
+                  <DateGroup
+                    month={initResignMonth} onMonth={setInitResignMonth}
+                    day={initResignDay}     onDay={setInitResignDay}
+                    year={initResignYear}   onYear={setInitResignYear}
+                  />
                 </div>
                 <div>
                   <label style={LABEL_STYLE}>Last Working Date</label>
-                  <div style={{ display: 'flex', gap: 5 }}>
-                    <div style={{ position: 'relative', flex: '0 0 68px' }}>
-                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
-                        {MONTHS.map(m => <option key={m}>{m}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                    <div style={{ position: 'relative', flex: '0 0 58px' }}>
-                      <select style={{ ...SEL, padding: '9px 22px 9px 8px' }}>
-                        {Array.from({length: 31}, (_, i) => i + 1).map(d => <option key={d}>{d}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                      <select style={{ ...SEL, padding: '9px 24px 9px 9px' }}>
-                        {YEARS.map(y => <option key={y}>{y}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6b7280' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                  </div>
+                  <DateGroup
+                    month={initLastMonth} onMonth={setInitLastMonth}
+                    day={initLastDay}     onDay={setInitLastDay}
+                    year={initLastYear}   onYear={setInitLastYear}
+                  />
                 </div>
               </div>
 
@@ -342,18 +485,20 @@ export default function ExitPage() {
                 <button onClick={() => setShowInitiateModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
                 <button
                   className="btn btn-sm"
-                  disabled={!initEmployee || !initReason}
+                  onClick={handleInitiateExit}
+                  disabled={!canSubmit || submittingExit}
                   style={{
-                    flex: 2, background: initEmployee && initReason ? `linear-gradient(135deg, ${exitTypeCfg.color} 0%, ${exitTypeCfg.color}cc 100%)` : '#e5e7eb',
-                    color: initEmployee && initReason ? 'white' : '#9ca3af',
+                    flex: 2,
+                    background: canSubmit ? `linear-gradient(135deg, ${exitTypeCfg.color} 0%, ${exitTypeCfg.color}cc 100%)` : '#e5e7eb',
+                    color: canSubmit ? 'white' : '#9ca3af',
                     border: 'none', borderRadius: 9, fontWeight: 700, fontSize: '0.8375rem',
-                    cursor: initEmployee && initReason ? 'pointer' : 'not-allowed',
+                    cursor: canSubmit ? 'pointer' : 'not-allowed',
                     padding: '9px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    boxShadow: initEmployee && initReason ? `0 2px 8px ${exitTypeCfg.color}40` : 'none',
+                    boxShadow: canSubmit ? `0 2px 8px ${exitTypeCfg.color}40` : 'none',
                     transition: 'all 150ms',
                   }}
                 >
-                  Initiate Exit
+                  <LogOut size={14} /> {submittingExit ? 'Processing…' : 'Initiate Exit'}
                 </button>
               </div>
             </div>
@@ -651,7 +796,7 @@ export default function ExitPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {EXIT_RECORDS.map(exit => {
+                  {exitRecords.map(exit => {
                     const pct = (exit.clearanceCleared / exit.clearanceTotal) * 100
                     const done = exit.clearanceCleared === exit.clearanceTotal
                     return (

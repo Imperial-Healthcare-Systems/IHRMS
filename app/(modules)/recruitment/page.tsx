@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { recruitmentApi, type JobRequisition as ApiJobRequisition, type Candidate as ApiCandidate, type Interview as ApiInterview } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Search, Download, Eye, MoreVertical,
   X, Filter, Phone, Video, Building2, Mail,
@@ -211,7 +213,67 @@ export default function RecruitmentPage() {
   const [pipeSearch, setPipeSearch] = useState('')
   const [pipeStage,  setPipeStage]  = useState<Stage>('All')
 
-  const filteredJR = useMemo(() => JR.filter((j) => {
+  const [apiJR, setApiJR]               = useState(JR)
+  const [apiCandidates, setApiCandidates] = useState(CANDIDATES)
+  const [apiInterviews, setApiInterviews] = useState(INTERVIEWS)
+
+  useEffect(() => {
+    // Fetch job requisitions
+    recruitmentApi.requisitions.list({ limit: 100 }).then(res => {
+      if (res.data.length > 0) {
+        setApiJR((res.data as ApiJobRequisition[]).map(r => ({
+          id: r.id.slice(0, 8).toUpperCase(),
+          title: r.title,
+          dept: r.department?.name ?? 'Unknown',
+          loc: r.work_location ?? 'Remote',
+          open: r.vacancies ?? 1,
+          filled: 0,
+          exp: r.experience_min != null ? `${r.experience_min}–${r.experience_max ?? r.experience_min + 3} yr` : 'Any',
+          sal: r.ctc_budget_min ? `${Math.round(r.ctc_budget_min / 100000)}–${Math.round((r.ctc_budget_max ?? r.ctc_budget_min * 1.5) / 100000)} LPA` : 'Competitive',
+          pri: (r.priority ? r.priority.charAt(0).toUpperCase() + r.priority.slice(1) : 'Medium') as Priority,
+          status: r.status === 'open' ? 'Open' : r.status === 'on_hold' ? 'On Hold' : r.status === 'filled' ? 'Filled' : 'Closed',
+          apps: 0,
+          days: Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000),
+        })))
+      }
+    }).catch(() => {})
+
+    // Fetch candidates
+    recruitmentApi.candidates.list({ limit: 100 }).then(res => {
+      if (res.data.length > 0) {
+        setApiCandidates((res.data as ApiCandidate[]).map((c, idx) => ({
+          id: idx + 1,
+          name: c.name,
+          co: c.current_employer ?? 'Unknown',
+          pos: c.requisition?.title ?? 'Unknown',
+          exp: c.experience_years != null ? `${c.experience_years} yr` : 'N/A',
+          ctc: c.current_ctc ? `${Math.round(c.current_ctc / 100000)} LPA` : 'N/A',
+          src: c.source ?? 'Direct',
+          stage: (c.stage ? c.stage.charAt(0).toUpperCase() + c.stage.slice(1) : 'Applied') as Stage,
+          upd: new Date(c.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        })))
+      }
+    }).catch(() => {})
+
+    // Fetch interviews
+    recruitmentApi.interviews.list().then(res => {
+      if (res.data.length > 0) {
+        setApiInterviews((res.data as ApiInterview[]).map((iv, idx) => ({
+          id: idx + 1,
+          name: iv.candidate?.name ?? 'Unknown',
+          pos: 'Position',
+          round: `${iv.interview_type} · Round ${iv.round_number}`,
+          date: new Date(iv.scheduled_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+          time: new Date(iv.scheduled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          mode: iv.interview_type === 'video' ? 'Video' : iv.interview_type === 'phone' ? 'Phone' : 'In-person',
+          ivrs: [],
+          status: iv.status === 'completed' ? 'Completed' : 'Scheduled',
+        })))
+      }
+    }).catch(() => {})
+  }, [])
+
+  const filteredJR = useMemo(() => apiJR.filter((j) => {
     const q = reqSearch.toLowerCase()
     return (
       (!q || j.title.toLowerCase().includes(q) || j.id.toLowerCase().includes(q)) &&
@@ -219,24 +281,24 @@ export default function RecruitmentPage() {
       (reqPri    === 'All Priority'    || j.pri    === reqPri) &&
       (reqStatus === 'All Status'      || j.status === reqStatus)
     )
-  }), [reqSearch, reqDept, reqPri, reqStatus])
+  }), [apiJR, reqSearch, reqDept, reqPri, reqStatus])
 
-  const filteredCandidates = useMemo(() => CANDIDATES.filter((c) => {
+  const filteredCandidates = useMemo(() => apiCandidates.filter((c) => {
     const q = pipeSearch.toLowerCase()
     return (
       (!q || c.name.toLowerCase().includes(q) || c.pos.toLowerCase().includes(q)) &&
       (pipeStage === 'All' || c.stage === pipeStage)
     )
-  }), [pipeSearch, pipeStage])
+  }), [apiCandidates, pipeSearch, pipeStage])
 
   const groupedInterviews = useMemo(() => {
     const groups: Record<string, typeof INTERVIEWS> = {}
-    INTERVIEWS.forEach((iv) => {
+    apiInterviews.forEach((iv) => {
       if (!groups[iv.date]) groups[iv.date] = []
       groups[iv.date].push(iv)
     })
     return groups
-  }, [])
+  }, [apiInterviews])
 
   const hasReqFilters = reqSearch || reqDept !== 'All Departments' || reqPri !== 'All Priority' || reqStatus !== 'All Status'
 

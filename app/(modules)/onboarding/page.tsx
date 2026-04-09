@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { onboardingApi } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   UserPlus,
   Loader,
@@ -176,7 +178,21 @@ export default function OnboardingPage() {
   const [newDept, setNewDept] = useState('')
   const [newJoining, setNewJoining] = useState('')
 
-  const selectedEmployeeData = ONBOARDING_EMPLOYEES.find(e => e.name === selectedEmployee)
+  const [onboardingEmployees, setOnboardingEmployees] = useState<OnboardingEmployee[]>(ONBOARDING_EMPLOYEES)
+
+  useEffect(() => {
+    onboardingApi.list().then(res => {
+      if (res.data.length > 0) {
+        // API returns unknown[] — use as-is if it matches shape, else keep mock
+        const data = res.data as OnboardingEmployee[]
+        if (data[0] && typeof data[0].name === 'string') {
+          setOnboardingEmployees(data)
+        }
+      }
+    }).catch(() => {})
+  }, [])
+
+  const selectedEmployeeData = onboardingEmployees.find(e => e.name === selectedEmployee)
 
   const totalItems = checklistSections.reduce((a, s) => a + s.items.filter(i => i.status !== 'not_required').length, 0)
   const doneItems = checklistSections.reduce((a, s) => a + s.items.filter(i => i.status === 'done').length, 0)
@@ -189,10 +205,17 @@ export default function OnboardingPage() {
       si !== sectionIdx ? section : {
         ...section,
         items: section.items.map(item =>
-          item.id === itemId ? { ...item, status: 'done' as const, detail: `Marked complete Apr 1, 2026` } : item
+          item.id === itemId ? { ...item, status: 'done' as const, detail: `Marked complete ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` } : item
         ),
       }
     ))
+    // Sync to API
+    const empData = onboardingEmployees.find(e => e.name === selectedEmployee)
+    if (empData) {
+      onboardingApi.update({ employee_id: String(empData.id), task_id: itemId, status: 'done' })
+        .then(() => toast.success('Task marked complete'))
+        .catch(() => {/* local state already updated */})
+    }
   }
 
   const TABS: { key: OnboardTab; label: string }[] = [
@@ -262,7 +285,7 @@ export default function OnboardingPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {ONBOARDING_EMPLOYEES.map((emp, i) => {
+                      {onboardingEmployees.map((emp, i) => {
                         const progressColor =
                           emp.status === 'Completed' ? '#16a34a' :
                           emp.progress >= 50 ? '#2563eb' :
@@ -333,7 +356,7 @@ export default function OnboardingPage() {
                         onChange={e => setSelectedEmployee(e.target.value)}
                         style={{ ...inputStyle, width: 220, paddingRight: 32, appearance: 'none', cursor: 'pointer' }}
                       >
-                        {ONBOARDING_EMPLOYEES.map(e => (
+                        {onboardingEmployees.map(e => (
                           <option key={e.id} value={e.name}>{e.name} ({e.department})</option>
                         ))}
                       </select>

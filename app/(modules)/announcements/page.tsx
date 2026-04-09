@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { announcementsApi, type Announcement as ApiAnnouncement } from '@/lib/api-client'
+import toast from 'react-hot-toast'
 import {
   Bell, Plus, Pin, Edit, Trash2, Users, MapPin,
   ChevronDown, ChevronUp, Megaphone, Calendar,
@@ -148,10 +150,33 @@ export default function AnnouncementsPage() {
   const [expiresOn, setExpiresOn]         = useState('')
   const [markUrgent, setMarkUrgent]       = useState(false)
   const [pinToTop, setPinToTop]           = useState(false)
+  const [announcements, setAnnouncements] = useState<Announcement[]>(ANNOUNCEMENTS)
+  const [posting, setPosting]             = useState(false)
+
+  useEffect(() => {
+    announcementsApi.list().then(res => {
+      if (res.data.length > 0) {
+        const adapted: Announcement[] = res.data.map((a: ApiAnnouncement, idx: number) => ({
+          id: idx + 1,
+          type: (a.category ?? 'general') as AnnouncementType,
+          title: a.title,
+          body: a.content ?? '',
+          publisher: a.created_by_employee
+            ? `${a.created_by_employee.first_name} ${a.created_by_employee.last_name}`
+            : 'HR',
+          date: new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+          target: a.target_audience ?? 'All Employees',
+          pinned: a.is_pinned ?? false,
+          urgent: a.priority === 'urgent',
+        }))
+        setAnnouncements(adapted)
+      }
+    }).catch(() => {/* keep mock */})
+  }, [])
 
   const filtered = activeFilter === 'All'
-    ? ANNOUNCEMENTS
-    : ANNOUNCEMENTS.filter(a => a.type === activeFilter.toLowerCase())
+    ? announcements
+    : announcements.filter(a => a.type === activeFilter.toLowerCase())
 
   const toggleExpand = (id: number) =>
     setExpandedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -165,7 +190,55 @@ export default function AnnouncementsPage() {
     setMarkUrgent(false); setPinToTop(false)
   }
 
-  const urgentCount = ANNOUNCEMENTS.filter(a => a.urgent).length
+  const handlePostAnnouncement = async () => {
+    if (!composeTitle.trim() || !composeBody.trim()) {
+      toast.error('Title and message are required')
+      return
+    }
+    setPosting(true)
+    try {
+      const target = targetMode === 'all'
+        ? 'All Employees'
+        : targetMode === 'department'
+          ? Array.from(selectedDepts).join(', ') || 'All Employees'
+          : 'By Location'
+      await announcementsApi.create({
+        title: composeTitle,
+        content: composeBody,
+        category: composeType,
+        target_audience: target,
+        priority: markUrgent ? 'urgent' : 'normal',
+        is_pinned: pinToTop,
+        expires_at: expiresOn || null,
+        status: 'published',
+      })
+      toast.success('Announcement posted successfully')
+      handleReset()
+      // Refresh list
+      const res = await announcementsApi.list()
+      if (res.data.length > 0) {
+        setAnnouncements(res.data.map((a: ApiAnnouncement, idx: number) => ({
+          id: idx + 1,
+          type: (a.category ?? 'general') as AnnouncementType,
+          title: a.title,
+          body: a.content ?? '',
+          publisher: a.created_by_employee
+            ? `${a.created_by_employee.first_name} ${a.created_by_employee.last_name}`
+            : 'HR',
+          date: new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+          target: a.target_audience ?? 'All Employees',
+          pinned: a.is_pinned ?? false,
+          urgent: a.priority === 'urgent',
+        })))
+      }
+    } catch {
+      toast.error('Failed to post announcement')
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  const urgentCount = announcements.filter(a => a.urgent).length
 
   return (
     <>
@@ -189,7 +262,7 @@ export default function AnnouncementsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1rem', fontWeight: 700, color: '#111827', margin: 0 }}>Company Announcements</p>
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, background: '#fff7ed', color: '#E8622A', border: '1px solid #fed7aa', borderRadius: 20, padding: '1px 8px' }}>
-                  {ANNOUNCEMENTS.length}
+                  {announcements.length}
                 </span>
               </div>
             </div>
@@ -328,8 +401,10 @@ export default function AnnouncementsPage() {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 8, paddingTop: 2 }}>
-                  <button onClick={handleReset} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Save Draft</button>
-                  <button className="btn btn-primary btn-sm" style={{ flex: 2 }}>Post Now</button>
+                  <button onClick={handleReset} className="btn btn-outline btn-sm" style={{ flex: 1 }} disabled={posting}>Save Draft</button>
+                  <button onClick={handlePostAnnouncement} className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={posting}>
+                    {posting ? 'Posting…' : 'Post Now'}
+                  </button>
                 </div>
               </div>
             </div>

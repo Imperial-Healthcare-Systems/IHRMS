@@ -1,7 +1,7 @@
 'use client'
 
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   Building2,
@@ -19,6 +19,8 @@ import {
   XCircle,
   ChevronDown,
   Upload,
+  Layers,
+  X,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -33,12 +35,14 @@ type Panel =
   | 'notifications'
   | 'users'
   | 'integrations'
+  | 'departments'
 
 /* ─────────────────────────────────────────────────────────────
    NAV ITEMS
 ───────────────────────────────────────────────────────────── */
 const NAV_ITEMS: { key: Panel; label: string; icon: React.ElementType }[] = [
   { key: 'company', label: 'Company Profile', icon: Building2 },
+  { key: 'departments', label: 'Departments', icon: Layers },
   { key: 'leave', label: 'Leave Configuration', icon: Calendar },
   { key: 'payroll', label: 'Payroll Settings', icon: IndianRupee },
   { key: 'working', label: 'Working Hours', icon: Clock },
@@ -1061,6 +1065,223 @@ function IntegrationsPanel() {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   DEPARTMENTS PANEL
+───────────────────────────────────────────────────────────── */
+type Department = {
+  id: string
+  name: string
+  code: string
+  is_active: boolean
+  created_at: string
+}
+
+function DepartmentsPanel() {
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
+  const [showModal, setShowModal]     = useState(false)
+  const [editing, setEditing]         = useState<Department | null>(null)
+  const [saving, setSaving]           = useState(false)
+  const [form, setForm]               = useState({ name: '', code: '' })
+  const [formErr, setFormErr]         = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/departments')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to load')
+      setDepartments(json.data ?? [])
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const openAdd = () => {
+    setEditing(null)
+    setForm({ name: '', code: '' })
+    setFormErr('')
+    setShowModal(true)
+  }
+
+  const openEdit = (dept: Department) => {
+    setEditing(dept)
+    setForm({ name: dept.name, code: dept.code })
+    setFormErr('')
+    setShowModal(true)
+  }
+
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.code.trim()) {
+      setFormErr('Name and code are required.')
+      return
+    }
+    setSaving(true)
+    setFormErr('')
+    try {
+      const url    = editing ? `/api/departments/${editing.id}` : '/api/departments'
+      const method = editing ? 'PATCH' : 'POST'
+      const res    = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name.trim(), code: form.code.trim().toUpperCase() }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to save')
+      setShowModal(false)
+      load()
+    } catch (e: any) {
+      setFormErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleToggleActive = async (dept: Department) => {
+    try {
+      await fetch(`/api/departments/${dept.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !dept.is_active }),
+      })
+      load()
+    } catch { /* silent */ }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)', margin: 0 }}>Departments</h3>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 4 }}>
+            Manage your organisation's departments
+          </p>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} /> Add Department
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', fontSize: '0.875rem', color: '#dc2626' }}>
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading…</div>
+      ) : departments.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>
+          No departments yet. Click <strong>Add Department</strong> to create the first one.
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--color-gray-200)', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <thead>
+              <tr style={{ background: 'var(--color-gray-50)' }}>
+                {['Name', 'Code', 'Status', 'Actions'].map(h => (
+                  <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', fontSize: '0.8125rem', borderBottom: '1px solid var(--color-gray-200)' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {departments.map((dept, i) => (
+                <tr key={dept.id} style={{ borderBottom: i < departments.length - 1 ? '1px solid var(--color-gray-100)' : 'none', background: '#fff' }}>
+                  <td style={{ padding: '12px 16px', color: 'var(--color-gray-900)', fontWeight: 500 }}>{dept.name}</td>
+                  <td style={{ padding: '12px 16px', color: 'var(--color-gray-500)', fontFamily: 'monospace' }}>{dept.code}</td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '2px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 500,
+                      background: dept.is_active ? '#dcfce7' : '#f3f4f6',
+                      color: dept.is_active ? '#16a34a' : '#6b7280',
+                    }}>
+                      {dept.is_active ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                      {dept.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => openEdit(dept)}
+                        style={{ background: 'none', border: '1px solid var(--color-gray-300)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-gray-600)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <Edit2 size={11} /> Edit
+                      </button>
+                      <button
+                        onClick={() => handleToggleActive(dept)}
+                        style={{ background: 'none', border: `1px solid ${dept.is_active ? '#fca5a5' : '#86efac'}`, borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: '0.75rem', color: dept.is_active ? '#dc2626' : '#16a34a', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        {dept.is_active ? <><XCircle size={11} /> Deactivate</> : <><CheckCircle2 size={11} /> Activate</>}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)' }}>
+                {editing ? 'Edit Department' : 'Add Department'}
+              </h4>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <FieldLabel>Department Name *</FieldLabel>
+                <Input value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="e.g. Engineering" />
+              </div>
+              <div>
+                <FieldLabel>Department Code *</FieldLabel>
+                <Input value={form.code} onChange={v => setForm(f => ({ ...f, code: v }))} placeholder="e.g. ENG" />
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', marginTop: 4 }}>Short uppercase code (3–5 chars)</p>
+              </div>
+            </div>
+
+            {formErr && (
+              <div style={{ marginTop: 12, fontSize: '0.8125rem', color: '#dc2626', background: '#fef2f2', borderRadius: 6, padding: '8px 12px' }}>
+                {formErr}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowModal(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="btn btn-primary btn-sm"
+                style={{ padding: '8px 18px', opacity: saving ? 0.7 : 1 }}
+              >
+                {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Department'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────────────────────── */
 export default function SettingsPage() {
@@ -1069,6 +1290,7 @@ export default function SettingsPage() {
   const renderPanel = () => {
     switch (activePanel) {
       case 'company':       return <CompanyProfilePanel />
+      case 'departments':   return <DepartmentsPanel />
       case 'leave':         return <LeaveConfigPanel />
       case 'payroll':       return <PayrollSettingsPanel />
       case 'working':       return <WorkingHoursPanel />
