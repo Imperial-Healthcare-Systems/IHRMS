@@ -16,11 +16,8 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('exit_processes')
       .select(`
-        id, exit_type, reason, resignation_date, last_working_day,
-        notice_period_days, notice_period_waived, status,
-        clearance_checklist, fnf_amount, fnf_settlement_date,
-        noc_issued, experience_letter, relieving_letter,
-        exit_interview_done, created_at, updated_at,
+        id, exit_type, reason, resignation_date, last_working_date,
+        notice_period_days, status, created_at, updated_at,
         employee:employees!employee_id(
           id, first_name, last_name, work_email,
           department:departments(id, name),
@@ -43,12 +40,19 @@ export async function GET(req: NextRequest) {
   }
 }
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as any)?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
 
     const body = await req.json()
     const {
@@ -72,51 +76,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `exit_type must be one of: ${validExitTypes.join(', ')}` }, { status: 400 })
     }
 
-    // Default clearance checklist with all flags set to false
-    const clearance_checklist = {
-      hr: false,
-      it: false,
-      finance: false,
-      manager: false,
-      admin: false,
-    }
-
-    const initiatedById = (session.user as any)?.id ?? null
-
     const { data, error } = await supabaseAdmin
       .from('exit_processes')
       .insert({
         employee_id,
         exit_type,
-        last_working_day: last_working_date,
         reason,
+        last_working_date,
         resignation_date: resignation_date ?? null,
         notice_period_days: notice_period_days ?? null,
         status: 'initiated',
-        clearance_checklist,
-        noc_issued: false,
-        experience_letter: false,
-        relieving_letter: false,
-        initiated_by: initiatedById,
       })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[exit POST]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
-    // Update employee status to notice_period
+    // Update employee status to notice_period (best-effort)
     const { error: empError } = await supabaseAdmin
       .from('employees')
       .update({ status: 'notice_period', updated_at: new Date().toISOString() })
       .eq('id', employee_id)
 
-    if (empError) {
-      console.error('Failed to update employee status:', empError.message)
-    }
+    if (empError) console.error('[exit POST] employee status update:', empError.message)
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Internal error'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    console.error('[exit POST] catch:', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

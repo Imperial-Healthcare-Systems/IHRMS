@@ -10,15 +10,10 @@ export default async function ModulesLayout({ children }: { children: React.Reac
   if (!session) redirect('/login')
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="bg-gray-50" style={{ minHeight: '100vh' }}>
       <Sidebar />
-      <div
-        className="flex-1 flex flex-col overflow-hidden"
-        style={{ marginLeft: '248px' }}
-      >
-        <main className="flex-1 overflow-y-auto" style={{ background: '#F1F4F9', minHeight: '100vh' }}>
-          {children}
-        </main>
+      <div style={{ marginLeft: '248px', minHeight: '100vh', background: '#F1F4F9' }}>
+        {children}
       </div>
     </div>
   )

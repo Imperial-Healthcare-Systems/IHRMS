@@ -95,59 +95,434 @@ function Avatar({ name, size = 36 }: { name: string; size?: number }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   DOCUMENTS MODAL
+───────────────────────────────────────────────────────────── */
+type Doc = { id: string; name: string; type: string; url: string; uploaded_at: string }
+
+function DocumentsModal({ empId, empName, onClose }: { empId: string; empName: string; onClose: () => void }) {
+  const [docs, setDocs]       = useState<Doc[]>([])
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError]     = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res  = await fetch(`/api/employees/${empId}/documents`)
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to load documents')
+      setDocs(json.data ?? [])
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load documents')
+    } finally {
+      setLoading(false)
+    }
+  }, [empId])
+
+  useEffect(() => { load() }, [load])
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('name', file.name)
+      const res  = await fetch(`/api/employees/${empId}/documents`, { method: 'POST', body: formData })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Upload failed')
+      load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleDelete = async (docId: string) => {
+    try {
+      await fetch(`/api/employees/${empId}/documents/${docId}`, { method: 'DELETE' })
+      setDocs(d => d.filter(x => x.id !== docId))
+    } catch {
+      setError('Failed to delete document')
+    }
+  }
+
+  const DOC_ICONS: Record<string, string> = { pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊', png: '🖼️', jpg: '🖼️', jpeg: '🖼️' }
+  const getIcon = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase() ?? ''
+    return DOC_ICONS[ext] ?? '📎'
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, width: 560, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 60px rgba(0,0,0,0.2)' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+          <div>
+            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)' }}>Employee Documents</h4>
+            <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{empName}</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4, borderRadius: 6 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Upload bar */}
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '8px 16px', borderRadius: 8, border: '1px dashed var(--color-gray-300)',
+            cursor: uploading ? 'not-allowed' : 'pointer', fontSize: '0.8125rem', color: 'var(--color-gray-600)',
+            background: uploading ? 'var(--color-gray-50)' : '#fff', width: '100%', justifyContent: 'center',
+          }}>
+            <Upload size={14} />
+            {uploading ? 'Uploading…' : 'Click to upload a document'}
+            <input type="file" style={{ display: 'none' }} onChange={handleUpload} disabled={uploading} />
+          </label>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 24px 20px' }}>
+          {error && (
+            <div style={{ margin: '12px 0', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>
+              {error}
+            </div>
+          )}
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading…</div>
+          ) : docs.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>
+              No documents uploaded yet.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {docs.map(doc => (
+                <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', border: '1px solid var(--color-gray-100)', borderRadius: 8, background: '#fafafa' }}>
+                  <span style={{ fontSize: '1.25rem' }}>{getIcon(doc.name)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</p>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-gray-400)', marginTop: 2 }}>
+                      {doc.type} · {new Date(doc.uploaded_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <a href={doc.url} target="_blank" rel="noopener noreferrer"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--color-gray-300)', fontSize: '0.75rem', color: 'var(--color-gray-600)', textDecoration: 'none', background: '#fff' }}>
+                      <Eye size={11} /> View
+                    </a>
+                    <button onClick={() => handleDelete(doc.id)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6, border: '1px solid #fca5a5', fontSize: '0.75rem', color: '#dc2626', background: '#fff', cursor: 'pointer' }}>
+                      <X size={11} /> Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EXIT PROCESS MODAL
+───────────────────────────────────────────────────────────── */
+const EXIT_TYPES = [
+  { value: 'resignation',      label: 'Resignation' },
+  { value: 'termination',      label: 'Termination' },
+  { value: 'retirement',       label: 'Retirement' },
+  { value: 'end_of_contract',  label: 'End of Contract' },
+  { value: 'absconding',       label: 'Absconding' },
+]
+
+function ExitProcessModal({ empId, empName, onClose, onSuccess }: { empId: string; empName: string; onClose: () => void; onSuccess: () => void }) {
+  const [form, setForm] = useState({
+    exit_type:        'resignation',
+    reason:           '',
+    resignation_date: '',
+    last_working_date: '',
+    notice_period_days: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
+
+  const handleSubmit = async () => {
+    if (!form.reason.trim() || !form.last_working_date) {
+      setError('Reason and last working date are required.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const res  = await fetch('/api/exit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id:        empId,
+          exit_type:          form.exit_type,
+          reason:             form.reason.trim(),
+          last_working_date:  form.last_working_date,
+          resignation_date:   form.resignation_date || null,
+          notice_period_days: form.notice_period_days ? parseInt(form.notice_period_days) : null,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to initiate exit process')
+      onSuccess()
+      onClose()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to initiate exit process')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const labelStyle: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 14, width: 500, boxShadow: '0 25px 60px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid #fee2e2', background: '#fff5f5' }}>
+          <div>
+            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#dc2626' }}>Initiate Exit Process</h4>
+            <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{empName}</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={labelStyle}>Exit Type *</label>
+            <select value={form.exit_type} onChange={e => setForm(f => ({ ...f, exit_type: e.target.value }))} style={inputStyle}>
+              {EXIT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Resignation Date</label>
+              <input type="date" value={form.resignation_date} onChange={e => setForm(f => ({ ...f, resignation_date: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Last Working Date *</label>
+              <input type="date" value={form.last_working_date} onChange={e => setForm(f => ({ ...f, last_working_date: e.target.value }))} style={inputStyle} />
+            </div>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Notice Period (days)</label>
+            <input type="number" min={0} value={form.notice_period_days} onChange={e => setForm(f => ({ ...f, notice_period_days: e.target.value }))} placeholder="e.g. 30" style={inputStyle} />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Reason *</label>
+            <textarea value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} placeholder="Reason for exit..." rows={3}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+          </div>
+
+          {error && (
+            <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)' }}>
+          <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>
+            Cancel
+          </button>
+          <button onClick={handleSubmit} disabled={saving}
+            style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#dc2626', color: '#fff', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '0.875rem', fontWeight: 500, opacity: saving ? 0.7 : 1 }}>
+            {saving ? 'Initiating…' : 'Initiate Exit'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    MORE MENU
 ───────────────────────────────────────────────────────────── */
-function MoreMenu({ empName }: { empName: string }) {
-  const [open, setOpen] = useState(false)
+function MoreMenu({ empId, empName, onExitSuccess }: { empId: string; empName: string; onExitSuccess: () => void }) {
+  const [open, setOpen]       = useState(false)
+  const [showDocs, setShowDocs] = useState(false)
+  const [showExit, setShowExit] = useState(false)
   return (
-    <div style={{ position: 'relative' }}>
-      <button
-        className="btn btn-ghost btn-sm btn-icon"
-        onClick={() => setOpen((v) => !v)}
-        title="More options"
-      >
-        <MoreVertical size={15} />
-      </button>
-      {open && (
-        <>
-          {/* Backdrop */}
-          <div
-            style={{ position: 'fixed', inset: 0, zIndex: 10 }}
-            onClick={() => setOpen(false)}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: 'calc(100% + 4px)',
-              zIndex: 20,
-              background: '#fff',
-              border: '1px solid var(--color-gray-200)',
-              borderRadius: 'var(--radius-md)',
-              boxShadow: 'var(--shadow-md)',
-              minWidth: 180,
-              overflow: 'hidden',
-            }}
-          >
-            <button
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', fontSize: '0.8125rem', color: 'var(--color-gray-700)', background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}
+    <>
+      <div style={{ position: 'relative' }}>
+        <button
+          className="btn btn-ghost btn-sm btn-icon"
+          onClick={() => setOpen((v) => !v)}
+          title="More options"
+        >
+          <MoreVertical size={15} />
+        </button>
+        {open && (
+          <>
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 10 }}
               onClick={() => setOpen(false)}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 'calc(100% + 4px)',
+                zIndex: 20,
+                background: '#fff',
+                border: '1px solid var(--color-gray-200)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-md)',
+                minWidth: 180,
+                overflow: 'hidden',
+              }}
             >
-              <FileText size={14} style={{ color: 'var(--color-gray-400)' }} />
-              Manage Documents
-            </button>
-            <button
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', fontSize: '0.8125rem', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', borderTop: '1px solid var(--color-gray-100)' }}
-              onClick={() => setOpen(false)}
-            >
-              <LogOut size={14} style={{ color: '#dc2626' }} />
-              Exit Process
-            </button>
+              <button
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', fontSize: '0.8125rem', color: 'var(--color-gray-700)', background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}
+                onClick={() => { setOpen(false); setShowDocs(true) }}
+              >
+                <FileText size={14} style={{ color: 'var(--color-gray-400)' }} />
+                Manage Documents
+              </button>
+              <button
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', fontSize: '0.8125rem', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', borderTop: '1px solid var(--color-gray-100)' }}
+                onClick={() => { setOpen(false); setShowExit(true) }}
+              >
+                <LogOut size={14} style={{ color: '#dc2626' }} />
+                Exit Process
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+      {showDocs && <DocumentsModal empId={empId} empName={empName} onClose={() => setShowDocs(false)} />}
+      {showExit && <ExitProcessModal empId={empId} empName={empName} onClose={() => setShowExit(false)} onSuccess={onExitSuccess} />}
+    </>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EDIT EMPLOYEE FORM
+───────────────────────────────────────────────────────────── */
+function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
+  emp: ApiEmployee
+  departments: Department[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [form, setForm] = useState({
+    first_name:      emp.first_name,
+    last_name:       emp.last_name,
+    work_location:   emp.work_location ?? '',
+    employment_type: emp.employment_type ?? 'full_time',
+    status:          emp.status ?? 'active',
+    role:            emp.role ?? 'employee',
+    department_id:   emp.department?.id ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
+
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const labelStyle: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
+
+  const handleSave = async () => {
+    if (!form.first_name.trim() || !form.last_name.trim()) {
+      setError('First name and last name are required.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const res  = await fetch(`/api/employees/${emp.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name:      form.first_name.trim(),
+          last_name:       form.last_name.trim(),
+          full_name:       `${form.first_name.trim()} ${form.last_name.trim()}`,
+          work_location:   form.work_location,
+          employment_type: form.employment_type,
+          status:          form.status,
+          role:            form.role,
+          department_id:   form.department_id || null,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to save')
+      onSaved()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={labelStyle}>First Name *</label>
+            <input style={inputStyle} value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} />
           </div>
-        </>
-      )}
-    </div>
+          <div>
+            <label style={labelStyle}>Last Name *</label>
+            <input style={inputStyle} value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} />
+          </div>
+        </div>
+        <div>
+          <label style={labelStyle}>Department</label>
+          <select style={inputStyle} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>
+            <option value="">— No Department —</option>
+            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={labelStyle}>Employment Type</label>
+            <select style={inputStyle} value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))}>
+              {[['full_time','Full-time'],['part_time','Part-time'],['contract','Contract'],['intern','Intern']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+              {[['active','Active'],['probation','Probation'],['on_leave','On Leave'],['notice_period','Notice Period'],['inactive','Inactive']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style={labelStyle}>Work Location</label>
+          <input style={inputStyle} value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} placeholder="e.g. Mumbai" />
+        </div>
+        <div>
+          <label style={labelStyle}>Role</label>
+          <select style={inputStyle} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+            {[['employee','Employee'],['manager','Manager'],['hr','HR'],['admin','Admin']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{error}</div>}
+      </div>
+      <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+        <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm" style={{ opacity: saving ? 0.7 : 1 }}>
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
+      </div>
+    </>
   )
 }
 
@@ -166,6 +541,10 @@ export default function EmployeesPage() {
   const [totalCount, setTotalCount]   = useState(0)
   const [loading, setLoading]         = useState(true)
   const [departments, setDepartments] = useState<Department[]>([])
+
+  /* View / Edit modals */
+  const [viewEmp, setViewEmp]         = useState<ApiEmployee | null>(null)
+  const [editEmp, setEditEmp]         = useState<ApiEmployee | null>(null)
 
   /* Add Employee modal */
   const [showAdd, setShowAdd]         = useState(false)
@@ -569,16 +948,18 @@ export default function EmployeesPage() {
                           <button
                             className="btn btn-ghost btn-sm btn-icon"
                             title={`View ${emp.name}`}
+                            onClick={() => setViewEmp(emp)}
                           >
                             <Eye size={15} />
                           </button>
                           <button
                             className="btn btn-ghost btn-sm btn-icon"
                             title={`Edit ${emp.name}`}
+                            onClick={() => setEditEmp(emp)}
                           >
                             <Edit size={15} />
                           </button>
-                          <MoreMenu empName={emp.name} />
+                          <MoreMenu empId={emp.id} empName={emp.name} onExitSuccess={fetchEmployees} />
                         </div>
                       </td>
                     </tr>
@@ -757,6 +1138,67 @@ export default function EmployeesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── View Employee Modal ── */}
+      {viewEmp && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 540, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <h3 style={{ margin: 0, fontSize: '1.0625rem', fontWeight: 700 }}>Employee Details</h3>
+              <button onClick={() => setViewEmp(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '24px' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24, padding: '16px', background: 'var(--color-gray-50)', borderRadius: 12 }}>
+                <Avatar name={`${viewEmp.first_name} ${viewEmp.last_name}`} size={52} />
+                <div>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: '1rem', color: 'var(--color-gray-900)' }}>{viewEmp.first_name} {viewEmp.last_name}</p>
+                  <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{viewEmp.designation?.title ?? '—'} · {viewEmp.emp_id}</p>
+                </div>
+              </div>
+              {/* Fields */}
+              {([
+                ['Email',           viewEmp.email],
+                ['Phone',           viewEmp.phone || '—'],
+                ['Department',      viewEmp.department?.name ?? '—'],
+                ['Designation',     viewEmp.designation?.title ?? '—'],
+                ['Employment Type', viewEmp.employment_type],
+                ['Work Location',   viewEmp.work_location || '—'],
+                ['Status',          viewEmp.status],
+                ['Joining Date',    viewEmp.hire_date || '—'],
+                ['Role',            viewEmp.role],
+              ] as [string, string][]).map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--color-gray-50)' }}>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', fontWeight: 500 }}>{label}</span>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-900)', textAlign: 'right', maxWidth: '60%' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={() => { setViewEmp(null); setEditEmp(viewEmp) }} className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Edit size={13} /> Edit Employee
+              </button>
+              <button onClick={() => setViewEmp(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Employee Modal ── */}
+      {editEmp && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 560, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.0625rem', fontWeight: 700 }}>Edit Employee</h3>
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{editEmp.first_name} {editEmp.last_name} · {editEmp.emp_id}</p>
+              </div>
+              <button onClick={() => setEditEmp(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+            </div>
+            <EditEmployeeForm emp={editEmp} departments={departments} onClose={() => setEditEmp(null)} onSaved={() => { setEditEmp(null); fetchEmployees() }} />
           </div>
         </div>
       )}

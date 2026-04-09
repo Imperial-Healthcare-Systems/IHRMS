@@ -48,7 +48,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .eq('id', id)
       .select()
       .single()
-    if (error) throw error
+    if (error) {
+      console.error('[employees PATCH]', error)
+      return NextResponse.json({ error: error.message ?? error.details ?? 'Update failed' }, { status: 500 })
+    }
     return NextResponse.json({ data })
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
