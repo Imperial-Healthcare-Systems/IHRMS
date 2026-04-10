@@ -948,14 +948,14 @@ export default function EmployeesPage() {
                           <button
                             className="btn btn-ghost btn-sm btn-icon"
                             title={`View ${emp.name}`}
-                            onClick={() => setViewEmp(emp)}
+                            onClick={() => setViewEmp(employees.find(e => e.id === emp.id) ?? null)}
                           >
                             <Eye size={15} />
                           </button>
                           <button
                             className="btn btn-ghost btn-sm btn-icon"
                             title={`Edit ${emp.name}`}
-                            onClick={() => setEditEmp(emp)}
+                            onClick={() => setEditEmp(employees.find(e => e.id === emp.id) ?? null)}
                           >
                             <Edit size={15} />
                           </button>
