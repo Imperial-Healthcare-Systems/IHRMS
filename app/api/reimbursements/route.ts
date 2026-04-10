@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -13,28 +22,22 @@ export async function GET(req: NextRequest) {
     const status      = searchParams.get('status')
     const month       = searchParams.get('month')
     const year        = searchParams.get('year')
-    const manager_id  = searchParams.get('manager_id')  // for team view
-    const limit       = parseInt(searchParams.get('limit') ?? '50')
+    const manager_id  = searchParams.get('manager_id')
+    const limit       = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset      = parseInt(searchParams.get('offset') ?? '0')
 
-    const sessionUserId  = (session.user as any)?.id
-    const sessionIsAdmin = (session.user as any)?.isAdmin
+    const sessionUserId  = (session.user as Record<string, unknown>)?.id as string | undefined
+    const sessionIsAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
 
+    // Plain SELECT * + simple employee join without explicit FK names
     let query = supabaseAdmin
       .from('expense_claims')
       .select(`
-        id, claim_date, category, description, amount, currency,
-        receipt_urls, status, rejection_note, paid_at, payment_ref,
-        approved_at,
+        *,
         employee:employees!expense_claims_employee_id_fkey(
-          id, first_name, last_name, emp_id, work_email,
-          department:departments(id, name),
-          manager:employees!employees_manager_id_fkey(id, first_name, last_name, emp_id)
-        ),
-        approved_by:employees!expense_claims_approved_by_fkey(
-          id, first_name, last_name, emp_id
-        ),
-        created_at, updated_at
+          id, first_name, last_name, emp_id, email,
+          department:departments!employees_department_id_fkey(id, name)
+        )
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .limit(limit)
@@ -43,7 +46,6 @@ export async function GET(req: NextRequest) {
     // Scope: HR admin sees all; managers see team; employees see own
     if (!sessionIsAdmin) {
       if (manager_id && manager_id === sessionUserId) {
-        // Team view: fetch employees under this manager
         const { data: teamMembers } = await supabaseAdmin
           .from('employees')
           .select('id')
@@ -55,15 +57,13 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ data: [], count: 0 })
         }
       } else {
-        // Regular employee: see own claims only
-        query = query.eq('employee_id', sessionUserId)
+        query = query.eq('employee_id', sessionUserId ?? '')
       }
     }
 
     if (employee_id && sessionIsAdmin) query = query.eq('employee_id', employee_id)
     if (status)                         query = query.eq('status', status)
 
-    // Filter by month/year using claim_date
     if (year && month) {
       const monthNum  = parseInt(month)
       const yearNum   = parseInt(year)
@@ -76,11 +76,21 @@ export async function GET(req: NextRequest) {
     }
 
     const { data, error, count } = await query
-    if (error) throw error
 
-    return NextResponse.json({ data, count, limit, offset })
+    if (error) {
+      console.error('[reimbursements GET]', error)
+      // If table or relationship doesn't exist yet, return empty gracefully
+      const msg = errMsg(error)
+      if (msg.includes('does not exist') || msg.includes('PGRST') || msg.includes('relation')) {
+        return NextResponse.json({ data: [], count: 0 })
+      }
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
+
+    return NextResponse.json({ data: data ?? [], count: count ?? 0, limit, offset })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[reimbursements GET catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -90,23 +100,27 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const {
-      category,
-      description,
-      amount,
-      month,
-      year,
-      receipt_url,
-    } = body
+    const { category: rawCategory, description, amount, month, year, receipt_url } = body
 
-    if (!category || !description || !amount || !month || !year) {
+    if (!rawCategory || !description || !amount || !month || !year) {
       return NextResponse.json(
         { error: 'Missing required fields: category, description, amount, month, year' },
         { status: 400 }
       )
     }
 
-    const employeeId = (session.user as any)?.id
+    // Normalise to lowercase DB values (UI sends Title-cased display names)
+    const CATEGORY_MAP: Record<string, string> = {
+      travel: 'travel', accommodation: 'accommodation', food: 'food',
+      'food & meals': 'food', stay: 'accommodation',
+      client_entertainment: 'client_entertainment', 'client entertainment': 'client_entertainment',
+      communication: 'communication', telecom: 'communication',
+      training: 'training', medical: 'medical',
+      equipment: 'equipment', other: 'other',
+    }
+    const category = CATEGORY_MAP[String(rawCategory).toLowerCase()] ?? 'other'
+
+    const employeeId = (session.user as Record<string, unknown>)?.id as string | undefined
     if (!employeeId) {
       return NextResponse.json({ error: 'Could not resolve employee from session' }, { status: 401 })
     }
@@ -121,31 +135,36 @@ export async function POST(req: NextRequest) {
       .gte('created_at', `${yearNum}-01-01`)
       .lte('created_at', `${yearNum}-12-31`)
 
-    const seq         = (existingCount ?? 0) + 1
+    const seq          = (existingCount ?? 0) + 1
     const claim_number = `CLM/${yearNum}/${String(seq).padStart(4, '0')}`
+    const claim_date   = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`
 
-    // claim_date: first day of the given month/year
-    const claim_date = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`
+    const insertPayload: Record<string, unknown> = {
+      employee_id: employeeId,
+      claim_date,
+      category,
+      expense_type: category,
+      description: `[${claim_number}] ${description}`,
+      amount: parseFloat(amount),
+      currency: 'INR',
+      status: 'pending',
+    }
+    if (receipt_url) insertPayload.receipt_urls = [receipt_url]
 
     const { data, error } = await supabaseAdmin
       .from('expense_claims')
-      .insert({
-        employee_id: employeeId,
-        claim_date,
-        category,
-        description: `[${claim_number}] ${description}`,
-        amount: parseFloat(amount),
-        currency: 'INR',
-        receipt_urls: receipt_url ? [receipt_url] : null,
-        status: 'submitted',   // schema enum: draft→submitted→approved/rejected→paid
-      })
+      .insert(insertPayload)
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[reimbursements POST]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
     return NextResponse.json({ data, claim_number }, { status: 201 })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[reimbursements POST catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

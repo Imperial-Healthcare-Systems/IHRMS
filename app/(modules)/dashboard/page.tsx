@@ -1,12 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   Users, UserCheck, Calendar, Briefcase, Clock, IndianRupee,
-  TrendingUp, AlertCircle, CheckCircle2, FileText, CreditCard,
+  AlertCircle, CheckCircle2, FileText, CreditCard,
   ChevronRight, Star, ArrowUpRight, ArrowDownRight, Minus,
-  Activity, Zap, Target, Shield,
+  Activity, Zap, Target, Shield, Download, UserPlus, PlayCircle,
+  ClipboardList, BarChart2, ChevronDown, X,
 } from 'lucide-react'
 import { dashboardApi, type DashboardStats } from '@/lib/api-client'
 
@@ -113,11 +115,11 @@ function Avatar({ name, size = 32 }: { name: string; size?: number }) {
 }
 
 function StatCard({
-  label, value, icon: Icon, color, subtext, trend, trendDir,
+  label, value, icon: Icon, color, subtext, trendDir,
 }: {
   label: string; value: string; icon: React.ElementType
   color: { bg: string; icon: string; border: string; glow: string }
-  subtext?: string; trend?: string; trendDir?: 'up' | 'down' | 'flat'
+  subtext?: string; trendDir?: 'up' | 'down' | 'flat'
 }) {
   return (
     <div style={{
@@ -178,11 +180,109 @@ function StatCard({
 /* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   EXPORT HELPERS
+───────────────────────────────────────────── */
+function exportToCSV(rows: string[][], filename: string) {
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportDashboardCSV(stats: DashboardStats | null, totalStaff: number, presentToday: number, onLeave: number, wfhToday: number, payrollNet: string, payrollPeriod: string) {
+  const rows: string[][] = [
+    ['HR Dashboard Export — Imperial Healthcare HRMS'],
+    ['Generated', new Date().toLocaleString('en-IN')],
+    [],
+    ['WORKFORCE OVERVIEW'],
+    ['Metric', 'Value'],
+    ['Total Employees', String(totalStaff)],
+    ['Present Today',   String(presentToday)],
+    ['On Leave Today',  String(onLeave)],
+    ['WFH Today',       String(wfhToday)],
+    ['Attendance Rate', stats?.today.attendance_rate ? `${stats.today.attendance_rate}%` : '—'],
+    ['Open Positions',  String(stats?.recruitment.open_positions ?? '—')],
+    [],
+    ['PAYROLL'],
+    ['Period', payrollPeriod],
+    ['Total Net', payrollNet],
+    [],
+    ['PENDING ACTIONS'],
+    ['Leaves Pending',          String(stats?.pending.leaves ?? 5)],
+    ['Expenses Pending',        String(stats?.pending.expenses ?? 2)],
+    ['Regularizations Pending', String(stats?.pending.regularizations ?? 3)],
+    [],
+    ["TODAY'S ATTENDANCE SAMPLE"],
+    ['Name', 'Department', 'Check-In', 'Hours', 'Status'],
+    ...todayAttendance.map(e => [e.name, e.dept, e.checkIn, e.hours, e.status]),
+  ]
+  exportToCSV(rows, `IHRMS_Dashboard_${new Date().toISOString().slice(0,10)}.csv`)
+}
+
+function exportDashboardHTML(totalStaff: number, presentToday: number, onLeave: number, wfhToday: number, payrollNet: string, payrollPeriod: string) {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>IHRMS Dashboard Report</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:32px;color:#1f2937}
+    h1{color:#1e3a5f;border-bottom:3px solid #E8622A;padding-bottom:8px}
+    h2{color:#374151;margin-top:24px;font-size:14px;text-transform:uppercase;letter-spacing:.05em}
+    table{border-collapse:collapse;width:100%;margin-top:8px}
+    th{background:#1e3a5f;color:#fff;padding:8px 12px;text-align:left;font-size:12px}
+    td{padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px}
+    tr:nth-child(even) td{background:#f9fafb}
+    .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700}
+    .present{background:#f0fdf4;color:#16a34a} .absent{background:#fef2f2;color:#dc2626}
+    .wfh{background:#eff6ff;color:#1d4ed8} .late{background:#fffbeb;color:#b45309}
+    .meta{font-size:11px;color:#94a3b8;margin-top:4px}
+  </style></head><body>
+  <h1>HR Dashboard Report — Imperial Healthcare</h1>
+  <p class="meta">Generated: ${new Date().toLocaleString('en-IN')} &nbsp;|&nbsp; Period: ${payrollPeriod}</p>
+  <h2>Workforce Overview</h2>
+  <table><tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Total Employees</td><td><b>${totalStaff}</b></td></tr>
+  <tr><td>Present Today</td><td><b>${presentToday}</b></td></tr>
+  <tr><td>On Leave</td><td><b>${onLeave}</b></td></tr>
+  <tr><td>WFH Today</td><td><b>${wfhToday}</b></td></tr>
+  <tr><td>Monthly Payroll</td><td><b>${payrollNet}</b></td></tr>
+  </table>
+  <h2>Today's Attendance</h2>
+  <table><tr><th>Employee</th><th>Department</th><th>Check-In</th><th>Hours</th><th>Status</th></tr>
+  ${todayAttendance.map(e=>`<tr><td>${e.name}</td><td>${e.dept}</td><td>${e.checkIn}</td><td>${e.hours}</td><td><span class="badge ${e.status.toLowerCase()}">${e.status}</span></td></tr>`).join('')}
+  </table>
+  </body></html>`
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url; a.download = `IHRMS_Dashboard_${new Date().toISOString().slice(0,10)}.html`; a.click()
+  URL.revokeObjectURL(url)
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PAGE
+───────────────────────────────────────────── */
 export default function DashboardPage() {
+  const router = useRouter()
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [showExport, setShowExport]           = useState(false)
+  const [showQuickActions, setShowQuickActions] = useState(false)
+  const exportRef      = useRef<HTMLDivElement>(null)
+  const quickActRef    = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     dashboardApi.stats().then(setStats).catch(console.error)
+  }, [])
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (exportRef.current   && !exportRef.current.contains(e.target as Node))   setShowExport(false)
+      if (quickActRef.current && !quickActRef.current.contains(e.target as Node)) setShowQuickActions(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   const totalStaff  = stats?.headcount.total              ?? 248
@@ -206,22 +306,104 @@ export default function DashboardPage() {
         notificationCount={pendingLeaves + pendingExpenses + pendingRegs}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
-              <FileText size={13} />
-              Export
-            </button>
-            <button
-              className="btn btn-sm"
-              style={{
-                background: 'linear-gradient(135deg, #1E3A5F 0%, #1565C0 100%)',
-                color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6,
-                fontSize: 12.5, padding: '6px 14px', borderRadius: 8,
-                boxShadow: '0 2px 8px rgba(21,101,192,0.3)',
-              }}
-            >
-              <Zap size={13} />
-              Quick Actions
-            </button>
+
+            {/* ── Export dropdown ── */}
+            <div ref={exportRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => { setShowExport(v => !v); setShowQuickActions(false) }}
+                className="btn btn-outline btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}
+              >
+                <FileText size={13} />
+                Export
+                <ChevronDown size={11} style={{ transition: 'transform 0.2s', transform: showExport ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+              </button>
+              {showExport && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
+                  background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 200, overflow: 'hidden',
+                }}>
+                  <div style={{ padding: '8px 14px 6px', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Export As
+                  </div>
+                  {[
+                    { icon: FileText, label: 'Export as CSV',          sub: 'Spreadsheet-ready data',    action: () => { exportDashboardCSV(stats, totalStaff, presentToday, onLeave, wfhToday, payrollNet, payrollPeriod ?? 'Apr 2026'); setShowExport(false) } },
+                    { icon: Download, label: 'Export as HTML Report',  sub: 'Printable summary page',    action: () => { exportDashboardHTML(totalStaff, presentToday, onLeave, wfhToday, payrollNet, payrollPeriod ?? 'Apr 2026'); setShowExport(false) } },
+                    { icon: BarChart2, label: 'Export Attendance CSV', sub: "Today's attendance log",    action: () => { exportToCSV([['Name','Department','Check-In','Hours','Status'], ...todayAttendance.map(e=>[e.name,e.dept,e.checkIn,e.hours,e.status])], `IHRMS_Attendance_${new Date().toISOString().slice(0,10)}.csv`); setShowExport(false) } },
+                  ].map(item => (
+                    <button key={item.label} onClick={item.action}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 0.12s' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8fafc'}
+                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'none'}
+                    >
+                      <item.icon size={14} style={{ color: '#64748b', flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{item.label}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8' }}>{item.sub}</div>
+                      </div>
+                    </button>
+                  ))}
+                  <div style={{ borderTop: '1px solid #f1f5f9', padding: '6px 14px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <X size={11} style={{ color: '#94a3b8' }} />
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>Files download to your device</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Quick Actions dropdown ── */}
+            <div ref={quickActRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => { setShowQuickActions(v => !v); setShowExport(false) }}
+                style={{
+                  background: 'linear-gradient(135deg, #1E3A5F 0%, #1565C0 100%)',
+                  color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 12.5, padding: '6px 14px', borderRadius: 8, cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(21,101,192,0.3)',
+                }}
+              >
+                <Zap size={13} />
+                Quick Actions
+                <ChevronDown size={11} style={{ transition: 'transform 0.2s', transform: showQuickActions ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+              </button>
+              {showQuickActions && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
+                  background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 230, overflow: 'hidden',
+                }}>
+                  <div style={{ padding: '8px 14px 6px', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    HR Actions
+                  </div>
+                  {[
+                    { icon: UserPlus,     label: 'Add New Employee',     sub: 'Onboard a new hire',             color: '#2563eb', path: '/employees' },
+                    { icon: ClipboardList,label: 'Review Leave Requests', sub: `${stats?.pending.leaves ?? 5} awaiting approval`, color: '#d97706', path: '/leaves' },
+                    { icon: PlayCircle,   label: 'Run Payroll',           sub: 'Process current month salary',   color: '#7c3aed', path: '/payroll' },
+                    { icon: UserCheck,    label: 'Mark Attendance',       sub: "Record today's attendance",       color: '#16a34a', path: '/attendance' },
+                    { icon: Briefcase,    label: 'Post Job Opening',       sub: 'Add a new recruitment listing',  color: '#ea580c', path: '/recruitment' },
+                    { icon: BarChart2,    label: 'View Reports',          sub: 'Analytics & compliance reports',  color: '#0891b2', path: '/reports' },
+                  ].map(item => (
+                    <button key={item.label}
+                      onClick={() => { router.push(item.path); setShowQuickActions(false) }}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 0.12s' }}
+                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8fafc'}
+                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'none'}
+                    >
+                      <div style={{ width: 30, height: 30, borderRadius: 7, background: `${item.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <item.icon size={14} style={{ color: item.color }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{item.label}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8' }}>{item.sub}</div>
+                      </div>
+                      <ChevronRight size={12} style={{ color: '#cbd5e1', marginLeft: 'auto', flexShrink: 0 }} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
         }
       />

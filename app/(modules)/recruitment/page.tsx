@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { recruitmentApi, type JobRequisition as ApiJobRequisition, type Candidate as ApiCandidate, type Interview as ApiInterview } from '@/lib/api-client'
 import toast from 'react-hot-toast'
 import {
   Search, Download, Eye, MoreVertical,
   X, Filter, Phone, Video, Building2, Mail,
-  Plus, FileText, Clock, Users,
+  Plus, FileText, Clock, Users, MessageSquare, Pencil,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -306,6 +306,160 @@ export default function RecruitmentPage() {
     setReqSearch(''); setReqDept('All Departments'); setReqPri('All Priority'); setReqStatus('All Status')
   }
 
+  /* ── View modals ── */
+  type JRItem = typeof JR[0]
+  type CandItem = typeof CANDIDATES[0]
+  const [viewJR, setViewJR]     = useState<JRItem | null>(null)
+  const [viewCand, setViewCand] = useState<CandItem | null>(null)
+
+  /* ── Row action dropdown ── */
+  const [menuOpen, setMenuOpen] = useState<{ type: string; id: string | number } | null>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = () => setMenuOpen(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [menuOpen])
+
+  const STAGES_ORDER: Stage[] = ['Applied', 'Screening', 'Interview', 'Technical', 'HR Round', 'Offer', 'Selected']
+
+  function nextStage(current: Stage): Stage {
+    const idx = STAGES_ORDER.indexOf(current)
+    return idx >= 0 && idx < STAGES_ORDER.length - 1 ? STAGES_ORDER[idx + 1] : current
+  }
+
+  const MENU_STYLE: React.CSSProperties = {
+    position: 'absolute', right: 0, top: '100%', zIndex: 200, marginTop: 4,
+    background: '#fff', border: '1px solid var(--color-gray-200)',
+    borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+    minWidth: 180, overflow: 'hidden',
+  }
+  const MI_STYLE: React.CSSProperties = {
+    display: 'block', width: '100%', textAlign: 'left',
+    padding: '9px 16px', fontSize: '0.8125rem', fontWeight: 500,
+    color: 'var(--color-gray-700)', background: 'none', border: 'none',
+    cursor: 'pointer',
+  }
+  const MI_RED: React.CSSProperties = { ...MI_STYLE, color: '#dc2626' }
+
+  /* ── Remarks — persisted in localStorage ── */
+  const [remarks, setRemarks] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {}
+    try { return JSON.parse(localStorage.getItem('ihrms_remarks') ?? '{}') } catch { return {} }
+  })
+  const [remarkModal, setRemarkModal] = useState<{ key: string; label: string } | null>(null)
+  const [remarkText, setRemarkText] = useState('')
+
+  useEffect(() => { localStorage.setItem('ihrms_remarks', JSON.stringify(remarks)) }, [remarks])
+
+  function openRemark(key: string, label: string) {
+    setRemarkText(remarks[key] ?? '')
+    setRemarkModal({ key, label })
+  }
+  function saveRemark() {
+    if (!remarkModal) return
+    if (remarkText.trim()) setRemarks(r => ({ ...r, [remarkModal.key]: remarkText.trim() }))
+    else setRemarks(r => { const n = { ...r }; delete n[remarkModal.key]; return n })
+    setRemarkModal(null)
+    toast.success(remarkText.trim() ? 'Remark saved' : 'Remark removed')
+  }
+
+  /* ── Interview Comments — persisted in localStorage ── */
+  type IvComment = { id: string; text: string; author: string; ts: string }
+  const [comments, setComments] = useState<Record<string, IvComment[]>>(() => {
+    if (typeof window === 'undefined') return {}
+    try { return JSON.parse(localStorage.getItem('ihrms_iv_comments') ?? '{}') } catch { return {} }
+  })
+  const [commentPanel, setCommentPanel] = useState<typeof INTERVIEWS[0] | null>(null)
+  const [newComment, setNewComment] = useState('')
+
+  useEffect(() => { localStorage.setItem('ihrms_iv_comments', JSON.stringify(comments)) }, [comments])
+
+  function addComment(ivKey: string) {
+    if (!newComment.trim()) return
+    const c: IvComment = {
+      id: Date.now().toString(),
+      text: newComment.trim(),
+      author: 'HR Admin',
+      ts: new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+    }
+    setComments(prev => ({ ...prev, [ivKey]: [...(prev[ivKey] ?? []), c] }))
+    setNewComment('')
+  }
+  function deleteComment(ivKey: string, commentId: string) {
+    setComments(prev => ({ ...prev, [ivKey]: (prev[ivKey] ?? []).filter(c => c.id !== commentId) }))
+  }
+
+  /* ── New Requisition modal state ── */
+  const [showNewReq, setShowNewReq] = useState(false)
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
+  const [reqForm, setReqForm] = useState({
+    title: '', department_id: '', location: '', employment_type: 'full_time',
+    no_of_positions: '1', min_experience_years: '', max_experience_years: '',
+    min_ctc: '', max_ctc: '', priority: 'medium', target_date: '', job_description: '',
+  })
+  const [reqSaving, setReqSaving] = useState(false)
+  const [reqErr, setReqErr] = useState('')
+
+  useEffect(() => {
+    fetch('/api/departments').then(r => r.json()).then(j => setDepartments(j.data ?? [])).catch(() => {})
+  }, [])
+
+  const handleCreateReq = useCallback(async () => {
+    if (!reqForm.title.trim() || !reqForm.department_id || !reqForm.location.trim() || !reqForm.employment_type) {
+      setReqErr('Title, department, location and employment type are required.')
+      return
+    }
+    setReqSaving(true); setReqErr('')
+    try {
+      const res = await fetch('/api/recruitment/requisitions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title:               reqForm.title.trim(),
+          department_id:       reqForm.department_id,
+          location:            reqForm.location.trim(),
+          employment_type:     reqForm.employment_type,
+          openings:            reqForm.no_of_positions || '1',
+          min_experience_years: reqForm.min_experience_years || '0',
+          max_experience_years: reqForm.max_experience_years || null,
+          min_ctc:             reqForm.min_ctc || null,
+          max_ctc:             reqForm.max_ctc || null,
+          priority:            reqForm.priority,
+          target_date:         reqForm.target_date || null,
+          job_description:     reqForm.job_description || null,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to create')
+      // Add to list immediately
+      const r = json.data
+      setApiJR(prev => [{
+        id: r.id.slice(0, 8).toUpperCase(),
+        title: r.title,
+        dept: departments.find(d => d.id === r.department_id)?.name ?? '—',
+        loc: r.location ?? '—',
+        open: r.no_of_positions ?? 1,
+        filled: 0,
+        exp: r.min_experience_years != null ? `${r.min_experience_years}–${r.max_experience_years ?? (r.min_experience_years + 2)} yr` : 'Any',
+        sal: r.min_ctc ? `${Math.round(r.min_ctc / 100000)}–${Math.round((r.max_ctc ?? r.min_ctc * 1.5) / 100000)} LPA` : 'Competitive',
+        pri: (r.priority ? r.priority.charAt(0).toUpperCase() + r.priority.slice(1) : 'Medium') as Priority,
+        status: 'Open',
+        apps: 0,
+        days: 0,
+      }, ...prev])
+      setShowNewReq(false)
+      setReqForm({ title: '', department_id: '', location: '', employment_type: 'full_time', no_of_positions: '1', min_experience_years: '', max_experience_years: '', min_ctc: '', max_ctc: '', priority: 'medium', target_date: '', job_description: '' })
+    } catch (e: unknown) {
+      setReqErr(e instanceof Error ? e.message : 'Failed to create requisition')
+    } finally {
+      setReqSaving(false)
+    }
+  }, [reqForm, departments])
+
+  const INP: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const LBL: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
+
   return (
     <>
       <Topbar
@@ -318,7 +472,7 @@ export default function RecruitmentPage() {
               <Download size={14} />
               Export
             </button>
-            <button className="btn btn-primary btn-sm">
+            <button className="btn btn-primary btn-sm" onClick={() => setShowNewReq(true)}>
               <Plus size={14} />
               New Requisition
             </button>
@@ -588,8 +742,40 @@ export default function RecruitmentPage() {
                           {/* Actions */}
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                              <button className="btn btn-ghost btn-sm btn-icon" title="View"><Eye size={15} /></button>
-                              <button className="btn btn-ghost btn-sm btn-icon" title="More"><MoreVertical size={15} /></button>
+                              <button className="btn btn-ghost btn-sm btn-icon" title="View" onClick={() => setViewJR(jr)}><Eye size={15} /></button>
+                              <button
+                                className="btn btn-ghost btn-sm btn-icon"
+                                title={remarks[`jr_${jr.id}`] ? 'View / edit remark' : 'Add remark'}
+                                onClick={() => openRemark(`jr_${jr.id}`, jr.title)}
+                                style={{ position: 'relative' }}
+                              >
+                                <Pencil size={14} />
+                                {remarks[`jr_${jr.id}`] && (
+                                  <span style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }} />
+                                )}
+                              </button>
+                              <div style={{ position: 'relative' }}>
+                                <button
+                                  className="btn btn-ghost btn-sm btn-icon" title="More"
+                                  onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen?.id === jr.id && menuOpen.type === 'jr' ? null : { type: 'jr', id: jr.id }) }}
+                                >
+                                  <MoreVertical size={15} />
+                                </button>
+                                {menuOpen?.type === 'jr' && menuOpen.id === jr.id && (
+                                  <div style={MENU_STYLE} onClick={e => e.stopPropagation()}>
+                                    <button style={MI_STYLE} onClick={() => { toast('Edit feature coming soon'); setMenuOpen(null) }}>Edit Requisition</button>
+                                    {jr.status === 'Open' && (
+                                      <button style={MI_STYLE} onClick={() => { setApiJR(prev => prev.map(r => r.id === jr.id ? { ...r, status: 'On Hold' } : r)); toast.success('Requisition put on hold'); setMenuOpen(null) }}>Put On Hold</button>
+                                    )}
+                                    {jr.status === 'On Hold' && (
+                                      <button style={MI_STYLE} onClick={() => { setApiJR(prev => prev.map(r => r.id === jr.id ? { ...r, status: 'Open' } : r)); toast.success('Requisition reopened'); setMenuOpen(null) }}>Reopen</button>
+                                    )}
+                                    {jr.status !== 'Closed' && jr.status !== 'Filled' && (
+                                      <button style={MI_RED} onClick={() => { setApiJR(prev => prev.map(r => r.id === jr.id ? { ...r, status: 'Closed' } : r)); toast.success('Requisition closed'); setMenuOpen(null) }}>Close Requisition</button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
                         </tr>
@@ -718,8 +904,39 @@ export default function RecruitmentPage() {
                         {/* Actions */}
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="View profile"><Eye size={15} /></button>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="More"><MoreVertical size={15} /></button>
+                            <button className="btn btn-ghost btn-sm btn-icon" title="View profile" onClick={() => setViewCand(c)}><Eye size={15} /></button>
+                            <button
+                              className="btn btn-ghost btn-sm btn-icon"
+                              title={remarks[`cand_${c.id}`] ? 'View / edit remark' : 'Add remark'}
+                              onClick={() => openRemark(`cand_${c.id}`, c.name)}
+                              style={{ position: 'relative' }}
+                            >
+                              <Pencil size={14} />
+                              {remarks[`cand_${c.id}`] && (
+                                <span style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }} />
+                              )}
+                            </button>
+                            <div style={{ position: 'relative' }}>
+                              <button
+                                className="btn btn-ghost btn-sm btn-icon" title="More"
+                                onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen?.id === c.id && menuOpen.type === 'cand' ? null : { type: 'cand', id: c.id }) }}
+                              >
+                                <MoreVertical size={15} />
+                              </button>
+                              {menuOpen?.type === 'cand' && menuOpen.id === c.id && (
+                                <div style={MENU_STYLE} onClick={e => e.stopPropagation()}>
+                                  {c.stage !== 'Selected' && c.stage !== 'Rejected' && (
+                                    <button style={MI_STYLE} onClick={() => { setApiCandidates(prev => prev.map(x => x.id === c.id ? { ...x, stage: nextStage(x.stage) } : x)); toast.success(`Moved to ${nextStage(c.stage)}`); setMenuOpen(null) }}>
+                                      Move to {nextStage(c.stage)}
+                                    </button>
+                                  )}
+                                  <button style={MI_STYLE} onClick={() => { toast('Schedule Interview coming soon'); setMenuOpen(null) }}>Schedule Interview</button>
+                                  {c.stage !== 'Rejected' && (
+                                    <button style={MI_RED} onClick={() => { setApiCandidates(prev => prev.map(x => x.id === c.id ? { ...x, stage: 'Rejected' as Stage } : x)); toast.success('Candidate rejected'); setMenuOpen(null) }}>Reject Candidate</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -816,7 +1033,60 @@ export default function RecruitmentPage() {
                                 ) : (
                                   <button className="btn btn-ghost btn-sm btn-icon" title="Join call"><Video size={15} /></button>
                                 )}
-                                <button className="btn btn-ghost btn-sm btn-icon" title="More"><MoreVertical size={15} /></button>
+                                {/* Comments */}
+                                <button
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  title="Comments"
+                                  onClick={() => setCommentPanel(iv)}
+                                  style={{ position: 'relative' }}
+                                >
+                                  <MessageSquare size={14} />
+                                  {(comments[`iv_${iv.id}`] ?? []).length > 0 && (
+                                    <span style={{
+                                      position: 'absolute', top: 1, right: 1,
+                                      minWidth: 14, height: 14, borderRadius: 99,
+                                      background: '#1d4ed8', border: '1.5px solid #fff',
+                                      fontSize: '0.6rem', fontWeight: 700, color: '#fff',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      lineHeight: 1, padding: '0 3px',
+                                    }}>
+                                      {(comments[`iv_${iv.id}`] ?? []).length}
+                                    </span>
+                                  )}
+                                </button>
+                                {/* Remark */}
+                                <button
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  title={remarks[`iv_${iv.id}`] ? 'View / edit remark' : 'Add remark'}
+                                  onClick={() => openRemark(`iv_${iv.id}`, iv.name)}
+                                  style={{ position: 'relative' }}
+                                >
+                                  <Pencil size={14} />
+                                  {remarks[`iv_${iv.id}`] && (
+                                    <span style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }} />
+                                  )}
+                                </button>
+                                <div style={{ position: 'relative' }}>
+                                  <button
+                                    className="btn btn-ghost btn-sm btn-icon" title="More"
+                                    onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen?.id === iv.id && menuOpen.type === 'iv' ? null : { type: 'iv', id: iv.id }) }}
+                                  >
+                                    <MoreVertical size={15} />
+                                  </button>
+                                  {menuOpen?.type === 'iv' && menuOpen.id === iv.id && (
+                                    <div style={MENU_STYLE} onClick={e => e.stopPropagation()}>
+                                      {iv.status !== 'Completed' && (
+                                        <button style={MI_STYLE} onClick={() => { toast('Reschedule feature coming soon'); setMenuOpen(null) }}>Reschedule</button>
+                                      )}
+                                      {iv.status !== 'Completed' && (
+                                        <button style={MI_RED} onClick={() => { setApiInterviews(prev => prev.map(x => x.id === iv.id ? { ...x, status: 'Completed' } : x)); toast.success('Interview cancelled'); setMenuOpen(null) }}>Cancel Interview</button>
+                                      )}
+                                      {iv.status === 'Completed' && (
+                                        <button style={MI_STYLE} onClick={() => { toast('Feedback form coming soon'); setMenuOpen(null) }}>Add Feedback</button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -879,7 +1149,36 @@ export default function RecruitmentPage() {
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
                             <button className="btn btn-ghost btn-sm btn-icon" title="View offer letter"><FileText size={15} /></button>
                             <button className="btn btn-ghost btn-sm btn-icon" title="Send reminder"><Mail size={15} /></button>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="More"><MoreVertical size={15} /></button>
+                            <button
+                              className="btn btn-ghost btn-sm btn-icon"
+                              title={remarks[`offer_${o.id}`] ? 'View / edit remark' : 'Add remark'}
+                              onClick={() => openRemark(`offer_${o.id}`, o.name)}
+                              style={{ position: 'relative' }}
+                            >
+                              <Pencil size={14} />
+                              {remarks[`offer_${o.id}`] && (
+                                <span style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }} />
+                              )}
+                            </button>
+                            <div style={{ position: 'relative' }}>
+                              <button
+                                className="btn btn-ghost btn-sm btn-icon" title="More"
+                                onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen?.id === o.id && menuOpen.type === 'offer' ? null : { type: 'offer', id: o.id }) }}
+                              >
+                                <MoreVertical size={15} />
+                              </button>
+                              {menuOpen?.type === 'offer' && menuOpen.id === o.id && (
+                                <div style={MENU_STYLE} onClick={e => e.stopPropagation()}>
+                                  {o.status === 'Pending' && (
+                                    <button style={MI_STYLE} onClick={() => { toast.success('Offer marked as accepted'); setMenuOpen(null) }}>Mark as Accepted</button>
+                                  )}
+                                  <button style={MI_STYLE} onClick={() => { toast('Send reminder feature coming soon'); setMenuOpen(null) }}>Send Reminder</button>
+                                  {o.status !== 'Rejected' && (
+                                    <button style={MI_RED} onClick={() => { toast.success('Offer revoked'); setMenuOpen(null) }}>Revoke Offer</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -892,6 +1191,381 @@ export default function RecruitmentPage() {
 
         </div>
       </div>
+
+      {/* ── View Requisition Modal ── */}
+      {viewJR && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 520, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>{viewJR.title}</h3>
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{viewJR.id} · {viewJR.dept}</p>
+              </div>
+              <button onClick={() => setViewJR(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+                {([
+                  ['Department',       viewJR.dept],
+                  ['Location',         viewJR.loc],
+                  ['Experience',       viewJR.exp],
+                  ['Salary Range',     viewJR.sal],
+                  ['Positions',        `${viewJR.filled}/${viewJR.open} filled`],
+                  ['Priority',         viewJR.pri],
+                  ['Status',           viewJR.status],
+                  ['Days Open',        `${viewJR.days}d`],
+                  ['Total Applicants', String(viewJR.apps)],
+                ] as [string, string][]).map(([label, value]) => (
+                  <div key={label} style={{ padding: '10px 0', borderBottom: '1px solid var(--color-gray-50)' }}>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-gray-400)', fontWeight: 500 }}>{label}</p>
+                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-gray-900)', marginTop: 2, fontWeight: 500 }}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              {/* Remarks section */}
+              <div style={{ marginTop: 20, padding: '14px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#b45309', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Pencil size={13} /> Remarks
+                  </span>
+                  <button onClick={() => { setViewJR(null); openRemark(`jr_${viewJR.id}`, viewJR.title) }} style={{ fontSize: '0.75rem', color: '#b45309', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                    {remarks[`jr_${viewJR.id}`] ? 'Edit' : 'Add Remark'}
+                  </button>
+                </div>
+                {remarks[`jr_${viewJR.id}`]
+                  ? <p style={{ margin: 0, fontSize: '0.875rem', color: '#92400e', lineHeight: 1.5 }}>{remarks[`jr_${viewJR.id}`]}</p>
+                  : <p style={{ margin: 0, fontSize: '0.8125rem', color: '#d97706', fontStyle: 'italic' }}>No remarks added yet.</p>
+                }
+              </div>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setViewJR(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── View Candidate Modal ── */}
+      {viewCand && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 500, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={viewCand.name} size={44} />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>{viewCand.name}</h3>
+                  <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{viewCand.pos}</p>
+                </div>
+              </div>
+              <button onClick={() => setViewCand(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+            </div>
+            <div style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {([
+                ['Current Company',  viewCand.co],
+                ['Experience',       viewCand.exp],
+                ['Current CTC',      viewCand.ctc],
+                ['Source',           viewCand.src],
+                ['Stage',            viewCand.stage],
+                ['Last Updated',     viewCand.upd],
+              ] as [string, string][]).map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--color-gray-50)' }}>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', fontWeight: 500 }}>{label}</span>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-900)', fontWeight: 500 }}>{value}</span>
+                </div>
+              ))}
+              {/* Remarks section */}
+              <div style={{ marginTop: 20, padding: '14px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#b45309', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Pencil size={13} /> Remarks
+                  </span>
+                  <button onClick={() => { setViewCand(null); openRemark(`cand_${viewCand.id}`, viewCand.name) }} style={{ fontSize: '0.75rem', color: '#b45309', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                    {remarks[`cand_${viewCand.id}`] ? 'Edit' : 'Add Remark'}
+                  </button>
+                </div>
+                {remarks[`cand_${viewCand.id}`]
+                  ? <p style={{ margin: 0, fontSize: '0.875rem', color: '#92400e', lineHeight: 1.5 }}>{remarks[`cand_${viewCand.id}`]}</p>
+                  : <p style={{ margin: 0, fontSize: '0.8125rem', color: '#d97706', fontStyle: 'italic' }}>No remarks added yet.</p>
+                }
+              </div>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setViewCand(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Remark Modal ── */}
+      {remarkModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: '#fff', width: 460, maxWidth: '95vw', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '18px 22px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>
+                  {remarkText ? 'Edit Remark' : 'Add Remark'}
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 3 }}>{remarkModal.label}</p>
+              </div>
+              <button onClick={() => setRemarkModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4, marginTop: -2 }}><X size={17} /></button>
+            </div>
+            <div style={{ padding: '20px 22px' }}>
+              <textarea
+                value={remarkText}
+                onChange={e => setRemarkText(e.target.value)}
+                placeholder="Type your remark or note here..."
+                rows={5}
+                autoFocus
+                style={{ width: '100%', padding: '10px 12px', border: '1.5px solid var(--color-gray-200)', borderRadius: 8, fontSize: '0.875rem', resize: 'vertical', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', lineHeight: 1.6 }}
+              />
+              {remarks[remarkModal.key] && (
+                <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', marginTop: 6 }}>
+                  Clear the field and save to remove the existing remark.
+                </p>
+              )}
+            </div>
+            <div style={{ padding: '14px 22px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {remarks[remarkModal.key] ? (
+                <button
+                  onClick={() => { setRemarkText(''); saveRemark() }}
+                  style={{ fontSize: '0.8125rem', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 500 }}
+                >
+                  Remove Remark
+                </button>
+              ) : <span />}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setRemarkModal(null)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+                <button onClick={saveRemark} className="btn btn-primary btn-sm">Save Remark</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Interview Comments Panel ── */}
+      {commentPanel && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(4px)' }} onClick={() => setCommentPanel(null)}>
+          <div
+            style={{ marginLeft: 'auto', background: '#fff', width: 440, maxWidth: '95vw', height: '100%', boxShadow: '-8px 0 40px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Panel Header */}
+            <div style={{ padding: '20px 22px', borderBottom: '1px solid var(--color-gray-100)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <MessageSquare size={17} style={{ color: '#1d4ed8' }} />
+                    Interview Comments
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: 'var(--color-gray-700)', fontWeight: 600 }}>{commentPanel.name}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>{commentPanel.round} · {commentPanel.date}, {commentPanel.time} · {commentPanel.mode}</p>
+                </div>
+                <button onClick={() => setCommentPanel(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4, marginTop: -2 }}><X size={18} /></button>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <StatusBadge s={commentPanel.status} />
+              </div>
+            </div>
+
+            {/* Remarks section inside panel */}
+            <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--color-gray-100)', background: '#fffbeb', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#b45309', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Pencil size={12} /> Remark
+                </span>
+                <button
+                  onClick={() => openRemark(`iv_${commentPanel.id}`, commentPanel.name)}
+                  style={{ fontSize: '0.75rem', color: '#b45309', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  {remarks[`iv_${commentPanel.id}`] ? 'Edit' : 'Add'}
+                </button>
+              </div>
+              {remarks[`iv_${commentPanel.id}`]
+                ? <p style={{ margin: '6px 0 0', fontSize: '0.8125rem', color: '#92400e', lineHeight: 1.5 }}>{remarks[`iv_${commentPanel.id}`]}</p>
+                : <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#d97706', fontStyle: 'italic' }}>No remark yet — click Add.</p>
+              }
+            </div>
+
+            {/* Comment thread */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {(comments[`iv_${commentPanel.id}`] ?? []).length === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10, opacity: 0.6 }}>
+                  <MessageSquare size={38} style={{ color: 'var(--color-gray-300)' }} />
+                  <p style={{ fontWeight: 600, color: 'var(--color-gray-400)', fontSize: '0.875rem', margin: 0 }}>No comments yet</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-300)', margin: 0 }}>Add the first comment below</p>
+                </div>
+              ) : (comments[`iv_${commentPanel.id}`] ?? []).map(cm => (
+                <div key={cm.id} style={{ display: 'flex', gap: 10 }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: '50%',
+                    background: '#eff6ff', border: '2px solid #bfdbfe',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.7rem', fontWeight: 700, color: '#1d4ed8', flexShrink: 0,
+                  }}>
+                    {cm.author.split(' ').map((w: string) => w[0]).join('')}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-gray-800)' }}>{cm.author}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>{cm.ts}</span>
+                        <button
+                          onClick={() => deleteComment(`iv_${commentPanel.id}`, cm.id)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-300)', padding: 0, display: 'flex', alignItems: 'center' }}
+                          title="Delete comment"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{
+                      fontSize: '0.875rem', color: 'var(--color-gray-700)', lineHeight: 1.55,
+                      background: 'var(--color-gray-50)', padding: '10px 14px',
+                      borderRadius: 10, border: '1px solid var(--color-gray-100)',
+                      wordBreak: 'break-word',
+                    }}>
+                      {cm.text}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Comment input */}
+            <div style={{ padding: '14px 22px', borderTop: '1px solid var(--color-gray-100)', flexShrink: 0, background: '#fafbfc' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <textarea
+                  value={newComment}
+                  onChange={e => setNewComment(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(`iv_${commentPanel.id}`) } }}
+                  placeholder="Write a comment… (Enter to send)"
+                  rows={3}
+                  style={{
+                    flex: 1, padding: '10px 12px',
+                    border: '1.5px solid var(--color-gray-200)', borderRadius: 10,
+                    fontSize: '0.875rem', resize: 'none', fontFamily: 'inherit',
+                    outline: 'none', lineHeight: 1.5,
+                  }}
+                />
+                <button
+                  onClick={() => addComment(`iv_${commentPanel.id}`)}
+                  className="btn btn-primary btn-sm"
+                  style={{ padding: '9px 16px', flexShrink: 0 }}
+                  disabled={!newComment.trim()}
+                >
+                  Send
+                </button>
+              </div>
+              <p style={{ fontSize: '0.72rem', color: 'var(--color-gray-300)', marginTop: 5 }}>
+                Enter to send · Shift+Enter for new line
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── New Requisition Modal ── */}
+      {showNewReq && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 580, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.0625rem', fontWeight: 700 }}>New Job Requisition</h3>
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>Create a new hiring request</p>
+              </div>
+              <button onClick={() => setShowNewReq(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+            </div>
+
+            {/* Body */}
+            <div style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={LBL}>Job Title *</label>
+                <input style={INP} value={reqForm.title} onChange={e => setReqForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Senior Software Engineer" />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={LBL}>Department *</label>
+                  <select style={INP} value={reqForm.department_id} onChange={e => setReqForm(f => ({ ...f, department_id: e.target.value }))}>
+                    <option value="">— Select Department —</option>
+                    {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LBL}>Location *</label>
+                  <input style={INP} value={reqForm.location} onChange={e => setReqForm(f => ({ ...f, location: e.target.value }))} placeholder="e.g. Mumbai" />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={LBL}>Employment Type *</label>
+                  <select style={INP} value={reqForm.employment_type} onChange={e => setReqForm(f => ({ ...f, employment_type: e.target.value }))}>
+                    {[['full_time','Full-time'],['part_time','Part-time'],['contract','Contract'],['intern','Intern']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LBL}>No. of Positions</label>
+                  <input style={INP} type="number" min={1} value={reqForm.no_of_positions} onChange={e => setReqForm(f => ({ ...f, no_of_positions: e.target.value }))} />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={LBL}>Min Experience (yrs)</label>
+                  <input style={INP} type="number" min={0} value={reqForm.min_experience_years} onChange={e => setReqForm(f => ({ ...f, min_experience_years: e.target.value }))} placeholder="0" />
+                </div>
+                <div>
+                  <label style={LBL}>Max Experience (yrs)</label>
+                  <input style={INP} type="number" min={0} value={reqForm.max_experience_years} onChange={e => setReqForm(f => ({ ...f, max_experience_years: e.target.value }))} placeholder="Optional" />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={LBL}>Min CTC (₹)</label>
+                  <input style={INP} type="number" min={0} value={reqForm.min_ctc} onChange={e => setReqForm(f => ({ ...f, min_ctc: e.target.value }))} placeholder="e.g. 500000" />
+                </div>
+                <div>
+                  <label style={LBL}>Max CTC (₹)</label>
+                  <input style={INP} type="number" min={0} value={reqForm.max_ctc} onChange={e => setReqForm(f => ({ ...f, max_ctc: e.target.value }))} placeholder="e.g. 1200000" />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={LBL}>Priority</label>
+                  <select style={INP} value={reqForm.priority} onChange={e => setReqForm(f => ({ ...f, priority: e.target.value }))}>
+                    {[['low','Low'],['medium','Medium'],['high','High'],['urgent','Urgent']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LBL}>Target Date</label>
+                  <input style={INP} type="date" value={reqForm.target_date} onChange={e => setReqForm(f => ({ ...f, target_date: e.target.value }))} />
+                </div>
+              </div>
+
+              <div>
+                <label style={LBL}>Job Description</label>
+                <textarea style={{ ...INP, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={reqForm.job_description} onChange={e => setReqForm(f => ({ ...f, job_description: e.target.value }))} placeholder="Describe the role, responsibilities..." />
+              </div>
+
+              {reqErr && (
+                <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{reqErr}</div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={() => setShowNewReq(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+              <button onClick={handleCreateReq} disabled={reqSaving} className="btn btn-primary btn-sm" style={{ opacity: reqSaving ? 0.7 : 1 }}>
+                {reqSaving ? 'Creating…' : 'Create Requisition'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

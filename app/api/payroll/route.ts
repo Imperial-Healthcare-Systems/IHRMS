@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 const MONTH_NAMES = [
   '', 'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -20,14 +29,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseAdmin
       .from('payroll_runs')
-      .select(`
-        id, month, year, run_date, payment_date, status,
-        total_employees, total_gross, total_deductions, total_net,
-        total_employer_pf, total_employer_esic, remarks,
-        processed_by:employees!payroll_runs_processed_by_fkey(id, first_name, last_name, emp_id),
-        approved_by:employees!payroll_runs_approved_by_fkey(id, first_name, last_name, emp_id),
-        created_at, updated_at
-      `, { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('year', { ascending: false })
       .order('month', { ascending: false })
       .limit(limit)
@@ -36,12 +38,12 @@ export async function GET(req: NextRequest) {
     if (status) query = query.eq('status', status)
 
     const { data, error, count } = await query
-    if (error) throw error
+    if (error) { console.error('[payroll GET]', error); throw error }
 
     return NextResponse.json({ data, count })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Internal error'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    console.error('[payroll GET catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -49,9 +51,6 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const isAdmin = (session.user as any)?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
 
     const body = await req.json()
     const { month, year } = body
@@ -73,7 +72,7 @@ export async function POST(req: NextRequest) {
       .select('id, status')
       .eq('month', monthNum)
       .eq('year', yearNum)
-      .single()
+      .maybeSingle()
 
     if (existing) {
       return NextResponse.json(
@@ -89,27 +88,25 @@ export async function POST(req: NextRequest) {
       .in('status', ['active', 'probation', 'on_leave', 'notice_period'])
 
     const period_label = `${MONTH_NAMES[monthNum]} ${yearNum}`
-    const processedById = (session.user as any)?.id ?? null
 
     const { data, error } = await supabaseAdmin
       .from('payroll_runs')
       .insert({
         month: monthNum,
-        year: yearNum,
+        year:  yearNum,
         status: 'draft',
         total_employees: employeeCount ?? 0,
         remarks: period_label,
-        processed_by: processedById,
         run_date: new Date().toISOString().split('T')[0],
       })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) { console.error('[payroll POST]', error); throw error }
 
     return NextResponse.json({ data, period_label }, { status: 201 })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Internal error'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    console.error('[payroll POST catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

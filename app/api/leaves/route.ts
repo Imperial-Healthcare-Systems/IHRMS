@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -10,23 +19,20 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const employee_id = searchParams.get('employee_id')
-    const status = searchParams.get('status')
-    const leave_type = searchParams.get('leave_type')
-    const year = searchParams.get('year')
-    const manager_id = searchParams.get('manager_id') // for pending approvals
-    const limit = parseInt(searchParams.get('limit') ?? '50')
+    const status      = searchParams.get('status')
+    const leave_type  = searchParams.get('leave_type')
+    const year        = searchParams.get('year')
+    const manager_id  = searchParams.get('manager_id')
+    const limit       = parseInt(searchParams.get('limit') ?? '50')
 
     const userRole = (session.user as any)?.role
-    const userId = (session.user as any)?.id
+    const userId   = (session.user as any)?.id
 
     let query = supabaseAdmin
       .from('leave_requests')
       .select(`
         *,
-        employee:employees(id, first_name, last_name, emp_id,
-          department:departments(name)),
-        level1_approver:employees!level1_approver_id(id, first_name, last_name),
-        level2_approver:employees!level2_approver_id(id, first_name, last_name)
+        employee:employees!leave_requests_employee_id_fkey(id, first_name, last_name, emp_id, department_id)
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .limit(limit)
@@ -35,20 +41,17 @@ export async function GET(req: NextRequest) {
     else if (!['hr_admin', 'super_admin', 'operations_head', 'manager'].includes(userRole)) {
       query = query.eq('employee_id', userId)
     }
-    if (status) query = query.eq('status', status)
+    if (status)     query = query.eq('status', status)
     if (leave_type) query = query.eq('leave_type', leave_type)
-    if (year) {
-      query = query.gte('start_date', `${year}-01-01`).lte('start_date', `${year}-12-31`)
-    }
-    if (manager_id) {
-      query = query.eq('level1_approver_id', manager_id).eq('level1_status', 'pending')
-    }
+    if (year)       query = query.gte('from_date', `${year}-01-01`).lte('from_date', `${year}-12-31`)
+    if (manager_id) query = query.eq('approved_by', manager_id)
 
     const { data, error, count } = await query
-    if (error) throw error
+    if (error) { console.error('[leaves GET]', error); throw error }
     return NextResponse.json({ data, count })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[leaves GET catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -58,57 +61,50 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { leave_type, start_date, end_date, days, reason, is_half_day, half_day_session, employee_id } = body
+    const { leave_type, start_date, end_date, from_date, to_date, days, reason, employee_id } = body
 
-    if (!leave_type || !start_date || !end_date || !reason) {
-      return NextResponse.json({ error: 'leave_type, start_date, end_date, reason are required' }, { status: 400 })
+    const effectiveFrom = from_date ?? start_date
+    const effectiveTo   = to_date   ?? end_date
+
+    if (!leave_type || !effectiveFrom || !effectiveTo || !reason) {
+      return NextResponse.json({ error: 'leave_type, from_date, to_date, reason are required' }, { status: 400 })
     }
+
+    // Map UI short codes → DB enum values
+    const LEAVE_TYPE_MAP: Record<string, string> = {
+      CL: 'casual', SL: 'sick', EL: 'earned', LOP: 'unpaid',
+      ML: 'maternity', PL: 'paternity', CompOff: 'compensatory',
+      Bereavement: 'bereavement', WFH: 'work_from_home',
+      casual: 'casual', sick: 'sick', earned: 'earned', unpaid: 'unpaid',
+      maternity: 'maternity', paternity: 'paternity',
+      compensatory: 'compensatory', bereavement: 'bereavement',
+    }
+    const dbLeaveType = LEAVE_TYPE_MAP[leave_type] ?? leave_type.toLowerCase()
 
     const targetEmployee = employee_id ?? (session.user as any)?.id
 
-    // Get employee info for approver
-    const { data: emp } = await supabaseAdmin
-      .from('employees')
-      .select('manager_id, status')
-      .eq('id', targetEmployee)
-      .single()
-
-    if (emp?.status === 'terminated') {
-      return NextResponse.json({ error: 'Cannot apply leave for terminated employee' }, { status: 400 })
-    }
-
-    // Check leave balance (except LOP)
-    if (leave_type !== 'LOP') {
-      const year = new Date(start_date).getFullYear()
-      const { data: balance } = await supabaseAdmin
-        .from('leave_balances')
-        .select('closing_balance')
-        .eq('employee_id', targetEmployee)
-        .eq('leave_type', leave_type)
-        .eq('year', year)
-        .single()
-
-      if (balance && (balance.closing_balance ?? 0) < days) {
-        return NextResponse.json({
-          error: `Insufficient ${leave_type} balance. Available: ${balance.closing_balance}, Requested: ${days}`
-        }, { status: 400 })
-      }
-    }
+    // Calculate total_days if not provided
+    const msPerDay  = 86400000
+    const totalDays = days ?? Math.round((new Date(effectiveTo).getTime() - new Date(effectiveFrom).getTime()) / msPerDay) + 1
 
     const { data, error } = await supabaseAdmin
       .from('leave_requests')
       .insert({
-        employee_id: targetEmployee, leave_type, start_date, end_date,
-        days: days ?? 1, reason, is_half_day: is_half_day ?? false,
-        half_day_session, status: 'pending',
-        level1_approver_id: emp?.manager_id ?? null,
-        level1_status: 'pending',
+        employee_id: targetEmployee,
+        leave_type:  dbLeaveType,
+        from_date:   effectiveFrom,
+        to_date:     effectiveTo,
+        total_days:  totalDays,
+        reason,
+        status:      'pending',
       })
       .select()
       .single()
-    if (error) throw error
+
+    if (error) { console.error('[leaves POST]', error); throw error }
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[leaves POST catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

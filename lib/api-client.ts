@@ -60,11 +60,12 @@ export interface AttendanceLog {
 }
 
 export interface LeaveRequest {
-  id: string; employee_id: string; leave_type: string; start_date: string; end_date: string
-  days: number; reason: string; status: string; is_half_day: boolean; half_day_session: string | null
-  level1_status: string | null; level2_status: string | null; created_at: string
-  employee: { id: string; first_name: string; last_name: string; emp_id: string; department: { name: string } | null } | null
-  level1_approver: { id: string; first_name: string; last_name: string } | null
+  id: string; employee_id: string; leave_type: string
+  from_date: string; to_date: string; total_days: number
+  reason: string; status: string
+  approved_by: string | null; approved_at: string | null; approver_remarks: string | null
+  created_at: string; updated_at: string | null
+  employee: { id: string; first_name: string; last_name: string; emp_id: string; department_id: string | null } | null
 }
 
 export interface LeaveBalance {
@@ -73,9 +74,13 @@ export interface LeaveBalance {
 }
 
 export interface PayrollRun {
-  id: string; month: number; year: number; run_date: string; payment_date: string | null; status: string
-  total_employees: number; total_gross: number; total_deductions: number; total_net: number
-  total_employer_pf: number; total_employer_esic: number; remarks: string | null; created_at: string
+  id: string; month: number; year: number; status: string
+  run_date?: string | null; payment_date?: string | null
+  total_employees?: number | null; total_gross?: number | null
+  total_deductions?: number | null; total_net?: number | null
+  total_employer_pf?: number | null; total_employer_esic?: number | null
+  remarks?: string | null; processed_by?: string | null; approved_by?: string | null
+  created_at?: string; updated_at?: string | null
 }
 
 export interface Payslip {
@@ -228,11 +233,11 @@ export const leavesApi = {
 
   get: (id: string) => apiFetch<{ data: LeaveRequest }>(`/api/leaves/${id}`),
 
-  create: (payload: { leave_type: string; start_date: string; end_date: string; days: number; reason: string; is_half_day?: boolean; half_day_session?: string; employee_id?: string }) =>
+  create: (payload: { leave_type: string; from_date: string; to_date: string; days?: number; reason: string; employee_id?: string }) =>
     apiFetch<{ data: LeaveRequest }>('/api/leaves', { method: 'POST', body: JSON.stringify(payload) }),
 
-  approve: (id: string, payload: { action: 'approve' | 'reject'; level?: 1 | 2; remarks?: string }) =>
-    apiFetch<{ data: LeaveRequest }>(`/api/leaves/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  approve: (id: string, payload: { action: 'approve' | 'reject' | 'cancel'; remarks?: string }) =>
+    apiFetch<{ data: LeaveRequest }>(`/api/leaves/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 
   balance: (params: { employee_id?: string; year?: number } = {}) =>
     apiFetch<{ data: LeaveBalance[] }>(`/api/leaves/balance${qs(params)}`),
@@ -252,7 +257,30 @@ export const payrollApi = {
   payslips: (id: string, params: { employee_id?: string } = {}) =>
     apiFetch<{ data: Payslip[] }>(`/api/payroll/${id}/payslips${qs(params)}`),
 
-  salaryStructures: () => apiFetch<{ data: unknown[] }>('/api/payroll/salary-structures'),
+  salaryStructures: (params: { employee_id?: string } = {}) =>
+    apiFetch<{ data: unknown[] }>(`/api/payroll/salary-structures${qs(params)}`),
+
+  createSalaryStructure: (payload: {
+    employee_id: string
+    effective_from: string
+    effective_to?: string
+    ctc_annual: number
+    basic: number
+    hra?: number
+    conveyance?: number
+    medical_allowance?: number
+    special_allowance?: number
+    lta?: number
+    pf_employer?: number
+    esic_employer?: number
+    remarks?: string
+  }) => apiFetch<{ data: unknown }>('/api/payroll/salary-structures', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  action: (id: string, payload: { action: string; notes?: string }) =>
+    apiFetch<{ data: PayrollRun }>(`/api/payroll/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 }
 
 // ─── recruitment ─────────────────────────────────────────────────────────────

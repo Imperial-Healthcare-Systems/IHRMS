@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Topbar } from '@/components/layout/Topbar'
-import { employeesApi, type Employee as ApiEmployee, type Department } from '@/lib/api-client'
+import { employeesApi, payrollApi, type Employee as ApiEmployee, type Department } from '@/lib/api-client'
 import toast from 'react-hot-toast'
 import {
   Users,
@@ -26,20 +27,6 @@ import {
 ───────────────────────────────────────────────────────────── */
 type EmployeeStatus = 'Active' | 'Probation' | 'On Leave' | 'Notice Period' | 'Inactive'
 type EmploymentType = 'Full-time' | 'Part-time' | 'Contract' | 'Intern'
-
-interface Employee {
-  id: string
-  empId: string
-  name: string
-  email: string
-  phone: string
-  department: string
-  designation: string
-  location: string
-  employmentType: EmploymentType
-  status: EmployeeStatus
-  hireDate: string
-}
 
 // Employee data is fetched live from /api/employees
 const STATUSES: ['All Status', ...EmployeeStatus[]] = ['All Status', 'Active', 'Probation', 'On Leave', 'Notice Period', 'Inactive']
@@ -423,6 +410,9 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
+  const [tab, setTab] = useState<'details' | 'salary'>('details')
+
+  /* ── Details state ── */
   const [form, setForm] = useState({
     first_name:      emp.first_name,
     last_name:       emp.last_name,
@@ -435,29 +425,80 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
 
-  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
-  const labelStyle: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
+  /* ── Salary state ── */
+  const BLANK_SAL = { ctc_annual: '', basic: '', hra: '', conveyance: '', medical: '', special: '', lta: '', pf: '', esic: '', metro: true, effective_from: new Date().toISOString().slice(0, 10) }
+  const [sal, setSal]             = useState(BLANK_SAL)
+  const [salLoading, setSalLoading] = useState(false)
+  const [salError, setSalError]   = useState('')
+  const [hasSal, setHasSal]       = useState(false)   // true = existing structure found
 
-  const handleSave = async () => {
-    if (!form.first_name.trim() || !form.last_name.trim()) {
-      setError('First name and last name are required.')
-      return
-    }
-    setSaving(true)
-    setError('')
+  useEffect(() => {
+    if (tab !== 'salary') return
+    setSalLoading(true); setSalError('')
+    // Direct fetch so we can see the real error text
+    fetch(`/api/payroll/salary-structures?employee_id=${emp.id}`)
+      .then(async res => {
+        const json = await res.json()
+        if (!res.ok) {
+          // Show real server error but still allow form entry
+          setSalError(`Server: ${json?.error ?? `HTTP ${res.status}`}`)
+          return
+        }
+        const rows = (json.data ?? []) as Record<string, unknown>[]
+        if (rows.length > 0) {
+          const r = rows[0]
+          setHasSal(true)
+          setSal({
+            ctc_annual:    String(r.ctc_annual            ?? ''),
+            basic:         String(r.basic_monthly         ?? ''),
+            hra:           String(r.hra_monthly           ?? ''),
+            conveyance:    String(r.conveyance_allowance  ?? ''),
+            medical:       String(r.medical_allowance     ?? ''),
+            special:       String(r.special_allowance     ?? ''),
+            lta:           String(r.lta_monthly           ?? ''),
+            pf:            String(r.employer_pf           ?? ''),
+            esic:          String(r.employer_esic         ?? ''),
+            metro:         true,
+            effective_from: new Date().toISOString().slice(0, 10),
+          })
+        }
+      })
+      .catch(err => setSalError(`Network error: ${err?.message ?? err}`))
+      .finally(() => setSalLoading(false))
+  }, [tab, emp.id])
+
+  function recalcSal(ctcAnnual: string, metro: boolean) {
+    const ctc   = parseFloat(ctcAnnual) || 0
+    if (ctc === 0) return
+    const basic   = Math.round(ctc * 0.40 / 12)
+    const hra     = Math.round(basic * (metro ? 0.50 : 0.40))
+    const convey  = 1600
+    const medical = 1250
+    const pfBase  = Math.min(basic, 15000)
+    const pf      = Math.round(pfBase * 0.12)
+    const gross   = Math.round(ctc / 12)
+    const esic    = gross <= 21000 ? Math.round(gross * 0.0325) : 0
+    const special = Math.max(0, gross - basic - hra - convey - medical - pf - esic)
+    setSal(s => ({ ...s, basic: String(basic), hra: String(hra), conveyance: String(convey), medical: String(medical), special: String(special), pf: String(pf), esic: String(esic) }))
+  }
+
+  const IS: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const LS: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
+  const LBs: React.CSSProperties = { display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }
+  const FLs: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1.5px solid #e5e7eb', padding: '8px 11px', fontSize: '0.875rem', color: '#111827', background: '#f9fafb', outline: 'none', boxSizing: 'border-box' }
+
+  const handleSaveDetails = async () => {
+    if (!form.first_name.trim() || !form.last_name.trim()) { setError('First name and last name are required.'); return }
+    setSaving(true); setError('')
     try {
       const res  = await fetch(`/api/employees/${emp.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          first_name:      form.first_name.trim(),
-          last_name:       form.last_name.trim(),
-          full_name:       `${form.first_name.trim()} ${form.last_name.trim()}`,
-          work_location:   form.work_location,
-          employment_type: form.employment_type,
-          status:          form.status,
-          role:            form.role,
-          department_id:   form.department_id || null,
+          first_name: form.first_name.trim(), last_name: form.last_name.trim(),
+          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`,
+          work_location: form.work_location, employment_type: form.employment_type,
+          status: form.status, role: form.role, department_id: form.department_id || null,
         }),
       })
       const json = await res.json()
@@ -465,63 +506,241 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
       onSaved()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
+  }
+
+  const handleSaveSalary = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setSaving(true); setSalError('')
+    try {
+      await payrollApi.createSalaryStructure({
+        employee_id:       emp.id,
+        effective_from:    sal.effective_from,
+        ctc_annual:        parseFloat(sal.ctc_annual)  || 0,
+        basic:             parseFloat(sal.basic)        || 0,
+        hra:               parseFloat(sal.hra)          || 0,
+        conveyance:        parseFloat(sal.conveyance)   || 0,
+        medical_allowance: parseFloat(sal.medical)      || 0,
+        special_allowance: parseFloat(sal.special)      || 0,
+        lta:               parseFloat(sal.lta)          || 0,
+        pf_employer:       parseFloat(sal.pf)           || 0,
+        esic_employer:     parseFloat(sal.esic)         || 0,
+        remarks:           hasSal ? 'Salary amended' : 'Salary set up',
+      })
+      toast.success(
+        hasSal ? 'Salary updated!' : 'Salary structure saved!',
+        { duration: 5000 }
+      )
+      onSaved()
+      // Show a follow-up toast prompting payroll
+      setTimeout(() => {
+        toast(
+          (t) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>Ready to generate payroll?</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => { toast.dismiss(t.id); window.location.href = '/payroll' }}
+                  style={{ padding: '6px 14px', borderRadius: 7, border: 'none', background: '#1e3a5f', color: '#fff', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}
+                >
+                  Go to Payroll →
+                </button>
+                <button
+                  onClick={() => toast.dismiss(t.id)}
+                  style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: '0.8rem', cursor: 'pointer' }}
+                >
+                  Later
+                </button>
+              </div>
+            </div>
+          ),
+          { duration: 8000, icon: '💰' }
+        )
+      }, 800)
+    } catch (err: unknown) {
+      setSalError(err instanceof Error ? err.message : 'Failed to save salary')
+    } finally { setSaving(false) }
   }
 
   return (
     <>
-      <div style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div>
-            <label style={labelStyle}>First Name *</label>
-            <input style={inputStyle} value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} />
-          </div>
-          <div>
-            <label style={labelStyle}>Last Name *</label>
-            <input style={inputStyle} value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} />
-          </div>
-        </div>
-        <div>
-          <label style={labelStyle}>Department</label>
-          <select style={inputStyle} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>
-            <option value="">— No Department —</option>
-            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div>
-            <label style={labelStyle}>Employment Type</label>
-            <select style={inputStyle} value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))}>
-              {[['full_time','Full-time'],['part_time','Part-time'],['contract','Contract'],['intern','Intern']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Status</label>
-            <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
-              {[['active','Active'],['probation','Probation'],['on_leave','On Leave'],['notice_period','Notice Period'],['inactive','Inactive']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-        </div>
-        <div>
-          <label style={labelStyle}>Work Location</label>
-          <input style={inputStyle} value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} placeholder="e.g. Mumbai" />
-        </div>
-        <div>
-          <label style={labelStyle}>Role</label>
-          <select style={inputStyle} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-            {[['employee','Employee'],['manager','Manager'],['hr','HR'],['admin','Admin']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
-        {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{error}</div>}
+      {/* Tab strip */}
+      <div style={{ display: 'flex', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
+        {([['details', 'Employee Details'], ['salary', 'Salary & Components']] as const).map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            padding: '11px 22px', fontSize: '0.85rem', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer',
+            color: tab === key ? '#E8622A' : '#6b7280',
+            borderBottom: tab === key ? '2px solid #E8622A' : '2px solid transparent',
+          }}>
+            {label}
+          </button>
+        ))}
       </div>
-      <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-        <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
-        <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm" style={{ opacity: saving ? 0.7 : 1 }}>
-          {saving ? 'Saving…' : 'Save Changes'}
-        </button>
-      </div>
+
+      {/* ── TAB: Employee Details ── */}
+      {tab === 'details' && (
+        <>
+          <div style={{ overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={LS}>First Name *</label>
+                <input style={IS} value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} />
+              </div>
+              <div>
+                <label style={LS}>Last Name *</label>
+                <input style={IS} value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <label style={LS}>Department</label>
+              <select style={IS} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>
+                <option value="">— No Department —</option>
+                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={LS}>Employment Type</label>
+                <select style={IS} value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))}>
+                  {[['full_time','Full-time'],['part_time','Part-time'],['contract','Contract'],['intern','Intern']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={LS}>Status</label>
+                <select style={IS} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+                  {[['active','Active'],['probation','Probation'],['on_leave','On Leave'],['notice_period','Notice Period'],['inactive','Inactive']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style={LS}>Work Location</label>
+              <input style={IS} value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} placeholder="e.g. Mumbai" />
+            </div>
+            <div>
+              <label style={LS}>Role</label>
+              <select style={IS} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+                {[['employee','Employee'],['manager','Manager'],['hr','HR'],['admin','Admin']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{error}</div>}
+          </div>
+          <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
+            <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+            <button onClick={handleSaveDetails} disabled={saving} className="btn btn-primary btn-sm" style={{ opacity: saving ? 0.7 : 1 }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── TAB: Salary & Components ── */}
+      {tab === 'salary' && (
+        salLoading ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '0.875rem' }}>Loading salary data…</div>
+        ) : (
+          <form onSubmit={handleSaveSalary} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ overflowY: 'auto', flex: 1, padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Status banner */}
+              {hasSal ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', fontSize: '0.8rem', color: '#1d4ed8', fontWeight: 600 }}>
+                  <span style={{ fontSize: '1rem' }}>ℹ️</span>
+                  Existing salary structure loaded. Changes will create a new revision effective from the date below.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontSize: '0.8rem', color: '#92400e', fontWeight: 600 }}>
+                  <span style={{ fontSize: '1rem' }}>⚠️</span>
+                  No salary structure found. Set one up below.
+                </div>
+              )}
+
+              {/* CTC + Metro + Effective From */}
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <label style={LBs}>Annual CTC (₹) *</label>
+                  <input required type="number" min="0" step="1000" value={sal.ctc_annual} placeholder="e.g. 600000"
+                    onChange={e => { setSal(s => ({ ...s, ctc_annual: e.target.value })); recalcSal(e.target.value, sal.metro) }}
+                    style={{ ...FLs, fontWeight: 700, fontSize: '1rem', color: '#c2410c' }} />
+                </div>
+                <div style={{ minWidth: 160 }}>
+                  <label style={LBs}>Effective From *</label>
+                  <input required type="date" value={sal.effective_from} onChange={e => setSal(s => ({ ...s, effective_from: e.target.value }))} style={FLs} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingBottom: 2 }}>
+                  <input type="checkbox" id="edit-metro" checked={sal.metro} style={{ width: 15, height: 15, cursor: 'pointer' }}
+                    onChange={e => { setSal(s => ({ ...s, metro: e.target.checked })); recalcSal(sal.ctc_annual, e.target.checked) }} />
+                  <label htmlFor="edit-metro" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', cursor: 'pointer', whiteSpace: 'nowrap' }}>Metro City (50% HRA)</label>
+                </div>
+              </div>
+
+              {/* Earnings */}
+              <div>
+                <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Earnings (Monthly ₹)</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 11 }}>
+                  {([['basic','Basic Salary *', true],['hra','HRA', false],['conveyance','Conveyance', false],['medical','Medical Allow.', false],['special','Special Allow.', false],['lta','LTA (monthly)', false]] as [string, string, boolean][]).map(([k, lbl, req]) => (
+                    <div key={k}>
+                      <label style={LBs}>{lbl}</label>
+                      <input required={req} type="number" min="0" step="1" placeholder="0"
+                        value={(sal as unknown as Record<string, string>)[k]}
+                        onChange={e => setSal(s => ({ ...s, [k]: e.target.value }))}
+                        style={FLs} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Employer contributions */}
+              <div>
+                <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Employer Contributions (Monthly ₹)</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11 }}>
+                  <div>
+                    <label style={LBs}>Employer PF <span style={{ color: '#9ca3af', fontWeight: 400, textTransform: 'none' }}>(12% of Basic, max ₹1,800)</span></label>
+                    <input type="number" min="0" step="1" placeholder="0" value={sal.pf} onChange={e => setSal(s => ({ ...s, pf: e.target.value }))} style={FLs} />
+                  </div>
+                  <div>
+                    <label style={LBs}>Employer ESIC <span style={{ color: '#9ca3af', fontWeight: 400, textTransform: 'none' }}>(3.25%, if gross ≤ ₹21,000)</span></label>
+                    <input type="number" min="0" step="1" placeholder="0" value={sal.esic} onChange={e => setSal(s => ({ ...s, esic: e.target.value }))} style={FLs} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Live summary */}
+              {sal.ctc_annual && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px' }}>
+                  <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Salary Summary</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
+                    {[
+                      { label: 'Annual CTC',    val: `₹${(parseFloat(sal.ctc_annual)||0).toLocaleString('en-IN')}` },
+                      { label: 'Monthly Gross', val: `₹${Math.round((parseFloat(sal.ctc_annual)||0)/12).toLocaleString('en-IN')}` },
+                      { label: 'Basic / mo',    val: `₹${(parseFloat(sal.basic)||0).toLocaleString('en-IN')}` },
+                      { label: 'Take-home est.', val: `₹${Math.max(0, Math.round((parseFloat(sal.ctc_annual)||0)/12) - (parseFloat(sal.pf)||0) - (parseFloat(sal.esic)||0)).toLocaleString('en-IN')}` },
+                    ].map(item => (
+                      <div key={item.label}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#166534' }}>{item.val}</div>
+                        <div style={{ fontSize: '0.68rem', color: '#4ade80' }}>{item.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {salError && (
+                <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>
+                  <strong>Could not load existing salary data.</strong> You can still enter salary details below and save them.<br />
+                  <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>{salError}</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '14px 24px 18px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
+              <button type="button" onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+              <button type="submit" disabled={saving} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: saving ? '#9ca3af' : '#16a34a', color: '#fff', fontWeight: 600, fontSize: '0.875rem', cursor: saving ? 'not-allowed' : 'pointer' }}>
+                {saving ? 'Saving…' : hasSal ? '✓ Amend Salary' : '✓ Save Salary'}
+              </button>
+            </div>
+          </form>
+        )
+      )}
     </>
   )
 }
@@ -530,6 +749,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
    MAIN COMPONENT
 ───────────────────────────────────────────────────────────── */
 export default function EmployeesPage() {
+  const router = useRouter()
   const [search, setSearch]           = useState('')
   const [deptFilter, setDeptFilter]   = useState('All Departments')
   const [statusFilter, setStatusFilter] = useState('All Status')
@@ -546,14 +766,47 @@ export default function EmployeesPage() {
   const [viewEmp, setViewEmp]         = useState<ApiEmployee | null>(null)
   const [editEmp, setEditEmp]         = useState<ApiEmployee | null>(null)
 
-  /* Add Employee modal */
+  /* Add Employee modal — 2-step wizard */
   const [showAdd, setShowAdd]         = useState(false)
+  const [addStep, setAddStep]         = useState<1 | 2 | 3>(1)
+  const [newEmpId, setNewEmpId]       = useState<string>('')
+  const [newEmpName, setNewEmpName]   = useState<string>('')
   const [saving, setSaving]           = useState(false)
   const [form, setForm]               = useState({
     first_name: '', last_name: '', email: '', phone: '',
     department_id: '', designation_id: '', employment_type: 'full_time',
     hire_date: '', work_location: '', role: 'employee',
   })
+
+  const BLANK_SALARY = { ctc_annual: '', basic: '', hra: '', conveyance: '', medical: '', special: '', lta: '', pf: '', esic: '', metro: true, effective_from: new Date().toISOString().slice(0, 10) }
+  const [salary, setSalary]           = useState(BLANK_SALARY)
+
+  function closAddModal() {
+    setShowAdd(false); setAddStep(1); setNewEmpId(''); setNewEmpName('')
+    setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', role: 'employee' })
+    setSalary(BLANK_SALARY)
+  }
+
+  /* Auto-calculate salary fields from CTC */
+  function recalcSalary(ctcAnnual: string, metroCity: boolean) {
+    const ctc = parseFloat(ctcAnnual) || 0
+    if (ctc === 0) return
+    const basic     = Math.round(ctc * 0.40 / 12)
+    const hra       = Math.round(basic * (metroCity ? 0.50 : 0.40))
+    const convey    = 1600
+    const medical   = 1250
+    const pfBase    = Math.min(basic, 15000)
+    const pf        = Math.round(pfBase * 0.12)
+    const grossEst  = Math.round(ctc / 12)
+    const esic      = grossEst <= 21000 ? Math.round(grossEst * 0.0325) : 0
+    const special   = Math.max(0, grossEst - basic - hra - convey - medical - pf - esic)
+    setSalary(s => ({
+      ...s,
+      basic: String(basic), hra: String(hra),
+      conveyance: String(convey), medical: String(medical),
+      special: String(special), pf: String(pf), esic: String(esic),
+    }))
+  }
 
   const PAGE_SIZE = 50
 
@@ -617,23 +870,53 @@ export default function EmployeesPage() {
     setCurrentPage(1)
   }
 
-  async function handleAddEmployee(e: React.FormEvent) {
+  async function handleAddEmployee(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setSaving(true)
     try {
-      await employeesApi.create({
+      const res = await employeesApi.create({
         first_name: form.first_name, last_name: form.last_name,
         email: form.email, phone: form.phone || undefined,
         department_id: form.department_id, designation_id: form.designation_id || undefined,
         employment_type: form.employment_type, hire_date: form.hire_date,
         work_location: form.work_location || undefined, role: form.role,
       })
-      toast.success('Employee added successfully')
-      setShowAdd(false)
-      setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', role: 'employee' })
+      const empId   = (res as { data?: { id?: string } }).data?.id ?? ''
+      const empName = `${form.first_name} ${form.last_name}`.trim()
+      setNewEmpId(empId)
+      setNewEmpName(empName)
+      toast.success('Employee added! Now set up salary.')
       fetchEmployees()
+      setAddStep(2)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to add employee')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleSaveSalary(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!newEmpId) { closAddModal(); return }
+    setSaving(true)
+    try {
+      await payrollApi.createSalaryStructure({
+        employee_id:       newEmpId,
+        effective_from:    salary.effective_from,
+        ctc_annual:        parseFloat(salary.ctc_annual) || 0,
+        basic:             parseFloat(salary.basic)      || 0,
+        hra:               parseFloat(salary.hra)        || 0,
+        conveyance:        parseFloat(salary.conveyance) || 0,
+        medical_allowance: parseFloat(salary.medical)    || 0,
+        special_allowance: parseFloat(salary.special)    || 0,
+        lta:               parseFloat(salary.lta)        || 0,
+        pf_employer:       parseFloat(salary.pf)         || 0,
+        esic_employer:     parseFloat(salary.esic)       || 0,
+        remarks:           'Set during onboarding',
+      })
+      setAddStep(3)   // go to success screen
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save salary')
     } finally {
       setSaving(false)
     }
@@ -1005,37 +1288,45 @@ export default function EmployeesPage() {
             </button>
 
             {/* Page numbers */}
-            {[1, 2, 3, '...', 17].map((pg, idx) => (
-              typeof pg === 'number' ? (
-                <button
-                  key={idx}
-                  onClick={() => setCurrentPage(pg)}
-                  style={{
-                    minWidth: 34,
-                    height: 34,
-                    borderRadius: 'var(--radius-sm)',
-                    border: currentPage === pg ? 'none' : '1.5px solid var(--color-gray-200)',
-                    background: currentPage === pg
-                      ? 'linear-gradient(135deg,#1E3A5F 0%,#2D5391 100%)'
-                      : 'transparent',
-                    color: currentPage === pg ? '#fff' : 'var(--color-gray-600)',
-                    fontWeight: currentPage === pg ? 700 : 500,
-                    fontSize: '0.875rem',
-                    cursor: 'pointer',
-                    transition: 'all 150ms',
-                  }}
-                >
-                  {pg}
-                </button>
-              ) : (
-                <span
-                  key={idx}
-                  style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem', padding: '0 4px' }}
-                >
-                  {pg}
-                </span>
+            {(() => {
+              const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE))
+              const pages: (number | '...')[] = []
+              if (totalPages <= 5) {
+                for (let i = 1; i <= totalPages; i++) pages.push(i)
+              } else {
+                pages.push(1)
+                if (currentPage > 3) pages.push('...')
+                for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) pages.push(i)
+                if (currentPage < totalPages - 2) pages.push('...')
+                pages.push(totalPages)
+              }
+              return pages.map((pg, idx) =>
+                typeof pg === 'number' ? (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentPage(pg)}
+                    style={{
+                      minWidth: 34,
+                      height: 34,
+                      borderRadius: 'var(--radius-sm)',
+                      border: currentPage === pg ? 'none' : '1.5px solid var(--color-gray-200)',
+                      background: currentPage === pg
+                        ? 'linear-gradient(135deg,#1E3A5F 0%,#2D5391 100%)'
+                        : 'transparent',
+                      color: currentPage === pg ? '#fff' : 'var(--color-gray-600)',
+                      fontWeight: currentPage === pg ? 700 : 500,
+                      fontSize: '0.875rem',
+                      cursor: 'pointer',
+                      transition: 'all 150ms',
+                    }}
+                  >
+                    {pg}
+                  </button>
+                ) : (
+                  <span key={idx} style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem', padding: '0 4px' }}>…</span>
+                )
               )
-            ))}
+            })()}
 
             <button
               className="btn btn-outline btn-sm"
@@ -1051,93 +1342,290 @@ export default function EmployeesPage() {
 
       </div>
 
-      {/* ── Add Employee Modal ── */}
+      {/* ── Add Employee Modal (2-step wizard) ── */}
       {showAdd && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
-          <div style={{ background: '#fff', width: 560, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '18px 22px 16px', borderBottom: '1.5px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Add New Employee</h2>
-                <p style={{ fontSize: '0.775rem', color: '#9ca3af', margin: '3px 0 0' }}>Fill in the details to onboard a new team member</p>
-              </div>
-              <button onClick={() => setShowAdd(false)} className="btn btn-ghost btn-sm btn-icon"><X size={15} /></button>
-            </div>
-            <form onSubmit={handleAddEmployee} style={{ overflowY: 'auto', flex: 1 }}>
-              <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div>
-                    <label style={LBL}>First Name *</label>
-                    <input required value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} style={FLD} placeholder="e.g. Rahul" />
-                  </div>
-                  <div>
-                    <label style={LBL}>Last Name *</label>
-                    <input required value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} style={FLD} placeholder="e.g. Sharma" />
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div>
-                    <label style={LBL}>Work Email *</label>
-                    <input required type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} style={FLD} placeholder="rahul@company.in" />
-                  </div>
-                  <div>
-                    <label style={LBL}>Phone</label>
-                    <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} style={FLD} placeholder="+91 98765 43210" />
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div>
-                    <label style={LBL}>Department *</label>
-                    <div style={{ position: 'relative' }}>
-                      <select required value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))} style={SEL}>
-                        <option value="">Select department…</option>
-                        {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                      </select>
-                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                  </div>
-                  <div>
-                    <label style={LBL}>Employment Type</label>
-                    <div style={{ position: 'relative' }}>
-                      <select value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))} style={SEL}>
-                        <option value="full_time">Full-time</option>
-                        <option value="part_time">Part-time</option>
-                        <option value="contract">Contract</option>
-                        <option value="intern">Intern</option>
-                      </select>
-                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div>
-                    <label style={LBL}>Hire Date *</label>
-                    <input required type="date" value={form.hire_date} onChange={e => setForm(f => ({ ...f, hire_date: e.target.value }))} style={FLD} />
-                  </div>
-                  <div>
-                    <label style={LBL}>Work Location</label>
-                    <input value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} style={FLD} placeholder="e.g. Bengaluru, Remote" />
-                  </div>
-                </div>
+          <div style={{ background: '#fff', width: addStep === 2 ? 680 : addStep === 3 ? 520 : 560, maxWidth: '95vw', maxHeight: '92vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', transition: 'width 0.25s ease' }}>
+
+            {/* Header — hidden on success screen */}
+            {addStep !== 3 && (
+              <div style={{ padding: '18px 22px 14px', borderBottom: '1.5px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
                 <div>
-                  <label style={LBL}>Role</label>
-                  <div style={{ position: 'relative' }}>
-                    <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={SEL}>
-                      <option value="employee">Employee</option>
-                      <option value="manager">Manager</option>
-                      <option value="hr_admin">HR Admin</option>
-                      <option value="operations_head">Operations Head</option>
-                    </select>
-                    <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>
+                    {addStep === 1 ? 'Add New Employee' : 'Set Up Salary Structure'}
+                  </h2>
+                  <p style={{ fontSize: '0.775rem', color: '#9ca3af', margin: '3px 0 0' }}>
+                    {addStep === 1 ? 'Fill in the details to onboard a new team member' : `Setting up salary for ${newEmpName}`}
+                  </p>
+                </div>
+                <button onClick={closAddModal} className="btn btn-ghost btn-sm btn-icon"><X size={15} /></button>
+              </div>
+            )}
+
+            {/* Step indicator — hidden on success screen */}
+            {addStep !== 3 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '12px 22px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
+                {[{ n: 1, label: 'Basic Info' }, { n: 2, label: 'Salary Setup' }, { n: 3, label: 'Done' }].map((s, i) => (
+                  <div key={s.n} style={{ display: 'flex', alignItems: 'center', gap: 0, flex: i < 2 ? 0 : 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '0.7rem', fontWeight: 700,
+                        background: addStep > s.n ? '#16a34a' : addStep === s.n ? '#E8622A' : '#e5e7eb',
+                        color: addStep >= s.n ? '#fff' : '#9ca3af',
+                        flexShrink: 0,
+                      }}>
+                        {addStep > s.n ? '✓' : s.n}
+                      </div>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 600, color: addStep === s.n ? '#E8622A' : addStep > s.n ? '#16a34a' : '#9ca3af', whiteSpace: 'nowrap' }}>
+                        {s.label}
+                      </span>
+                    </div>
+                    {i < 2 && <div style={{ flex: 1, height: 1.5, background: addStep > s.n ? '#16a34a' : '#e5e7eb', margin: '0 12px', minWidth: 32 }} />}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── STEP 1: Basic Info ── */}
+            {addStep === 1 && (
+              <form onSubmit={handleAddEmployee} style={{ overflowY: 'auto', flex: 1 }}>
+                <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div>
+                      <label style={LBL}>First Name *</label>
+                      <input required value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} style={FLD} placeholder="e.g. Rahul" />
+                    </div>
+                    <div>
+                      <label style={LBL}>Last Name *</label>
+                      <input required value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} style={FLD} placeholder="e.g. Sharma" />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div>
+                      <label style={LBL}>Work Email *</label>
+                      <input required type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} style={FLD} placeholder="rahul@company.in" />
+                    </div>
+                    <div>
+                      <label style={LBL}>Phone</label>
+                      <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} style={FLD} placeholder="+91 98765 43210" />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div>
+                      <label style={LBL}>Department *</label>
+                      <div style={{ position: 'relative' }}>
+                        <select required value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))} style={SEL}>
+                          <option value="">Select department…</option>
+                          {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        </select>
+                        <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                      </div>
+                    </div>
+                    <div>
+                      <label style={LBL}>Employment Type</label>
+                      <div style={{ position: 'relative' }}>
+                        <select value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))} style={SEL}>
+                          <option value="full_time">Full-time</option>
+                          <option value="part_time">Part-time</option>
+                          <option value="contract">Contract</option>
+                          <option value="intern">Intern</option>
+                        </select>
+                        <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div>
+                      <label style={LBL}>Hire Date *</label>
+                      <input required type="date" value={form.hire_date} onChange={e => setForm(f => ({ ...f, hire_date: e.target.value }))} style={FLD} />
+                    </div>
+                    <div>
+                      <label style={LBL}>Work Location</label>
+                      <input value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} style={FLD} placeholder="e.g. Bengaluru, Remote" />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={LBL}>Role</label>
+                    <div style={{ position: 'relative' }}>
+                      <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={SEL}>
+                        <option value="employee">Employee</option>
+                        <option value="manager">Manager</option>
+                        <option value="hr_admin">HR Admin</option>
+                        <option value="operations_head">Operations Head</option>
+                      </select>
+                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
                   </div>
                 </div>
+                <div style={{ padding: '14px 22px 20px', borderTop: '1.5px solid #f1f5f9', display: 'flex', gap: 10, flexShrink: 0 }}>
+                  <button type="button" onClick={closAddModal} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
+                  <button type="submit" disabled={saving} className="btn btn-primary btn-sm" style={{ flex: 2 }}>
+                    {saving ? 'Saving…' : <><UserPlus size={14} /> Save &amp; Set Up Salary →</>}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ── STEP 2: Salary Setup ── */}
+            {addStep === 2 && (
+              <form onSubmit={handleSaveSalary} style={{ overflowY: 'auto', flex: 1 }}>
+                <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                  {/* CTC + Metro row */}
+                  <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <label style={LBL}>Annual CTC (₹) *</label>
+                      <input
+                        required type="number" min="0" step="1000"
+                        value={salary.ctc_annual}
+                        onChange={e => { setSalary(s => ({ ...s, ctc_annual: e.target.value })); recalcSalary(e.target.value, salary.metro) }}
+                        style={{ ...FLD, fontWeight: 700, fontSize: '1rem', color: '#c2410c' }}
+                        placeholder="e.g. 600000"
+                      />
+                    </div>
+                    <div style={{ minWidth: 160 }}>
+                      <label style={LBL}>Effective From *</label>
+                      <input required type="date" value={salary.effective_from} onChange={e => setSalary(s => ({ ...s, effective_from: e.target.value }))} style={FLD} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 18 }}>
+                      <input
+                        type="checkbox" id="metro" checked={salary.metro}
+                        onChange={e => { setSalary(s => ({ ...s, metro: e.target.checked })); recalcSalary(salary.ctc_annual, e.target.checked) }}
+                        style={{ width: 15, height: 15, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="metro" style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', cursor: 'pointer' }}>Metro City (50% HRA)</label>
+                    </div>
+                  </div>
+
+                  {/* Earnings grid */}
+                  <div>
+                    <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Earnings (Monthly ₹)</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      {[
+                        { key: 'basic',     label: 'Basic Salary *', required: true },
+                        { key: 'hra',       label: 'HRA',            required: false },
+                        { key: 'conveyance',label: 'Conveyance',     required: false },
+                        { key: 'medical',   label: 'Medical Allow.', required: false },
+                        { key: 'special',   label: 'Special Allow.', required: false },
+                        { key: 'lta',       label: 'LTA (monthly)',  required: false },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label style={LBL}>{f.label}</label>
+                          <input
+                            required={f.required} type="number" min="0" step="1"
+                            value={(salary as unknown as Record<string, string>)[f.key]}
+                            onChange={e => setSalary(s => ({ ...s, [f.key]: e.target.value }))}
+                            style={FLD} placeholder="0"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Deductions grid */}
+                  <div>
+                    <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Employer Contributions (Monthly ₹)</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={LBL}>Employer PF <span style={{ color: '#9ca3af', fontWeight: 400 }}>(12% of Basic, max ₹1,800)</span></label>
+                        <input type="number" min="0" step="1" value={salary.pf} onChange={e => setSalary(s => ({ ...s, pf: e.target.value }))} style={FLD} placeholder="0" />
+                      </div>
+                      <div>
+                        <label style={LBL}>Employer ESIC <span style={{ color: '#9ca3af', fontWeight: 400 }}>(3.25%, if gross ≤ ₹21,000)</span></label>
+                        <input type="number" min="0" step="1" value={salary.esic} onChange={e => setSalary(s => ({ ...s, esic: e.target.value }))} style={FLD} placeholder="0" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Live CTC breakup summary */}
+                  {salary.ctc_annual && (
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px' }}>
+                      <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Salary Summary</p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                        {[
+                          { label: 'Annual CTC',    val: `₹${(parseFloat(salary.ctc_annual)||0).toLocaleString('en-IN')}` },
+                          { label: 'Monthly Gross', val: `₹${Math.round((parseFloat(salary.ctc_annual)||0)/12).toLocaleString('en-IN')}` },
+                          { label: 'Basic/mo',      val: `₹${(parseFloat(salary.basic)||0).toLocaleString('en-IN')}` },
+                          { label: 'HRA/mo',        val: `₹${(parseFloat(salary.hra)||0).toLocaleString('en-IN')}` },
+                        ].map(item => (
+                          <div key={item.label} style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#166534' }}>{item.val}</div>
+                            <div style={{ fontSize: '0.68rem', color: '#86efac' }}>{item.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+
+                <div style={{ padding: '14px 22px 20px', borderTop: '1.5px solid #f1f5f9', display: 'flex', gap: 10, flexShrink: 0 }}>
+                  <button type="button" onClick={closAddModal} className="btn btn-outline btn-sm" style={{ flex: 1 }}>
+                    Skip for Now
+                  </button>
+                  <button type="submit" disabled={saving} className="btn btn-primary btn-sm" style={{ flex: 2, background: '#16a34a', borderColor: '#16a34a' }}>
+                    {saving ? 'Saving…' : '✓ Save Salary & Finish'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ── STEP 3: Success ── */}
+            {addStep === 3 && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 32px', textAlign: 'center', gap: 20 }}>
+                {/* Success icon */}
+                <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg, #16a34a, #22c55e)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(22,163,74,0.3)' }}>
+                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+                    {newEmpName} is ready!
+                  </h3>
+                  <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: 0, lineHeight: 1.6 }}>
+                    Employee profile and salary structure have been saved.<br />
+                    Head to <strong>Payroll</strong> to run this month&apos;s payroll and generate payslips.
+                  </p>
+                </div>
+
+                {/* Flow diagram */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: '#f8fafc', borderRadius: 12, padding: '14px 20px', border: '1px solid #e5e7eb', width: '100%', maxWidth: 380 }}>
+                  {[
+                    { icon: '👤', label: 'Employee Added', done: true },
+                    { icon: '💰', label: 'Salary Set',     done: true },
+                    { icon: '⚙️', label: 'Run Payroll',    done: false },
+                    { icon: '🧾', label: 'Payslip Ready',  done: false },
+                  ].map((s, i) => (
+                    <div key={s.label} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flex: 1 }}>
+                        <div style={{ fontSize: '1.25rem', opacity: s.done ? 1 : 0.4 }}>{s.icon}</div>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 600, color: s.done ? '#16a34a' : '#9ca3af', textAlign: 'center', lineHeight: 1.2 }}>{s.label}</span>
+                      </div>
+                      {i < 3 && <div style={{ width: 20, height: 1.5, background: s.done ? '#16a34a' : '#e5e7eb', flexShrink: 0 }} />}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 380 }}>
+                  <button
+                    onClick={() => { closAddModal(); router.push('/payroll') }}
+                    style={{ padding: '11px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #1e3a5f, #1565c0)', color: '#fff', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: '0 4px 12px rgba(21,101,192,0.3)' }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="10 8 14 12 10 16"/></svg>
+                    Go to Payroll → Run Payroll
+                  </button>
+                  <button
+                    onClick={closAddModal}
+                    style={{ padding: '9px 20px', borderRadius: 10, border: '1.5px solid #e5e7eb', background: '#fff', color: '#374151', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }}
+                  >
+                    Done — Stay on Employees
+                  </button>
+                </div>
               </div>
-              <div style={{ padding: '14px 22px 20px', borderTop: '1.5px solid #f1f5f9', display: 'flex', gap: 10 }}>
-                <button type="button" onClick={() => setShowAdd(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
-                <button type="submit" disabled={saving} className="btn btn-primary btn-sm" style={{ flex: 2 }}>
-                  {saving ? 'Adding…' : <><UserPlus size={14} /> Add Employee</>}
-                </button>
-              </div>
-            </form>
+            )}
+
           </div>
         </div>
       )}
@@ -1190,8 +1678,8 @@ export default function EmployeesPage() {
       {/* ── Edit Employee Modal ── */}
       {editEmp && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
-          <div style={{ background: '#fff', width: 560, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+          <div style={{ background: '#fff', width: 660, maxWidth: '95vw', maxHeight: '92vh', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px 14px', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.0625rem', fontWeight: 700 }}>Edit Employee</h3>
                 <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{editEmp.first_name} {editEmp.last_name} · {editEmp.emp_id}</p>

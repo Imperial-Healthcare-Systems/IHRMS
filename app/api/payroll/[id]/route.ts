@@ -3,7 +3,16 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const session = await getServerSession(authOptions)
@@ -11,40 +20,35 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { data: run, error } = await supabaseAdmin
       .from('payroll_runs')
-      .select(`
-        id, month, year, run_date, payment_date, status, remarks,
-        total_employees, total_gross, total_deductions, total_net,
-        total_employer_pf, total_employer_esic,
-        processed_by:employees!payroll_runs_processed_by_fkey(id, first_name, last_name, emp_id),
-        approved_by:employees!payroll_runs_approved_by_fkey(id, first_name, last_name, emp_id),
-        created_at, updated_at
-      `)
+      .select('*')
       .eq('id', id)
       .single()
 
     if (error) {
+      console.error('[payroll GET id]', error)
       if (error.code === 'PGRST116') return NextResponse.json({ error: 'Payroll run not found' }, { status: 404 })
       throw error
     }
 
-    // Summary stats: payslip count and net pay distribution
+    // Summary stats from payslips (use * to avoid column-name mismatches)
     const { data: payslipStats } = await supabaseAdmin
       .from('payslips')
-      .select('net_pay, total_deductions, gross_earnings, payment_status')
+      .select('*')
       .eq('payroll_run_id', id)
 
     const stats = {
-      payslip_count: payslipStats?.length ?? 0,
-      paid_count: payslipStats?.filter((p) => p.payment_status === 'paid').length ?? 0,
-      pending_count: payslipStats?.filter((p) => p.payment_status === 'pending').length ?? 0,
-      total_gross: payslipStats?.reduce((sum, p) => sum + (p.gross_earnings ?? 0), 0) ?? 0,
-      total_deductions: payslipStats?.reduce((sum, p) => sum + (p.total_deductions ?? 0), 0) ?? 0,
-      total_net: payslipStats?.reduce((sum, p) => sum + (p.net_pay ?? 0), 0) ?? 0,
+      payslip_count:    payslipStats?.length ?? 0,
+      paid_count:       payslipStats?.filter((p: any) => p.payment_status === 'paid').length ?? 0,
+      pending_count:    payslipStats?.filter((p: any) => p.payment_status === 'pending').length ?? 0,
+      total_gross:      payslipStats?.reduce((sum: number, p: any) => sum + (p.gross_earnings ?? p.gross_salary ?? 0), 0) ?? 0,
+      total_deductions: payslipStats?.reduce((sum: number, p: any) => sum + (p.total_deductions ?? 0), 0) ?? 0,
+      total_net:        payslipStats?.reduce((sum: number, p: any) => sum + (p.net_pay ?? p.net_salary ?? 0), 0) ?? 0,
     }
 
     return NextResponse.json({ data: run, stats })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[payroll GET id catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -61,7 +65,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Missing required field: action' }, { status: 400 })
     }
 
-    // Fetch current run
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('payroll_runs')
       .select('id, status')
@@ -69,14 +72,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .single()
 
     if (fetchError) {
+      console.error('[payroll PATCH fetch]', fetchError)
       if (fetchError.code === 'PGRST116') return NextResponse.json({ error: 'Payroll run not found' }, { status: 404 })
       throw fetchError
     }
 
-    const userId = (session.user as any)?.id ?? null
-    let updatePayload: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    }
+    let updatePayload: Record<string, unknown> = {}
 
     if (action === 'approve') {
       if (!['processed', 'draft'].includes(current.status)) {
@@ -85,12 +86,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           { status: 422 }
         )
       }
-      updatePayload = {
-        ...updatePayload,
-        status: 'approved',
-        approved_by: userId,
-        remarks: notes ?? null,
-      }
+      updatePayload = { status: 'approved' }
+      if (notes) updatePayload.remarks = notes
     } else if (action === 'mark_paid') {
       if (current.status !== 'approved') {
         return NextResponse.json(
@@ -98,12 +95,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           { status: 422 }
         )
       }
-      updatePayload = {
-        ...updatePayload,
-        status: 'paid',
-        payment_date: new Date().toISOString().split('T')[0],
-        remarks: notes ?? null,
-      }
+      updatePayload = { status: 'paid' }
+      if (notes) updatePayload.remarks = notes
     } else {
       return NextResponse.json({ error: `Unknown action '${action}'` }, { status: 400 })
     }
@@ -115,10 +108,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .select()
       .single()
 
-    if (error) throw error
+    if (error) { console.error('[payroll PATCH save]', error); throw error }
 
     return NextResponse.json({ data })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[payroll PATCH catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

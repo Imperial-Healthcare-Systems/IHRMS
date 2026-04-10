@@ -170,8 +170,6 @@ export default function OnboardingPage() {
   const [showOnboardModal, setShowOnboardModal] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<string>('Arjun Patel')
   const [checklistSections, setChecklistSections] = useState<ChecklistSection[]>(DEFAULT_CHECKLIST_SECTIONS)
-  const [showChecklistModal, setShowChecklistModal] = useState(false)
-  const [checklistEmployee, setChecklistEmployee] = useState<OnboardingEmployee | null>(null)
 
   // Form state for new onboarding
   const [newName, setNewName] = useState('')
@@ -259,9 +257,11 @@ export default function OnboardingPage() {
                   fontSize: '0.875rem',
                   fontWeight: 600,
                   color: activeTab === t.key ? '#E8622A' : '#6b7280',
+                  borderTop: 'none',
+                  borderLeft: 'none',
+                  borderRight: 'none',
                   borderBottom: activeTab === t.key ? '2px solid #E8622A' : '2px solid transparent',
                   background: 'none',
-                  border: 'none',
                   cursor: 'pointer',
                 }}
               >
@@ -493,9 +493,9 @@ export default function OnboardingPage() {
       {/* ── Modal: Start Onboarding ── */}
       {showOnboardModal && (
         <ModalOverlay onClose={() => setShowOnboardModal(false)}>
-          <div style={{ width: 520 }}>
+          <div style={{ width: 520, display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
             <ModalHeader title="Start New Employee Onboarding" onClose={() => setShowOnboardModal(false)} />
-            <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', flex: 1 }}>
               <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 16px', fontSize: '0.8rem', color: '#0369a1' }}>
                 This will create an onboarding record and send a welcome email with the pre-boarding checklist link to the employee.
               </div>

@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
         { count: 'exact' }
       )
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+      .limit(limit)
 
     if (status)          query = query.eq('status', status)
     if (department_id)   query = query.eq('department_id', department_id)

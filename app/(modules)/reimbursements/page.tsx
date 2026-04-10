@@ -1,12 +1,15 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useSession } from 'next-auth/react'
 import { Topbar } from '@/components/layout/Topbar'
 import { reimbursementsApi, type ExpenseClaim } from '@/lib/api-client'
 import toast from 'react-hot-toast'
 import {
   Clock, CheckCircle, XCircle, IndianRupee, X, Eye, Edit,
   Trash2, Check, AlertTriangle, Upload, Info, Filter, Plus,
+  Car, Utensils, BedDouble, Phone, Monitor, GraduationCap,
+  HeartPulse, MoreHorizontal, FileText, Receipt,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -31,46 +34,6 @@ interface PendingApproval {
   receipt: boolean; submittedOn: string; status: 'Pending' | 'Approved' | 'Rejected'
 }
 
-/* ─────────────────────────────────────────────────────────────
-   MOCK DATA
-───────────────────────────────────────────────────────────── */
-const INITIAL_MY_CLAIMS: Claim[] = [
-  { id: 'CLM/2026/001', month: 'March 2026', category: 'Travel',        description: 'Mumbai to Pune cab for client meeting',    amount: 1850, receipt: true,  status: 'Approved', submittedOn: 'Mar 28, 2026' },
-  { id: 'CLM/2026/002', month: 'March 2026', category: 'Food',          description: 'Team lunch - client entertaining',          amount: 3200, receipt: true,  status: 'Approved', submittedOn: 'Mar 28, 2026' },
-  { id: 'CLM/2026/003', month: 'March 2026', category: 'Accommodation', description: 'Hotel stay - Hyderabad conference',         amount: 5400, receipt: true,  status: 'Pending',  submittedOn: 'Mar 29, 2026' },
-  { id: 'CLM/2026/004', month: 'March 2026', category: 'Communication', description: 'Mobile recharge for work',                  amount: 299,  receipt: false, status: 'Pending',  submittedOn: 'Mar 30, 2026' },
-  { id: 'CLM/2026/005', month: 'Feb 2026',   category: 'Travel',        description: 'Ola/Uber office visits - 15 trips',         amount: 4700, receipt: true,  status: 'Approved', submittedOn: 'Feb 25, 2026' },
-  { id: 'CLM/2026/006', month: 'Feb 2026',   category: 'Equipment',     description: 'Laptop bag',                                amount: 2500, receipt: true,  status: 'Rejected', submittedOn: 'Feb 20, 2026', rejectionReason: 'Exceeds policy limit of ₹2,000 for equipment purchases' },
-  { id: 'CLM/2026/007', month: 'Feb 2026',   category: 'Training',      description: 'Online course - AWS certification',         amount: 3999, receipt: true,  status: 'Approved', submittedOn: 'Feb 18, 2026' },
-  { id: 'CLM/2026/008', month: 'Jan 2026',   category: 'Medical',       description: 'Medical consultation reimbursement',        amount: 800,  receipt: true,  status: 'Approved', submittedOn: 'Jan 28, 2026' },
-  { id: 'CLM/2026/009', month: 'Jan 2026',   category: 'Food',          description: 'Working overtime meals',                    amount: 1200, receipt: true,  status: 'Approved', submittedOn: 'Jan 26, 2026' },
-  { id: 'CLM/2026/010', month: 'Jan 2026',   category: 'Communication', description: 'Internet allowance',                        amount: 599,  receipt: true,  status: 'Pending',  submittedOn: 'Jan 27, 2026' },
-]
-
-const TEAM_CLAIMS: TeamClaim[] = [
-  { id: 'T001', employee: 'Rohit Verma',    dept: 'Engineering', month: 'March 2026', category: 'Travel',        description: 'Client site visits - Bengaluru',   amount: 3200, status: 'Approved', submittedOn: 'Mar 27, 2026' },
-  { id: 'T002', employee: 'Ananya Singh',   dept: 'HR',          month: 'March 2026', category: 'Training',       description: 'HR Summit registration fee',        amount: 5500, status: 'Pending',  submittedOn: 'Mar 28, 2026' },
-  { id: 'T003', employee: 'Vikas Sharma',   dept: 'Sales',       month: 'March 2026', category: 'Food',           description: 'Client entertaining - dinner',      amount: 4800, status: 'Approved', submittedOn: 'Mar 25, 2026' },
-  { id: 'T004', employee: 'Meera Nair',     dept: 'Engineering', month: 'March 2026', category: 'Communication',  description: 'Broadband for WFH',                 amount: 799,  status: 'Pending',  submittedOn: 'Mar 29, 2026' },
-  { id: 'T005', employee: 'Sanjay Gupta',   dept: 'Engineering', month: 'March 2026', category: 'Accommodation',  description: 'Pune offsite stay',                 amount: 6200, status: 'Approved', submittedOn: 'Mar 20, 2026' },
-  { id: 'T006', employee: 'Divya Krishnan', dept: 'Finance',     month: 'Feb 2026',   category: 'Travel',         description: 'Mumbai - Delhi flight for audit',   amount: 8900, status: 'Approved', submittedOn: 'Feb 22, 2026' },
-  { id: 'T007', employee: 'Karan Joshi',    dept: 'Operations',  month: 'Feb 2026',   category: 'Equipment',      description: 'Ergonomic keyboard',                amount: 1800, status: 'Approved', submittedOn: 'Feb 18, 2026' },
-  { id: 'T008', employee: 'Pooja Rao',      dept: 'HR',          month: 'Feb 2026',   category: 'Training',       description: 'Online SHRM certification',          amount: 7500, status: 'Rejected', submittedOn: 'Feb 15, 2026' },
-  { id: 'T009', employee: 'Rahul Tiwari',   dept: 'Sales',       month: 'Feb 2026',   category: 'Food',           description: 'Team outing expenses',              amount: 3400, status: 'Approved', submittedOn: 'Feb 24, 2026' },
-  { id: 'T010', employee: 'Kavya Menon',    dept: 'Engineering', month: 'Feb 2026',   category: 'Communication',  description: 'Mobile bill reimbursement',         amount: 499,  status: 'Approved', submittedOn: 'Feb 26, 2026' },
-  { id: 'T011', employee: 'Aditya Kumar',   dept: 'Finance',     month: 'Jan 2026',   category: 'Travel',         description: 'Cab - office field visits',         amount: 2100, status: 'Approved', submittedOn: 'Jan 27, 2026' },
-  { id: 'T012', employee: 'Rohit Verma',    dept: 'Engineering', month: 'Jan 2026',   category: 'Medical',        description: 'Eye test reimbursement',            amount: 600,  status: 'Approved', submittedOn: 'Jan 25, 2026' },
-  { id: 'T013', employee: 'Vikas Sharma',   dept: 'Sales',       month: 'Jan 2026',   category: 'Travel',         description: 'Delhi - Jaipur client trip',        amount: 4500, status: 'Pending',  submittedOn: 'Jan 28, 2026' },
-  { id: 'T014', employee: 'Sanjay Gupta',   dept: 'Engineering', month: 'Jan 2026',   category: 'Training',       description: 'Kubernetes certification',          amount: 4200, status: 'Approved', submittedOn: 'Jan 20, 2026' },
-  { id: 'T015', employee: 'Meera Nair',     dept: 'Engineering', month: 'Jan 2026',   category: 'Equipment',      description: 'USB hub for WFH',                   amount: 1200, status: 'Approved', submittedOn: 'Jan 22, 2026' },
-]
-
-const INITIAL_APPROVALS: PendingApproval[] = [
-  { id: 'PA001', employee: 'Ananya Singh',  dept: 'HR',          claimNo: 'CLM/2026/042', category: 'Training',      description: 'HR Summit registration fee',          amount: 5500, receipt: true,  submittedOn: 'Mar 28, 2026', status: 'Pending' },
-  { id: 'PA002', employee: 'Meera Nair',    dept: 'Engineering', claimNo: 'CLM/2026/043', category: 'Communication', description: 'Broadband for WFH - March',           amount: 799,  receipt: true,  submittedOn: 'Mar 29, 2026', status: 'Pending' },
-  { id: 'PA003', employee: 'Vikas Sharma',  dept: 'Sales',       claimNo: 'CLM/2026/044', category: 'Travel',        description: 'Delhi - Jaipur client trip',          amount: 4500, receipt: false, submittedOn: 'Mar 30, 2026', status: 'Pending' },
-  { id: 'PA004', employee: 'Karan Joshi',   dept: 'Operations',  claimNo: 'CLM/2026/045', category: 'Equipment',     description: 'Noise-cancelling headset for calls',  amount: 3200, receipt: true,  submittedOn: 'Mar 31, 2026', status: 'Pending' },
-]
 
 /* ─────────────────────────────────────────────────────────────
    DESIGN TOKENS — same triads as Employee / Payroll pages
@@ -135,6 +98,296 @@ function CategoryBadge({ category }: { category: string }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   SUBMIT CLAIM MODAL — fully redesigned
+───────────────────────────────────────────────────────────── */
+const CATEGORY_CARDS = [
+  { key: 'Travel',        label: 'Travel',        Icon: Car,           bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  { key: 'Food',          label: 'Food & Meals',  Icon: Utensils,      bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  { key: 'Accommodation', label: 'Stay',          Icon: BedDouble,     bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe' },
+  { key: 'Communication', label: 'Telecom',       Icon: Phone,         bg: '#f0f9ff', color: '#0369a1', border: '#bae6fd' },
+  { key: 'Equipment',     label: 'Equipment',     Icon: Monitor,       bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
+  { key: 'Training',      label: 'Training',      Icon: GraduationCap, bg: '#eef2ff', color: '#3730a3', border: '#c7d2fe' },
+  { key: 'Medical',       label: 'Medical',       Icon: HeartPulse,    bg: '#fef2f2', color: '#b91c1c', border: '#fecaca' },
+  { key: 'Other',         label: 'Other',         Icon: MoreHorizontal,bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb' },
+]
+
+function getMonthOptions() {
+  const now = new Date()
+  const opts = []
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    opts.push({
+      value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      label: d.toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+    })
+  }
+  return opts
+}
+
+function SubmitClaimModal({ onClose, newClaim, setNewClaim, uploadedFile, setUploadedFile, submitting, onSubmit, editMode = false }: {
+  onClose: () => void
+  newClaim: { month: string; category: string; description: string; amount: string }
+  setNewClaim: React.Dispatch<React.SetStateAction<{ month: string; category: string; description: string; amount: string }>>
+  uploadedFile: string | null
+  setUploadedFile: (f: string | null) => void
+  submitting: boolean
+  onSubmit: () => void
+  editMode?: boolean
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [touched, setTouched]   = useState({ month: false, category: false, description: false, amount: false })
+  const [dragging, setDragging] = useState(false)
+
+  const monthOpts   = getMonthOptions()
+  const amountNum   = parseFloat(newClaim.amount) || 0
+  const catCard     = CATEGORY_CARDS.find(c => c.key === newClaim.category)
+
+  const errors = {
+    month:       touched.month       && !newClaim.month,
+    category:    touched.category    && !newClaim.category,
+    description: touched.description && !newClaim.description.trim(),
+    amount:      touched.amount      && (!newClaim.amount || amountNum <= 0),
+  }
+  const canSubmit = newClaim.month && newClaim.category && newClaim.description.trim() && amountNum > 0
+
+  function handleFile(file: File) {
+    if (file.size > 5 * 1024 * 1024) { toast.error('File must be under 5 MB'); return }
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+    if (!allowed.includes(file.type)) { toast.error('Only PDF, JPG, PNG allowed'); return }
+    setUploadedFile(file.name)
+  }
+
+  const INP = (err: boolean): React.CSSProperties => ({
+    width: '100%', borderRadius: 8,
+    border: `1.5px solid ${err ? '#fca5a5' : '#e5e7eb'}`,
+    padding: '9px 12px', fontSize: '0.875rem', color: '#111827',
+    background: err ? '#fff5f5' : '#fff', outline: 'none',
+    boxSizing: 'border-box', fontFamily: 'inherit', transition: 'border-color 150ms',
+  })
+  const LBL: React.CSSProperties = {
+    display: 'block', fontSize: '0.72rem', fontWeight: 700,
+    color: '#374151', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+      <div style={{ background: '#fff', width: 640, maxWidth: '98vw', maxHeight: '94vh', borderRadius: 20, boxShadow: '0 32px 80px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+        {/* ── Header ── */}
+        <div style={{ background: 'linear-gradient(135deg,#1E3A5F 0%,#1565c0 100%)', padding: '20px 24px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Receipt size={16} style={{ color: '#fff' }} />
+                </div>
+                <h2 style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', margin: 0 }}>{editMode ? 'Edit Claim' : 'Submit New Claim'}</h2>
+              </div>
+              <p style={{ fontSize: '0.8125rem', color: 'rgba(255,255,255,0.65)', margin: 0 }}>{editMode ? 'Update the expense details below' : 'Fill in the expense details — all fields marked * are required'}</p>
+            </div>
+            <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer', color: '#fff', padding: '6px 8px', borderRadius: 8, display: 'flex', flexShrink: 0 }}><X size={16} /></button>
+          </div>
+
+          {/* Live amount pill in header */}
+          {amountNum > 0 && (
+            <div style={{ marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 20, padding: '5px 14px' }}>
+              {catCard && <catCard.Icon size={13} style={{ color: '#fff' }} />}
+              <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#fff' }}>
+                {newClaim.category || 'Expense'} · ₹{amountNum.toLocaleString('en-IN')}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* ── Body ── */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          {/* Row: Month + Amount side-by-side */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <label style={LBL}>Month / Year <span style={{ color: '#dc2626' }}>*</span></label>
+              <select
+                value={newClaim.month}
+                onChange={e => setNewClaim(p => ({ ...p, month: e.target.value }))}
+                onBlur={() => setTouched(t => ({ ...t, month: true }))}
+                style={{ ...INP(errors.month), appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', paddingRight: 32, cursor: 'pointer' }}
+              >
+                <option value="">Select month…</option>
+                {monthOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              {errors.month && <p style={{ fontSize: '0.72rem', color: '#dc2626', margin: '4px 0 0' }}>Please select a month</p>}
+            </div>
+
+            <div>
+              <label style={LBL}>Amount (₹) <span style={{ color: '#dc2626' }}>*</span></label>
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: errors.amount ? '#fca5a5' : '#9ca3af', fontSize: '1rem', fontWeight: 600, pointerEvents: 'none' }}>₹</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  value={newClaim.amount}
+                  onChange={e => setNewClaim(p => ({ ...p, amount: e.target.value }))}
+                  onBlur={() => setTouched(t => ({ ...t, amount: true }))}
+                  placeholder="0.00"
+                  style={{ ...INP(errors.amount), paddingLeft: 30 }}
+                />
+              </div>
+              {errors.amount && <p style={{ fontSize: '0.72rem', color: '#dc2626', margin: '4px 0 0' }}>Enter a valid amount</p>}
+              {/* Quick amounts */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {[500, 1000, 2000, 5000].map(v => (
+                  <button key={v} type="button" onClick={() => setNewClaim(p => ({ ...p, amount: String(v) }))}
+                    style={{ padding: '3px 10px', borderRadius: 20, border: `1.5px solid ${newClaim.amount === String(v) ? '#1E3A5F' : '#e5e7eb'}`, background: newClaim.amount === String(v) ? '#eff6ff' : '#fff', fontSize: '0.72rem', fontWeight: 600, color: newClaim.amount === String(v) ? '#1E3A5F' : '#6b7280', cursor: 'pointer' }}>
+                    ₹{v.toLocaleString('en-IN')}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Category cards */}
+          <div>
+            <label style={LBL}>Category <span style={{ color: '#dc2626' }}>*</span></label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+              {CATEGORY_CARDS.map(({ key, label, Icon, bg, color, border }) => {
+                const selected = newClaim.category === key
+                return (
+                  <button key={key} type="button"
+                    onClick={() => { setNewClaim(p => ({ ...p, category: key })); setTouched(t => ({ ...t, category: true })) }}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      gap: 6, padding: '10px 6px', borderRadius: 10, cursor: 'pointer',
+                      border: selected ? `2px solid ${color}` : `1.5px solid ${errors.category ? '#fca5a5' : '#e5e7eb'}`,
+                      background: selected ? bg : '#fafafa',
+                      transition: 'all 120ms', outline: 'none',
+                      boxShadow: selected ? `0 0 0 3px ${color}18` : 'none',
+                    }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, background: selected ? bg : '#f3f4f6', border: `1px solid ${selected ? border : '#e5e7eb'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon size={14} style={{ color: selected ? color : '#9ca3af' }} />
+                    </div>
+                    <span style={{ fontSize: '0.65rem', fontWeight: selected ? 700 : 500, color: selected ? color : '#6b7280', textAlign: 'center', lineHeight: 1.2 }}>{label}</span>
+                    {selected && <div style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />}
+                  </button>
+                )
+              })}
+            </div>
+            {errors.category && <p style={{ fontSize: '0.72rem', color: '#dc2626', margin: '6px 0 0' }}>Please select a category</p>}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label style={LBL}>Description <span style={{ color: '#dc2626' }}>*</span></label>
+            <textarea
+              value={newClaim.description}
+              onChange={e => setNewClaim(p => ({ ...p, description: e.target.value }))}
+              onBlur={() => setTouched(t => ({ ...t, description: true }))}
+              rows={3}
+              maxLength={300}
+              placeholder="Describe the expense — purpose, vendor name, date of incurrence…"
+              style={{ ...INP(errors.description), resize: 'none', lineHeight: 1.6 }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+              {errors.description
+                ? <p style={{ fontSize: '0.72rem', color: '#dc2626', margin: 0 }}>Description is required</p>
+                : <span />}
+              <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>{newClaim.description.length}/300</span>
+            </div>
+          </div>
+
+          {/* Receipt upload */}
+          <div>
+            <label style={LBL}>Receipt <span style={{ fontWeight: 400, textTransform: 'none', color: '#9ca3af', letterSpacing: 0 }}>(optional)</span></label>
+            <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }}
+              onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }} />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]) }}
+              style={{
+                border: `2px dashed ${uploadedFile ? '#22c55e' : dragging ? '#1d4ed8' : '#d1d5db'}`,
+                borderRadius: 12, padding: '16px 20px', cursor: 'pointer',
+                background: uploadedFile ? '#f0fdf4' : dragging ? '#eff6ff' : '#fafafa',
+                transition: 'all 150ms', display: 'flex', alignItems: 'center', gap: 14,
+              }}
+            >
+              {uploadedFile ? (
+                <>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: '#dcfce7', border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <FileText size={18} style={{ color: '#16a34a' }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#15803d', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{uploadedFile}</p>
+                    <p style={{ fontSize: '0.75rem', color: '#16a34a', margin: '2px 0 0' }}>Receipt attached · Click to change</p>
+                  </div>
+                  <button type="button" onClick={e => { e.stopPropagation(); setUploadedFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                    style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', color: '#dc2626', padding: '4px 8px', fontSize: '0.72rem', fontWeight: 600, flexShrink: 0 }}>
+                    Remove
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: dragging ? '#dbeafe' : '#f3f4f6', border: `1px solid ${dragging ? '#93c5fd' : '#e5e7eb'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Upload size={17} style={{ color: dragging ? '#1d4ed8' : '#9ca3af' }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: dragging ? '#1d4ed8' : '#374151', margin: 0 }}>
+                      {dragging ? 'Drop file here' : 'Click or drag receipt here'}
+                    </p>
+                    <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: '2px 0 0' }}>PDF, JPG, PNG, WEBP · Max 5 MB</p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Policy banner */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' }}>
+            <AlertTriangle size={14} style={{ color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+            <p style={{ fontSize: '0.78rem', color: '#78350f', margin: 0, lineHeight: 1.6 }}>
+              Claims submitted by <strong style={{ color: '#92400e' }}>25th of the month</strong> are included in current month payroll. Claims without receipts above ₹500 may require approval.
+            </p>
+          </div>
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ padding: '14px 24px', borderTop: '1px solid #f1f5f9', background: '#fafafa', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          {/* Summary pill */}
+          {canSubmit && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {catCard && <catCard.Icon size={13} style={{ color: catCard.color }} />}
+              <span style={{ fontSize: '0.78rem', color: '#374151', fontWeight: 500 }}>
+                <strong style={{ color: catCard?.color ?? '#374151' }}>{newClaim.category}</strong>
+                {' · '}
+                <strong style={{ color: '#15803d' }}>₹{amountNum.toLocaleString('en-IN')}</strong>
+              </span>
+            </div>
+          )}
+          {!canSubmit && <div style={{ flex: 1 }} />}
+          <button type="button" onClick={onClose}
+            style={{ padding: '9px 20px', borderRadius: 9, border: '1.5px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>
+            Cancel
+          </button>
+          <button type="button" onClick={() => { setTouched({ month: true, category: true, description: true, amount: true }); if (canSubmit) onSubmit() }}
+            disabled={submitting}
+            style={{
+              padding: '9px 28px', borderRadius: 9, border: 'none', cursor: canSubmit ? 'pointer' : 'not-allowed',
+              background: canSubmit ? 'linear-gradient(135deg,#E8622A 0%,#d05520 100%)' : '#e5e7eb',
+              color: canSubmit ? '#fff' : '#9ca3af', fontSize: '0.875rem', fontWeight: 700,
+              display: 'flex', alignItems: 'center', gap: 7, boxShadow: canSubmit ? '0 2px 8px rgba(232,98,42,0.35)' : 'none',
+              transition: 'all 150ms', opacity: submitting ? 0.75 : 1,
+            }}>
+            <Receipt size={14} />
+            {submitting ? (editMode ? 'Saving…' : 'Submitting…') : (editMode ? 'Save Changes' : 'Submit Claim')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    MODAL WRAPPER
 ───────────────────────────────────────────────────────────── */
 function Modal({ open, onClose, title, sub, wide, children }: {
@@ -160,17 +413,28 @@ function Modal({ open, onClose, title, sub, wide, children }: {
 /* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────────────────────── */
+function toTitleCase(s: string) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 export default function ReimbursementsPage() {
+  const { data: session } = useSession()
+  const sessionUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
+
   const [activeTab, setActiveTab]   = useState<ReimbTab>('myClaims')
-  const [myClaims, setMyClaims]     = useState<Claim[]>(INITIAL_MY_CLAIMS)
-  const [approvals, setApprovals]   = useState<PendingApproval[]>(INITIAL_APPROVALS)
+  const [myClaims, setMyClaims]     = useState<Claim[]>([])
+  const [teamClaims, setTeamClaims] = useState<TeamClaim[]>([])
+  const [approvals, setApprovals]   = useState<PendingApproval[]>([])
 
   const [submitModal, setSubmitModal] = useState(false)
   const [newClaim, setNewClaim] = useState({ month: '', category: '', description: '', amount: '' })
   const [uploadedFile, setUploadedFile] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const [viewModal, setViewModal] = useState<{ open: boolean; claim: Claim | null }>({ open: false, claim: null })
+  const [viewModal, setViewModal]   = useState<{ open: boolean; claim: Claim | null }>({ open: false, claim: null })
+  const [editModal, setEditModal]   = useState<{ open: boolean; claim: Claim | null }>({ open: false, claim: null })
+  const [editClaim, setEditClaim]   = useState({ month: '', category: '', description: '', amount: '' })
+  const [editing, setEditing]       = useState(false)
   const [rejectModal, setRejectModal] = useState<{ open: boolean; id: string | null }>({ open: false, id: null })
   const [rejectReason, setRejectReason] = useState('')
 
@@ -179,80 +443,196 @@ export default function ReimbursementsPage() {
 
   // Fetch live data
   const [apiClaims, setApiClaims] = useState<ExpenseClaim[]>([])
+
+  function mapApiClaims(data: ExpenseClaim[]) {
+    setApiClaims(data)
+    setMyClaims(data.map(c => {
+      const raw = c as unknown as Record<string, unknown>
+      const dateStr = (raw.claim_date as string | undefined) ?? c.expense_date
+      return {
+        id:          c.id,
+        month:       dateStr ? new Date(dateStr).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : '—',
+        category:    toTitleCase(c.category ?? 'other'),
+        description: c.description ?? '—',
+        amount:      c.amount,
+        receipt:     !!(c.receipt_url ?? (raw.receipt_urls as unknown)),
+        status:      (c.status.charAt(0).toUpperCase() + c.status.slice(1)) as Claim['status'],
+        submittedOn: c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+      }
+    }))
+  }
+
   useEffect(() => {
+    // My claims
     reimbursementsApi.list({ limit: 50 })
-      .then(r => {
-        setApiClaims(r.data)
-        if (r.data.length > 0) {
-          setMyClaims(r.data.map(c => ({
-            id: c.id,
-            month: c.expense_date ? new Date(c.expense_date).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : '—',
-            category: c.category,
-            description: c.description ?? '—',
-            amount: c.amount,
-            receipt: !!c.receipt_url,
-            status: c.status.charAt(0).toUpperCase() + c.status.slice(1) as Claim['status'],
-            submittedOn: c.created_at ? new Date(c.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
-          })))
-        }
+      .then(r => mapApiClaims(r.data))
+      .catch(console.error)
+
+    // Team claims (manager view)
+    if (sessionUserId) {
+      fetch(`/api/reimbursements?manager_id=${sessionUserId}&limit=100`)
+        .then(r => r.json())
+        .then((r: { data?: unknown[] }) => {
+          const rows = (r.data ?? []) as Array<Record<string, unknown>>
+          setTeamClaims(rows.map(c => {
+            const emp = c.employee as Record<string, unknown> | undefined
+            const dept = (emp?.department as Record<string, unknown> | undefined)?.name as string | undefined
+            const dateStr = c.claim_date as string | undefined
+            const status = c.status as string
+            return {
+              id:          c.id as string,
+              employee:    emp ? `${emp.first_name} ${emp.last_name}` : '—',
+              dept:        dept ?? '—',
+              month:       dateStr ? new Date(dateStr).toLocaleString('en-IN', { month: 'long', year: 'numeric' }) : '—',
+              category:    toTitleCase(c.category as string ?? 'other'),
+              description: c.description as string ?? '—',
+              amount:      Number(c.amount) || 0,
+              status:      (status.charAt(0).toUpperCase() + status.slice(1)) as TeamClaim['status'],
+              submittedOn: c.created_at ? new Date(c.created_at as string).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+            }
+          }))
+        })
+        .catch(console.error)
+    }
+
+    // Pending approvals (admin view — all pending/submitted claims)
+    fetch('/api/reimbursements?status=pending&limit=100')
+      .then(r => r.json())
+      .then((r: { data?: unknown[] }) => {
+        const rows = (r.data ?? []) as Array<Record<string, unknown>>
+        setApprovals(rows.map(c => {
+          const emp = c.employee as Record<string, unknown> | undefined
+          const dept = (emp?.department as Record<string, unknown> | undefined)?.name as string | undefined
+          const raw = c as Record<string, unknown>
+          const status = c.status as string
+          return {
+            id:          c.id as string,
+            employee:    emp ? `${emp.first_name} ${emp.last_name}` : '—',
+            dept:        dept ?? '—',
+            claimNo:     c.id as string,
+            category:    toTitleCase(c.category as string ?? 'other'),
+            description: c.description as string ?? '—',
+            amount:      Number(c.amount) || 0,
+            receipt:     !!(raw.receipt_urls),
+            submittedOn: c.created_at ? new Date(c.created_at as string).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+            status:      (status.charAt(0).toUpperCase() + status.slice(1)) as PendingApproval['status'],
+          }
+        }))
       })
       .catch(console.error)
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionUserId])
 
   void apiClaims
 
   async function handleSubmitClaim() {
-    if (!newClaim.description || !newClaim.amount) return
+    if (!newClaim.description || !newClaim.amount || !newClaim.month || !newClaim.category) return
     setSubmitting(true)
     try {
-      const now = new Date()
-      await reimbursementsApi.create({
-        title: newClaim.description.slice(0, 80),
-        category: newClaim.category || 'Other',
-        amount: Number(newClaim.amount),
-        expense_date: now.toISOString().split('T')[0],
-        description: newClaim.description,
-        status: 'submitted',
-      } as Partial<ExpenseClaim>)
+      // newClaim.month is "YYYY-MM" — split into year + month for the API
+      const [yearStr, monthStr] = newClaim.month.split('-')
+
+      await fetch('/api/reimbursements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category:    newClaim.category,
+          description: newClaim.description,
+          amount:      Number(newClaim.amount),
+          month:       monthStr,
+          year:        yearStr,
+          receipt_url: uploadedFile ?? null,
+        }),
+      }).then(async res => {
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+        return json
+      })
+
       toast.success('Claim submitted successfully!')
       setNewClaim({ month: '', category: '', description: '', amount: '' })
       setUploadedFile(null)
       setSubmitModal(false)
-      reimbursementsApi.list({ limit: 50 }).then(r => setApiClaims(r.data)).catch(console.error)
+      reimbursementsApi.list({ limit: 50 }).then(r => mapApiClaims(r.data)).catch(console.error)
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to submit claim')
     } finally { setSubmitting(false) }
   }
 
-  async function handleApprove(id: string) {
+  async function handleEditClaim() {
+    if (!editModal.claim || !editClaim.description || !editClaim.amount || !editClaim.month || !editClaim.category) return
+    setEditing(true)
     try {
-      await reimbursementsApi.update(id, { status: 'approved' } as Partial<ExpenseClaim>)
-      setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' } : a))
+      const [yearStr, monthStr] = editClaim.month.split('-')
+      const res = await fetch(`/api/reimbursements/${editModal.claim.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action:      'update',
+          category:    editClaim.category,
+          description: editClaim.description,
+          amount:      Number(editClaim.amount),
+          month:       monthStr,
+          year:        yearStr,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      toast.success('Claim updated successfully!')
+      setEditModal({ open: false, claim: null })
+      reimbursementsApi.list({ limit: 50 }).then(r => mapApiClaims(r.data)).catch(console.error)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update claim')
+    } finally { setEditing(false) }
+  }
+
+  async function handleApprove(id: string) {
+    const ap = approvals.find(a => a.id === id)
+    try {
+      const res = await fetch(`/api/reimbursements/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve', approved_amount: ap?.amount ?? 0 }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      setApprovals(prev => prev.map(a => a.id === id ? { ...a, status: 'Approved' } : a))
       toast.success('Claim approved')
-    } catch { setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' } : a)) }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to approve claim')
+    }
   }
 
   async function handleReject() {
     if (!rejectModal.id) return
     try {
-      await reimbursementsApi.update(rejectModal.id, { status: 'rejected' } as Partial<ExpenseClaim>)
-    } catch { /* optimistic */ }
-    setApprovals((prev) => prev.map((a) => a.id === rejectModal.id ? { ...a, status: 'Rejected' } : a))
+      const res = await fetch(`/api/reimbursements/${rejectModal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject', rejection_reason: rejectReason }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      setApprovals(prev => prev.map(a => a.id === rejectModal.id ? { ...a, status: 'Rejected' } : a))
+      toast.success('Claim rejected')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reject claim')
+    }
     setRejectModal({ open: false, id: null })
     setRejectReason('')
   }
 
-  const filteredTeam = TEAM_CLAIMS.filter((tc) =>
+  const filteredTeam = teamClaims.filter((tc) =>
     (teamMonthFilter  === 'All' || tc.month  === teamMonthFilter) &&
     (teamStatusFilter === 'All' || tc.status === teamStatusFilter)
   )
 
   const pendingCount = approvals.filter((a) => a.status === 'Pending').length
-  const teamMonths   = ['All', ...Array.from(new Set(TEAM_CLAIMS.map((t) => t.month)))]
+  const teamMonths   = ['All', ...Array.from(new Set(teamClaims.map((t) => t.month)))]
 
   const tabs: { key: ReimbTab; label: string; count: number }[] = [
     { key: 'myClaims',        label: 'My Claims',              count: myClaims.length },
-    { key: 'teamClaims',      label: 'Team Claims',            count: TEAM_CLAIMS.length },
+    { key: 'teamClaims',      label: 'Team Claims',            count: teamClaims.length },
     { key: 'pendingApprovals',label: 'Pending Approvals',      count: pendingCount },
   ]
 
@@ -260,165 +640,122 @@ export default function ReimbursementsPage() {
     <>
       {/* ── Modals ── */}
       {/* Submit Claim */}
-      <Modal open={submitModal} onClose={() => setSubmitModal(false)} title="Submit New Claim" sub="Fill in the expense details below" wide>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Row 1: Month + Category */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Month / Year</label>
-              <select value={newClaim.month} onChange={(e) => setNewClaim((p) => ({ ...p, month: e.target.value }))} className="form-select" style={{ width: '100%' }}>
-                <option value="">Select month…</option>
-                {['April 2026', 'March 2026', 'Feb 2026', 'Jan 2026'].map((m) => <option key={m}>{m}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Category</label>
-              <select value={newClaim.category} onChange={(e) => setNewClaim((p) => ({ ...p, category: e.target.value }))} className="form-select" style={{ width: '100%' }}>
-                <option value="">Select category…</option>
-                {['Travel', 'Food', 'Accommodation', 'Communication', 'Equipment', 'Training', 'Medical', 'Other'].map((c) => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Description</label>
-            <textarea
-              value={newClaim.description}
-              onChange={(e) => setNewClaim((p) => ({ ...p, description: e.target.value }))}
-              rows={3}
-              placeholder="Describe the expense (purpose, vendor, date…)"
-              style={{
-                width: '100%', borderRadius: 8, border: '1.5px solid #e5e7eb',
-                padding: '9px 12px', fontSize: '0.875rem', color: '#111827', lineHeight: 1.5,
-                background: '#f9fafb', outline: 'none', resize: 'none', boxSizing: 'border-box',
-                transition: 'border-color 150ms',
-                fontFamily: 'inherit',
-              }}
-            />
-          </div>
-
-          {/* Amount */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Amount (₹) <span style={{ color: '#dc2626', fontWeight: 700 }}>*</span>
-            </label>
-            <div style={{ position: 'relative' }}>
-              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: '0.9rem', fontWeight: 500, pointerEvents: 'none' }}>₹</span>
-              <input
-                type="number"
-                value={newClaim.amount}
-                onChange={(e) => setNewClaim((p) => ({ ...p, amount: e.target.value }))}
-                placeholder="0"
-                style={{
-                  width: '100%', paddingLeft: 30, paddingRight: 12, paddingTop: 9, paddingBottom: 9,
-                  borderRadius: 8, border: '1.5px solid #e5e7eb',
-                  fontSize: '0.875rem', color: '#111827', background: '#f9fafb',
-                  outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Receipt upload */}
-          <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#374151', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Upload Receipt <span style={{ fontWeight: 400, textTransform: 'none', color: '#9ca3af', letterSpacing: 0 }}>(optional)</span></label>
-            <div
-              onClick={() => setUploadedFile('receipt_document.pdf')}
-              style={{
-                border: `1.5px dashed ${uploadedFile ? '#22c55e' : '#d1d5db'}`,
-                borderRadius: 10, padding: '18px 16px', textAlign: 'center', cursor: 'pointer',
-                background: uploadedFile ? '#f0fdf4' : '#fafafa',
-                transition: 'all 150ms',
-              }}
-            >
-              {uploadedFile ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Check size={15} style={{ color: '#16a34a' }} />
-                  </div>
-                  <div style={{ textAlign: 'left' }}>
-                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#15803d', margin: 0 }}>{uploadedFile}</p>
-                    <button onClick={(e) => { e.stopPropagation(); setUploadedFile(null) }} style={{ fontSize: '0.75rem', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginTop: 2 }}>
-                      Remove file
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#f3f4f6', border: '1.5px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Upload size={15} style={{ color: '#9ca3af' }} />
-                  </div>
-                  <p style={{ fontSize: '0.8125rem', color: '#374151', fontWeight: 500, margin: 0 }}>Click to upload receipt</p>
-                  <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>PDF, JPG, PNG · Max 5 MB</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Policy note */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '9px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a' }}>
-            <AlertTriangle size={13} style={{ color: '#d97706', flexShrink: 0, marginTop: 1 }} />
-            <p style={{ fontSize: '0.75rem', color: '#78350f', margin: 0, lineHeight: 1.5 }}>
-              Claims submitted by <strong style={{ color: '#92400e' }}>25th of the month</strong> will be included in the current month payroll.
-            </p>
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 10, paddingTop: 2 }}>
-            <button onClick={() => setSubmitModal(false)} className="btn btn-outline btn-sm" style={{ flex: 1 }}>Cancel</button>
-            <button
-              onClick={handleSubmitClaim}
-              disabled={!newClaim.description.trim() || !newClaim.amount || submitting}
-              className="btn btn-primary btn-sm"
-              style={{ flex: 2, opacity: (!newClaim.description.trim() || !newClaim.amount) ? 0.55 : 1, cursor: (!newClaim.description.trim() || !newClaim.amount) ? 'not-allowed' : 'pointer' }}
-            >
-              {submitting ? 'Submitting…' : 'Submit Claim'}
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {submitModal && <SubmitClaimModal
+        onClose={() => { setSubmitModal(false); setNewClaim({ month: '', category: '', description: '', amount: '' }); setUploadedFile(null) }}
+        newClaim={newClaim}
+        setNewClaim={setNewClaim}
+        uploadedFile={uploadedFile}
+        setUploadedFile={setUploadedFile}
+        submitting={submitting}
+        onSubmit={handleSubmitClaim}
+      />}
 
       {/* View Claim */}
-      <Modal open={viewModal.open} onClose={() => setViewModal({ open: false, claim: null })} title="Claim Details">
-        {viewModal.claim && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {[
-                ['Claim No',       viewModal.claim.id],
-                ['Month',          viewModal.claim.month],
-                ['Category',       viewModal.claim.category],
-                ['Amount',         `₹${viewModal.claim.amount.toLocaleString('en-IN')}`],
-                ['Receipt',        viewModal.claim.receipt ? 'Attached' : 'Not attached'],
-                ['Submitted On',   viewModal.claim.submittedOn],
-              ].map(([k, v]) => (
-                <div key={k} style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--color-gray-50)', border: '1px solid var(--color-gray-200)' }}>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', margin: '0 0 3px' }}>{k}</p>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-gray-900)', margin: 0 }}>{v}</p>
+      {viewModal.open && viewModal.claim && (() => {
+        const claim     = viewModal.claim!
+        const catCard   = CATEGORY_CARDS.find(c => c.key === claim.category)
+        const catCfg    = CATEGORY_CFG[claim.category] ?? CATEGORY_CFG.Other
+        // Extract CLM/YYYY/NNNN from description like "[CLM/2026/0004] Test"
+        const claimNoMatch = claim.description.match(/^\[([^\]]+)\]/)
+        const claimNo   = claimNoMatch ? claimNoMatch[1] : claim.id.slice(0, 8).toUpperCase()
+        const descBody  = claimNoMatch ? claim.description.replace(/^\[[^\]]+\]\s*/, '') : claim.description
+        const statusCfg = STATUS_CFG[claim.status] ?? { bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb' }
+
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+            <div style={{ background: '#fff', width: 520, maxWidth: '98vw', borderRadius: 20, boxShadow: '0 32px 80px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+
+              {/* Header */}
+              <div style={{ background: 'linear-gradient(135deg,#1E3A5F 0%,#1565c0 100%)', padding: '20px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <FileText size={16} style={{ color: '#fff' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Claim Details</p>
+                      <p style={{ fontSize: '0.9375rem', fontWeight: 800, color: '#fff', margin: 0, fontFamily: 'monospace', letterSpacing: '0.03em' }}>{claimNo}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setViewModal({ open: false, claim: null })} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer', color: '#fff', padding: '6px 8px', borderRadius: 8, display: 'flex' }}><X size={15} /></button>
                 </div>
-              ))}
-            </div>
-            <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--color-gray-50)', border: '1px solid var(--color-gray-200)' }}>
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', margin: '0 0 3px' }}>Description</p>
-              <p style={{ fontSize: '0.875rem', color: 'var(--color-gray-800)', margin: 0 }}>{viewModal.claim.description}</p>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: 8, background: 'var(--color-gray-50)', border: '1px solid var(--color-gray-200)' }}>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>Status</span>
-              <StatusBadge status={viewModal.claim.status} />
-            </div>
-            {viewModal.claim.status === 'Rejected' && viewModal.claim.rejectionReason && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                <XCircle size={14} style={{ color: '#dc2626', flexShrink: 0, marginTop: 1 }} />
-                <div>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 600, color: '#b91c1c', margin: '0 0 2px' }}>Rejection Reason</p>
-                  <p style={{ fontSize: '0.8125rem', color: '#b91c1c', margin: 0 }}>{viewModal.claim.rejectionReason}</p>
+
+                {/* Amount hero */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', margin: '0 0 2px' }}>Claim Amount</p>
+                    <p style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', margin: 0, lineHeight: 1 }}>₹{claim.amount.toLocaleString('en-IN')}</p>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px', borderRadius: 20, background: statusCfg.bg, color: statusCfg.color, border: `1px solid ${statusCfg.border}`, fontSize: '0.75rem', fontWeight: 700 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusCfg.color, display: 'inline-block' }} />
+                      {claim.status}
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 12px', borderRadius: 20, background: catCfg.bg, color: catCfg.color, border: `1px solid ${catCfg.border}`, fontSize: '0.75rem', fontWeight: 700 }}>
+                      {catCard && <catCard.Icon size={11} />}
+                      {claim.category}
+                    </span>
+                  </div>
                 </div>
               </div>
-            )}
-            <button onClick={() => setViewModal({ open: false, claim: null })} className="btn btn-outline btn-sm" style={{ width: '100%' }}>Close</button>
+
+              {/* Body */}
+              <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Info grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {[
+                    { label: 'Month',        value: claim.month },
+                    { label: 'Submitted On', value: claim.submittedOn },
+                    { label: 'Receipt',      value: claim.receipt ? '✓ Attached' : 'Not attached', color: claim.receipt ? '#15803d' : '#6b7280' },
+                    { label: 'Claim No',     value: claimNo, mono: true },
+                  ].map(({ label, value, color, mono }) => (
+                    <div key={label} style={{ padding: '10px 14px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                      <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{label}</p>
+                      <p style={{ fontSize: '0.875rem', fontWeight: 600, color: color ?? '#111827', margin: 0, fontFamily: mono ? 'monospace' : 'inherit' }}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Description */}
+                <div style={{ padding: '12px 14px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+                  <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: '0 0 5px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Description</p>
+                  <p style={{ fontSize: '0.875rem', color: '#374151', margin: 0, lineHeight: 1.5 }}>{descBody || '—'}</p>
+                </div>
+
+                {/* Rejection reason */}
+                {claim.status === 'Rejected' && claim.rejectionReason && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca' }}>
+                    <XCircle size={14} style={{ color: '#dc2626', flexShrink: 0, marginTop: 2 }} />
+                    <div>
+                      <p style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b91c1c', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rejection Reason</p>
+                      <p style={{ fontSize: '0.875rem', color: '#b91c1c', margin: 0, lineHeight: 1.5 }}>{claim.rejectionReason}</p>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={() => setViewModal({ open: false, claim: null })}
+                  style={{ width: '100%', padding: '10px', borderRadius: 10, border: '1.5px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
-        )}
-      </Modal>
+        )
+      })()}
+
+      {/* Edit Claim — reuses SubmitClaimModal pre-populated */}
+      {editModal.open && editModal.claim && (
+        <SubmitClaimModal
+          onClose={() => setEditModal({ open: false, claim: null })}
+          newClaim={editClaim}
+          setNewClaim={setEditClaim}
+          uploadedFile={null}
+          setUploadedFile={() => {}}
+          submitting={editing}
+          onSubmit={handleEditClaim}
+          editMode
+        />
+      )}
 
       {/* Reject Approval */}
       <Modal open={rejectModal.open} onClose={() => setRejectModal({ open: false, id: null })} title="Reject Claim" sub="Provide a reason for rejection">
@@ -588,7 +925,14 @@ export default function ReimbursementsPage() {
                             <button onClick={() => setViewModal({ open: true, claim })} className="btn btn-ghost btn-sm btn-icon" title="View"><Eye size={15} /></button>
                             {claim.status === 'Pending' && (
                               <>
-                                <button className="btn btn-ghost btn-sm btn-icon" title="Edit"><Edit size={15} /></button>
+                                <button onClick={() => {
+                                  const claimNoMatch = claim.description.match(/^\[([^\]]+)\]/)
+                                  const descBody = claimNoMatch ? claim.description.replace(/^\[[^\]]+\]\s*/, '') : claim.description
+                                  const d = new Date(claim.month + ' 1')
+                                  const monthVal = isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                                  setEditClaim({ month: monthVal, category: claim.category, description: descBody, amount: String(claim.amount) })
+                                  setEditModal({ open: true, claim })
+                                }} className="btn btn-ghost btn-sm btn-icon" title="Edit"><Edit size={15} /></button>
                                 <button onClick={() => setMyClaims((p) => p.filter((c) => c.id !== claim.id))} className="btn btn-ghost btn-sm btn-icon" title="Delete" style={{ color: '#dc2626' }}><Trash2 size={15} /></button>
                               </>
                             )}
@@ -615,7 +959,7 @@ export default function ReimbursementsPage() {
                 </select>
                 <span style={{ marginLeft: 'auto', fontSize: '0.8125rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap' }}>
                   <Filter size={13} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-                  {filteredTeam.length} of {TEAM_CLAIMS.length} records
+                  {filteredTeam.length} of {teamClaims.length} records
                 </span>
               </div>
 

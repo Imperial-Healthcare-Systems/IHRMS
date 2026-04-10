@@ -178,6 +178,33 @@ const LEAVE_POLICIES: LeavePolicy[] = [
 /* ─────────────────────────────────────────────────────────────
    HELPERS
 ───────────────────────────────────────────────────────────── */
+
+// Maps DB leave_type values → local short-code LeaveType
+const DB_LEAVE_TO_SHORT: Record<string, LeaveType> = {
+  casual:        'CL',
+  sick:          'SL',
+  earned:        'EL',
+  unpaid:        'LOP',
+  maternity:     'ML',
+  paternity:     'PL',
+  compensatory:  'CompOff',
+  bereavement:   'Bereavement',
+  work_from_home:'LOP',
+  // pass-through for short codes already stored
+  CL: 'CL', SL: 'SL', EL: 'EL', LOP: 'LOP', ML: 'ML', PL: 'PL',
+  CompOff: 'CompOff', Bereavement: 'Bereavement',
+}
+
+function safeLeaveType(raw: string): LeaveType {
+  return DB_LEAVE_TO_SHORT[raw] ?? 'CL'
+}
+
+function safeStatus(raw: string): LeaveStatus {
+  const cap = raw.charAt(0).toUpperCase() + raw.slice(1)
+  const valid: LeaveStatus[] = ['Pending', 'Approved', 'Rejected', 'Cancelled']
+  return valid.includes(cap as LeaveStatus) ? (cap as LeaveStatus) : 'Pending'
+}
+
 const PALETTE = ['#1E3A5F','#FF6B00','#1A7A4A','#7C3AED','#0369A1','#BE185D','#0F766E','#B45309']
 
 function Avatar({ name, size = 32 }: { name: string; size?: number }) {
@@ -230,7 +257,7 @@ function ApplyLeaveModal({ onClose }: { onClose: () => void }) {
       const from = new Date(fromDate)
       const to = new Date(toDate)
       const days = halfDay ? 0.5 : Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000) + 1)
-      await leavesApi.create({ leave_type: leaveType, start_date: fromDate, end_date: toDate, days, reason, is_half_day: halfDay })
+      await leavesApi.create({ leave_type: leaveType, from_date: fromDate, to_date: toDate, days, reason })
       toast.success('Leave request submitted successfully!')
       onClose()
     } catch (e: unknown) {
@@ -403,6 +430,30 @@ export default function LeavesPage() {
   const [approvals, setApprovals] = useState(PENDING_APPROVALS)
   const [calMonth, setCalMonth] = useState({ month: 3, year: 2026 })
 
+  /* View leave detail modal */
+  const [viewLeave, setViewLeave] = useState<LeaveRequest | null>(null)
+
+  /* Cancel leave */
+  async function cancelLeave(id: string) {
+    if (!confirm('Are you sure you want to cancel this leave request?')) return
+    try {
+      const res = await fetch(`/api/leaves/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' }),
+      })
+      if (!res.ok) {
+        const j = await res.json()
+        throw new Error(j.error ?? 'Failed to cancel')
+      }
+      // Update local state immediately
+      setMyLeaves(prev => prev.map(l => l.id === id ? { ...l, status: 'cancelled' } : l))
+      toast.success('Leave request cancelled')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to cancel')
+    }
+  }
+
   /* Live data */
   const [myLeaves, setMyLeaves] = useState<ApiLeave[]>([])
   const [pendingApprovals, setPendingApprovals] = useState<ApiLeave[]>([])
@@ -423,11 +474,11 @@ export default function LeavesPage() {
             id: l.id,
             empId: l.employee?.emp_id ?? '—',
             name: l.employee ? `${l.employee.first_name} ${l.employee.last_name}` : '—',
-            department: l.employee?.department?.name ?? '—',
-            leaveType: l.leave_type as LeaveType,
-            fromDate: l.start_date,
-            toDate: l.end_date,
-            days: l.days,
+            department: '—',
+            leaveType: safeLeaveType(l.leave_type),
+            fromDate: l.from_date ?? '—',
+            toDate: l.to_date ?? '—',
+            days: l.total_days ?? 0,
             reason: l.reason,
             appliedOn: l.created_at?.split('T')[0] ?? '—',
             pendingSince: 0,
@@ -443,12 +494,12 @@ export default function LeavesPage() {
   const myLeaveRequests: LeaveRequest[] = myLeaves.length > 0
     ? myLeaves.map(l => ({
         id: l.id,
-        leaveType: l.leave_type as LeaveType,
-        fromDate: l.start_date,
-        toDate: l.end_date,
-        days: l.days,
+        leaveType: safeLeaveType(l.leave_type),
+        fromDate: l.from_date ?? '—',
+        toDate: l.to_date ?? '—',
+        days: l.total_days ?? 0,
         reason: l.reason,
-        status: l.status.charAt(0).toUpperCase() + l.status.slice(1) as LeaveStatus,
+        status: safeStatus(l.status),
         appliedOn: l.created_at?.split('T')[0] ?? '—',
       }))
     : MY_LEAVES
@@ -457,7 +508,7 @@ export default function LeavesPage() {
 
   async function approveLeave(id: string) {
     try {
-      await leavesApi.approve(id, { action: 'approve', level: 1 })
+      await leavesApi.approve(id, { action: 'approve' })
       setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Approved' as const } : a))
       toast.success('Leave approved')
     } catch (e: unknown) {
@@ -467,7 +518,7 @@ export default function LeavesPage() {
   }
   async function rejectLeave(id: string) {
     try {
-      await leavesApi.approve(id, { action: 'reject', level: 1 })
+      await leavesApi.approve(id, { action: 'reject' })
       setApprovals((prev) => prev.map((a) => a.id === id ? { ...a, status: 'Rejected' as const } : a))
       toast.success('Leave rejected')
     } catch {
@@ -599,7 +650,7 @@ export default function LeavesPage() {
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge label={LEAVE_TYPE_CONFIG[lr.leaveType].label} config={LEAVE_TYPE_CONFIG[lr.leaveType]} />
+                        <Badge label={LEAVE_TYPE_CONFIG[lr.leaveType]?.label ?? lr.leaveType} config={LEAVE_TYPE_CONFIG[lr.leaveType] ?? LEAVE_TYPE_CONFIG['CL']} />
                       </td>
                       <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: 'var(--color-gray-700)', whiteSpace: 'nowrap' }}>{lr.fromDate}</td>
                       <td style={{ padding: '12px 16px', fontSize: '0.875rem', color: 'var(--color-gray-700)', whiteSpace: 'nowrap' }}>{lr.toDate}</td>
@@ -611,12 +662,16 @@ export default function LeavesPage() {
                         <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={lr.reason}>{lr.reason}</p>
                       </td>
                       <td style={{ padding: '12px 16px' }}>
-                        <Badge label={lr.status} config={STATUS_CONFIG[lr.status]} />
+                        <Badge label={lr.status} config={STATUS_CONFIG[lr.status] ?? STATUS_CONFIG['Pending']} />
                       </td>
                       <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap' }}>{lr.appliedOn}</td>
                       <td style={{ padding: '12px 16px' }}>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button className="btn btn-ghost btn-sm btn-icon" title="View details">
+                          <button
+                            className="btn btn-ghost btn-sm btn-icon"
+                            title="View details"
+                            onClick={() => setViewLeave(lr)}
+                          >
                             <Eye size={14} />
                           </button>
                           {lr.status === 'Pending' && (
@@ -624,6 +679,7 @@ export default function LeavesPage() {
                               className="btn btn-ghost btn-sm"
                               style={{ color: '#dc2626', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 4 }}
                               title="Cancel request"
+                              onClick={() => cancelLeave(lr.id)}
                             >
                               <X size={12} /> Cancel
                             </button>
@@ -777,7 +833,7 @@ export default function LeavesPage() {
                           </div>
                         </td>
                         <td style={{ padding: '12px 14px' }}>
-                          <Badge label={LEAVE_TYPE_CONFIG[ap.leaveType].label} config={LEAVE_TYPE_CONFIG[ap.leaveType]} />
+                          <Badge label={LEAVE_TYPE_CONFIG[ap.leaveType]?.label ?? ap.leaveType} config={LEAVE_TYPE_CONFIG[ap.leaveType] ?? LEAVE_TYPE_CONFIG['CL']} />
                         </td>
                         <td style={{ padding: '12px 14px', fontSize: '0.8rem', color: 'var(--color-gray-700)', whiteSpace: 'nowrap' }}>{ap.fromDate}</td>
                         <td style={{ padding: '12px 14px', fontSize: '0.8rem', color: 'var(--color-gray-700)', whiteSpace: 'nowrap' }}>{ap.toDate}</td>
@@ -907,6 +963,69 @@ export default function LeavesPage() {
           </div>
         )}
       </div>
+
+      {/* ── View Leave Detail Modal ── */}
+      {viewLeave && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 460, maxWidth: '95vw', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Leave Request Details</h3>
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 3 }}>
+                  {LEAVE_TYPE_CONFIG[viewLeave.leaveType as LeaveType]?.label ?? viewLeave.leaveType}
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Badge label={viewLeave.status} config={STATUS_CONFIG[viewLeave.status as LeaveStatus] ?? STATUS_CONFIG['Pending']} />
+                <button onClick={() => setViewLeave(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}>
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '24px' }}>
+              {([
+                ['Leave Type',  LEAVE_TYPE_CONFIG[viewLeave.leaveType as LeaveType]?.label ?? viewLeave.leaveType],
+                ['From Date',   viewLeave.fromDate],
+                ['To Date',     viewLeave.toDate],
+                ['Duration',    `${viewLeave.days} day${viewLeave.days !== 1 ? 's' : ''}`],
+                ['Applied On',  viewLeave.appliedOn],
+                ['Status',      viewLeave.status],
+              ] as [string, string][]).map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--color-gray-50)' }}>
+                  <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', fontWeight: 500 }}>{label}</span>
+                  <span style={{ fontSize: '0.875rem', color: 'var(--color-gray-900)', fontWeight: 600 }}>{value}</span>
+                </div>
+              ))}
+              {/* Reason */}
+              <div style={{ marginTop: 16, padding: '12px 14px', background: 'var(--color-gray-50)', borderRadius: 8, border: '1px solid var(--color-gray-200)' }}>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-gray-400)', fontWeight: 500, marginBottom: 5 }}>REASON</p>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-gray-700)', lineHeight: 1.55 }}>{viewLeave.reason}</p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {viewLeave.status === 'Pending' && (
+                <button
+                  onClick={() => { cancelLeave(viewLeave.id); setViewLeave(null) }}
+                  style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}
+                >
+                  <X size={13} /> Cancel Request
+                </button>
+              )}
+              <button
+                onClick={() => setViewLeave(null)}
+                style={{ marginLeft: 'auto', padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

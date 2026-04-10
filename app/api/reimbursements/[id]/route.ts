@@ -3,7 +3,16 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const session = await getServerSession(authOptions)
@@ -12,38 +21,33 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { data, error } = await supabaseAdmin
       .from('expense_claims')
       .select(`
-        id, claim_date, category, description, amount, currency,
-        receipt_urls, status, rejection_note, paid_at, payment_ref,
-        approved_at,
+        *,
         employee:employees!expense_claims_employee_id_fkey(
-          id, first_name, last_name, emp_id, work_email,
-          department:departments(id, name),
+          id, first_name, last_name, emp_id, email,
+          department:departments!employees_department_id_fkey(id, name),
           designation:designations(id, title)
-        ),
-        approved_by:employees!expense_claims_approved_by_fkey(
-          id, first_name, last_name, emp_id
-        ),
-        created_at, updated_at
+        )
       `)
       .eq('id', id)
       .single()
 
     if (error) {
       if (error.code === 'PGRST116') return NextResponse.json({ error: 'Expense claim not found' }, { status: 404 })
-      throw error
+      console.error('[reimbursements GET id]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
 
-    const sessionUserId  = (session.user as any)?.id
-    const sessionIsAdmin = (session.user as any)?.isAdmin
+    const sessionUserId  = (session.user as Record<string, unknown>)?.id as string | undefined
+    const sessionIsAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
 
-    // Non-admin employees can only view their own claim
-    if (!sessionIsAdmin && (data as any).employee?.id !== sessionUserId) {
+    if (!sessionIsAdmin && (data as Record<string, unknown> & { employee?: { id: string } })?.employee?.id !== sessionUserId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     return NextResponse.json({ data })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[reimbursements GET id catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -56,14 +60,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const body = await req.json()
     const {
       action,
-      approved_amount,
+
       rejection_reason,
       payroll_run_id,
+      category: editCategory,
+      description: editDescription,
+      amount: editAmount,
+      month: editMonth,
+      year: editYear,
     } = body as {
-      action?: 'approve' | 'reject' | 'include_payroll'
-      approved_amount?: number
+      action?: 'approve' | 'reject' | 'include_payroll' | 'update'
       rejection_reason?: string
       payroll_run_id?: string
+      category?: string
+      description?: string
+      amount?: number
+      month?: string
+      year?: string
     }
 
     if (!action) {
@@ -82,8 +95,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       throw fetchError
     }
 
-    const approverUserId = (session.user as any)?.id
-    const isAdmin        = (session.user as any)?.isAdmin
+    const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
+    const isAdmin        = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+
+    // 'update' action — employee editing their own pending claim
+    if (action === 'update') {
+      if (!['draft', 'pending', 'submitted'].includes(current.status)) {
+        return NextResponse.json({ error: `Cannot edit a claim with status '${current.status}'` }, { status: 422 })
+      }
+      if (current.employee_id !== sessionUserId && !isAdmin) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+
+      const CATEGORY_MAP: Record<string, string> = {
+        travel: 'travel', accommodation: 'accommodation', food: 'food',
+        'food & meals': 'food', stay: 'accommodation',
+        client_entertainment: 'client_entertainment', 'client entertainment': 'client_entertainment',
+        communication: 'communication', telecom: 'communication',
+        training: 'training', medical: 'medical', equipment: 'equipment', other: 'other',
+      }
+      const normalizedCategory = editCategory
+        ? (CATEGORY_MAP[editCategory.toLowerCase()] ?? 'other')
+        : undefined
+
+      const editPayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (normalizedCategory) { editPayload.category = normalizedCategory; editPayload.expense_type = normalizedCategory }
+      if (editDescription)    editPayload.description = editDescription
+      if (editAmount !== undefined) editPayload.amount = editAmount
+      if (editYear && editMonth) {
+        editPayload.claim_date = `${editYear}-${String(editMonth).padStart(2, '0')}-01`
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('expense_claims').update(editPayload).eq('id', id).select().single()
+      if (error) { console.error('[reimbursements PATCH update]', error); return NextResponse.json({ error: errMsg(error) }, { status: 500 }) }
+      return NextResponse.json({ data })
+    }
+
     if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin or Manager required' }, { status: 403 })
 
     const updatePayload: Record<string, unknown> = {
@@ -91,23 +139,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     if (action === 'approve') {
-      if (!['submitted', 'draft'].includes(current.status)) {
+      if (!['submitted', 'draft', 'pending'].includes(current.status)) {
         return NextResponse.json(
           { error: `Cannot approve a claim with status '${current.status}'` },
           { status: 422 }
         )
       }
-      if (approved_amount === undefined) {
-        return NextResponse.json({ error: 'approved_amount is required for approve action' }, { status: 400 })
-      }
-      updatePayload.status      = 'approved'
-      updatePayload.approved_by = approverUserId
-      updatePayload.approved_at = new Date().toISOString()
-      // Store approved_amount in description prefix since schema doesn't have dedicated column
-      // We update the payment_ref to track approved amount
-      updatePayload.payment_ref = `approved_amount:${approved_amount}`
+      updatePayload.status = 'approved'
     } else if (action === 'reject') {
-      if (!['submitted', 'draft', 'approved'].includes(current.status)) {
+      if (!['submitted', 'draft', 'pending', 'approved'].includes(current.status)) {
         return NextResponse.json(
           { error: `Cannot reject a claim with status '${current.status}'` },
           { status: 422 }
@@ -116,8 +156,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!rejection_reason) {
         return NextResponse.json({ error: 'rejection_reason is required for reject action' }, { status: 400 })
       }
-      updatePayload.status         = 'rejected'
-      updatePayload.rejection_note = rejection_reason
+      updatePayload.status = 'rejected'
+      updatePayload.rejection_note = rejection_reason ?? null
     } else if (action === 'include_payroll') {
       if (current.status !== 'approved') {
         return NextResponse.json(
@@ -128,10 +168,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!payroll_run_id) {
         return NextResponse.json({ error: 'payroll_run_id is required for include_payroll action' }, { status: 400 })
       }
-      // Mark as paid and link payroll run via payment_ref
-      updatePayload.status      = 'paid'
-      updatePayload.paid_at     = new Date().toISOString().split('T')[0]
-      updatePayload.payment_ref = `payroll_run:${payroll_run_id}`
+      updatePayload.status  = 'paid'
+      updatePayload.paid_at = new Date().toISOString().split('T')[0]
     } else {
       return NextResponse.json({ error: `Unknown action '${action}'` }, { status: 400 })
     }
@@ -143,22 +181,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[reimbursements PATCH]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
     return NextResponse.json({ data })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[reimbursements PATCH catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const sessionUserId = (session.user as any)?.id
-    const isAdmin       = (session.user as any)?.isAdmin
+    const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
+    const isAdmin       = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
 
     // Fetch the claim to check ownership and status
     const { data: current, error: fetchError } = await supabaseAdmin
@@ -172,13 +214,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       throw fetchError
     }
 
-    // Only the claim owner or an admin can delete
     if (!isAdmin && current.employee_id !== sessionUserId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Can only delete if status is 'pending' / 'draft' / 'submitted'
-    if (!['draft', 'submitted'].includes(current.status)) {
+    if (!['draft', 'submitted', 'pending'].includes(current.status)) {
       return NextResponse.json(
         { error: `Cannot delete a claim with status '${current.status}'. Only draft/submitted claims can be deleted.` },
         { status: 422 }
@@ -190,10 +231,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       .delete()
       .eq('id', id)
 
-    if (error) throw error
+    if (error) {
+      console.error('[reimbursements DELETE]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
     return NextResponse.json({ message: 'Expense claim deleted successfully' })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[reimbursements DELETE catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

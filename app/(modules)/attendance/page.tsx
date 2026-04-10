@@ -196,6 +196,61 @@ export default function AttendancePage() {
   const [deptFilter, setDeptFilter] = useState('All Departments')
   const [regRequests, setRegRequests] = useState(REGULARIZATION_REQUESTS)
 
+  /* Regularize modal */
+  const [regModal, setRegModal] = useState<{ rec: AttendanceRecord } | null>(null)
+  const [regForm, setRegForm] = useState({ checkIn: '', checkOut: '', reason: '' })
+  const [regSaving, setRegSaving] = useState(false)
+
+  function openRegModal(rec: AttendanceRecord) {
+    setRegForm({ checkIn: rec.checkIn === '—' ? '' : rec.checkIn, checkOut: rec.checkOut === '—' ? '' : rec.checkOut, reason: '' })
+    setRegModal({ rec })
+  }
+
+  async function submitRegularization() {
+    if (!regModal) return
+    if (!regForm.reason.trim()) { toast.error('Please provide a reason'); return }
+    setRegSaving(true)
+    try {
+      const log = attendanceLogs.find(l => l.id === regModal.rec.id)
+      const res = await fetch('/api/attendance/regularization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date:                 log?.date ?? new Date().toISOString().split('T')[0],
+          reason:               regForm.reason.trim(),
+          requested_punch_in:   regForm.checkIn   || null,
+          requested_punch_out:  regForm.checkOut  || null,
+          employee_id:          log?.employee_id  ?? null,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed')
+      toast.success('Regularization request submitted!')
+      setRegModal(null)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to submit')
+    } finally { setRegSaving(false) }
+  }
+
+  /* Download Report */
+  function downloadReport() {
+    const rows = [
+      ['Employee ID', 'Name', 'Department', 'Check-In', 'Check-Out', 'Hours Worked', 'Status', 'WFH'],
+      ...filteredAttendance.map(r => [
+        r.empId, r.name, r.department, r.checkIn, r.checkOut, r.hoursWorked, r.status, r.wfh ? 'Yes' : 'No',
+      ]),
+    ]
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `attendance-report-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('Report downloaded!')
+  }
+
   /* Live data */
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([])
   const [loadingAttendance, setLoadingAttendance] = useState(true)
@@ -302,7 +357,7 @@ export default function AttendancePage() {
         notificationCount={3}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn btn-outline btn-sm">
+            <button className="btn btn-outline btn-sm" onClick={downloadReport}>
               <Download size={14} />
               Download Report
             </button>
@@ -410,7 +465,7 @@ export default function AttendancePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAttendance.map((rec, i) => (
+                  {filteredAttendance.map((rec) => (
                     <tr key={rec.id} style={{ borderBottom: '1px solid var(--color-gray-100)', transition: 'background var(--transition-fast)' }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-gray-50)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
@@ -454,6 +509,7 @@ export default function AttendancePage() {
                           className="btn btn-ghost btn-sm"
                           title="Request regularization"
                           style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem' }}
+                          onClick={() => openRegModal(rec as AttendanceRecord)}
                         >
                           <Edit size={13} />
                           Regularize
@@ -723,6 +779,100 @@ export default function AttendancePage() {
           </div>
         )}
       </div>
+
+      {/* ── Regularization Modal ── */}
+      {regModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ background: '#fff', width: 480, maxWidth: '95vw', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px', borderBottom: '1px solid var(--color-gray-100)' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Request Regularization</h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 3 }}>
+                  {regModal.rec.name} &middot; {regModal.rec.empId}
+                </p>
+              </div>
+              <button onClick={() => setRegModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Current times info */}
+              <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: 'var(--color-gray-50)', borderRadius: 8, border: '1px solid var(--color-gray-200)' }}>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-gray-400)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Current Check-In</p>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-700)' }}>{regModal.rec.checkIn}</p>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-gray-400)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Current Check-Out</p>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-700)' }}>{regModal.rec.checkOut}</p>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-gray-400)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Status</p>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-gray-700)' }}>{regModal.rec.status}</p>
+                </div>
+              </div>
+
+              {/* Corrected times */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 5 }}>
+                    Corrected Check-In
+                  </label>
+                  <input
+                    type="time"
+                    value={regForm.checkIn}
+                    onChange={e => setRegForm(f => ({ ...f, checkIn: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 12px', border: '1.5px solid var(--color-gray-200)', borderRadius: 8, fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 5 }}>
+                    Corrected Check-Out
+                  </label>
+                  <input
+                    type="time"
+                    value={regForm.checkOut}
+                    onChange={e => setRegForm(f => ({ ...f, checkOut: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 12px', border: '1.5px solid var(--color-gray-200)', borderRadius: 8, fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 5 }}>
+                  Reason <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <textarea
+                  value={regForm.reason}
+                  onChange={e => setRegForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="Explain why attendance correction is needed..."
+                  rows={3}
+                  style={{ width: '100%', padding: '10px 12px', border: '1.5px solid var(--color-gray-200)', borderRadius: 8, fontSize: '0.875rem', resize: 'vertical', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', lineHeight: 1.5 }}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '14px 22px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setRegModal(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>
+                Cancel
+              </button>
+              <button
+                onClick={submitRegularization}
+                disabled={regSaving}
+                className="btn btn-primary btn-sm"
+                style={{ opacity: regSaving ? 0.7 : 1 }}
+              >
+                {regSaving ? 'Submitting…' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

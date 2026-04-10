@@ -3,7 +3,16 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const session = await getServerSession(authOptions)
@@ -11,13 +20,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { data, error } = await supabaseAdmin
       .from('leave_requests')
-      .select(`*, employee:employees(*), level1_approver:employees!level1_approver_id(*), level2_approver:employees!level2_approver_id(*)`)
+      .select(`
+        *,
+        employee:employees!leave_requests_employee_id_fkey(id, first_name, last_name, emp_id, department_id)
+      `)
       .eq('id', id)
       .single()
-    if (error) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    if (error) { console.error('[leaves GET id]', error); throw error }
     return NextResponse.json({ data })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[leaves GET id catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -28,7 +42,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { action, level, remarks } = body // action: 'approve'|'reject'|'escalate'|'cancel'
+    const { action, remarks } = body // action: 'approve' | 'reject' | 'cancel'
     const approverId = (session.user as any)?.id
     const now = new Date().toISOString()
 
@@ -37,46 +51,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         .from('leave_requests')
         .update({ status: 'cancelled', updated_at: now })
         .eq('id', id)
-        .select().single()
-      if (error) throw error
+        .select()
+        .single()
+      if (error) { console.error('[leaves PATCH cancel]', error); throw error }
       return NextResponse.json({ data })
     }
 
-    if (action === 'approve' || action === 'reject') {
-      const update: Record<string, unknown> = { updated_at: now }
-      if (level === 2) {
-        update.level2_status = action === 'approve' ? 'approved' : 'rejected'
-        update.level2_remarks = remarks
-        update.level2_actioned_at = now
-        update.status = action === 'approve' ? 'approved' : 'rejected'
-      } else {
-        update.level1_status = action === 'approve' ? 'approved' : 'rejected'
-        update.level1_remarks = remarks
-        update.level1_actioned_at = now
-        update.status = action === 'approve' ? 'approved' : 'rejected'
-      }
-
+    if (action === 'approve') {
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
-        .update(update)
+        .update({
+          status:           'approved',
+          approved_by:      approverId,
+          approved_at:      now,
+          approver_remarks: remarks ?? null,
+          updated_at:       now,
+        })
         .eq('id', id)
-        .select().single()
-      if (error) throw error
+        .select()
+        .single()
+      if (error) { console.error('[leaves PATCH approve]', error); throw error }
       return NextResponse.json({ data })
     }
 
-    if (action === 'escalate') {
+    if (action === 'reject') {
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
-        .update({ status: 'escalated', escalated_at: now, escalation_reason: remarks })
+        .update({
+          status:           'rejected',
+          approved_by:      approverId,
+          approved_at:      now,
+          approver_remarks: remarks ?? null,
+          updated_at:       now,
+        })
         .eq('id', id)
-        .select().single()
-      if (error) throw error
+        .select()
+        .single()
+      if (error) { console.error('[leaves PATCH reject]', error); throw error }
       return NextResponse.json({ data })
     }
 
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
+    return NextResponse.json({ error: 'Invalid action. Use cancel, approve, or reject' }, { status: 400 })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[leaves PATCH catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

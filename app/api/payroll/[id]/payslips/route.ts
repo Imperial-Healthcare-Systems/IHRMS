@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
@@ -23,38 +32,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .single()
 
     if (runError) {
+      console.error('[payslips GET run]', runError)
       if (runError.code === 'PGRST116') return NextResponse.json({ error: 'Payroll run not found' }, { status: 404 })
       throw runError
     }
 
     let query = supabaseAdmin
       .from('payslips')
-      .select(`
-        id, month, year, working_days, paid_days, lop_days,
-        basic, hra, special_allowance, conveyance, medical_allowance, lta,
-        overtime, bonus, other_earnings, gross_earnings,
-        employee_pf, employee_esic, professional_tax, tds, lwf_employee,
-        advance_recovery, loan_recovery, other_deductions, total_deductions,
-        net_pay, employer_pf, employer_esic, employer_gratuity,
-        ytd_gross, ytd_tds, ytd_pf,
-        payment_status, payment_date, payment_ref, pdf_url,
-        employee:employees!payslips_employee_id_fkey(
-          id, first_name, last_name, work_email,
-          department:departments(id, name, code),
-          designation:designations(id, title)
-        ),
-        created_at, updated_at
-      `, { count: 'exact' })
+      .select(`*, employee:employees(id, first_name, last_name, work_email, emp_id)`, { count: 'exact' })
       .eq('payroll_run_id', id)
       .order('created_at', { ascending: true })
-      .limit(limit)
       .range(offset, offset + limit - 1)
 
     const { data, error, count } = await query
-    if (error) throw error
+    if (error) { console.error('[payslips GET]', error); throw error }
 
-    // Apply search filter in JS since we're joining nested data
-    let filtered = data ?? []
+    let filtered = (data ?? []) as any[]
     if (search) {
       const term = search.toLowerCase()
       filtered = filtered.filter((p: any) => {
@@ -63,12 +56,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         return (
           emp.first_name?.toLowerCase().includes(term) ||
           emp.last_name?.toLowerCase().includes(term) ||
-          emp.work_email?.toLowerCase().includes(term)
+          emp.work_email?.toLowerCase().includes(term) ||
+          emp.emp_id?.toLowerCase().includes(term)
         )
       })
     }
     if (department_id) {
-      filtered = filtered.filter((p: any) => p.employee?.department?.id === department_id)
+      filtered = filtered.filter((p: any) => p.employee?.department_id === department_id)
     }
 
     return NextResponse.json({
@@ -79,6 +73,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       offset,
     })
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    console.error('[payslips GET catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
