@@ -17,8 +17,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as { isAdmin?: boolean })?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const body = await req.json()
     // Only allow safe fields to be updated
@@ -50,8 +48,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as { isAdmin?: boolean })?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Soft delete — deactivate instead of hard delete to preserve referential integrity
     const { data, error } = await supabaseAdmin

@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { announcementsApi, type Announcement as ApiAnnouncement } from '@/lib/api-client'
 import toast from 'react-hot-toast'
 import {
   Bell, Plus, Pin, Edit, Trash2, Users, MapPin,
   ChevronDown, ChevronUp, Megaphone, Calendar,
-  AlertCircle, Info,
+  AlertCircle, Info, Loader2, X, Check,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -17,23 +17,17 @@ type AnnouncementType = 'holiday' | 'policy' | 'event' | 'urgent' | 'general'
 type TargetAudienceMode = 'all' | 'department' | 'location'
 
 interface Announcement {
-  id: number; type: AnnouncementType; title: string; body: string
-  publisher: string; date: string; target: string; pinned: boolean; urgent: boolean
+  id: string
+  type: AnnouncementType
+  title: string
+  body: string
+  publisher: string
+  date: string
+  target: string
+  pinned: boolean
+  urgent: boolean
+  raw: ApiAnnouncement
 }
-
-/* ─────────────────────────────────────────────────────────────
-   MOCK DATA
-───────────────────────────────────────────────────────────── */
-const ANNOUNCEMENTS: Announcement[] = [
-  { id: 1, type: 'holiday', title: 'Office Closure — Good Friday', body: 'April 18, 2026 is a public holiday on account of Good Friday. All offices will remain closed. Employees requiring emergency access must get prior approval from their manager.', publisher: 'HR Team', date: 'Apr 1, 2026', target: 'All Employees', pinned: true, urgent: false },
-  { id: 2, type: 'policy',  title: 'Updated Work From Home Policy', body: 'Effective April 15, 2026: Maximum 2 WFH days per week are permitted. WFH must be pre-approved by the reporting manager. Employees on probation are not eligible for WFH. Please read the updated policy document on the portal.', publisher: 'HR Admin', date: 'Mar 28, 2026', target: 'All Employees', pinned: false, urgent: false },
-  { id: 3, type: 'event',   title: 'Annual Company Day — Save the Date!', body: 'Join us for our Grand Annual Celebration on May 15, 2026 at Taj Hotel, Bengaluru. Awards, entertainment, gala dinner. Family members are welcome. RSVP by May 1 to hr@company.com', publisher: 'HR Team', date: 'Mar 25, 2026', target: 'All Employees', pinned: false, urgent: false },
-  { id: 4, type: 'general', title: 'Q4 FY 2025-26 Performance Results Released', body: 'Annual appraisal outcomes for FY 2025-26 are now available. Employees can view their ratings and increment details in the Performance module. Please reach out to HR for any queries.', publisher: 'HR Admin', date: 'Mar 22, 2026', target: 'All Employees', pinned: false, urgent: false },
-  { id: 5, type: 'urgent',  title: 'EPF KYC Update — Action Required by Apr 30', body: 'MANDATORY: All employees must link their Aadhaar with UAN (Universal Account Number) by April 30, 2026 for EPF KYC compliance. Failure to do so may result in EPF contribution being blocked. Visit the EPFO portal or contact HR for assistance.', publisher: 'Finance & Compliance', date: 'Mar 20, 2026', target: 'All Employees', pinned: true, urgent: true },
-  { id: 6, type: 'policy',  title: 'New Leave Policy Effective April 2026', body: 'Key changes from April 1, 2026: Casual Leave increased from 8 to 12 days annually. Earned Leave carry forward limit raised to 30 days. LOP will now be tracked automatically from the attendance system. Full policy document available on the HR portal.', publisher: 'HR Admin', date: 'Mar 15, 2026', target: 'All Employees', pinned: false, urgent: false },
-  { id: 7, type: 'general', title: 'Welcome to Our New Team Members!', body: "Please join us in welcoming 8 new colleagues joining in April 2026 across Engineering, HR, Sales, Finance, and Operations. Their profiles are now live on the Employee Directory. Let's make them feel at home!", publisher: 'HR Team', date: 'Mar 10, 2026', target: 'All Employees', pinned: false, urgent: false },
-  { id: 8, type: 'general', title: 'Office Gymnasium Now Open', body: 'The gymnasium on Floor 2, Bengaluru office is now fully operational. Timings: 6:00 AM to 9:00 PM, Monday to Saturday. All employees are welcome. Please bring your ID card for access.', publisher: 'Admin Team', date: 'Mar 5, 2026', target: 'Bengaluru Office', pinned: false, urgent: false },
-]
 
 const DEPARTMENTS = ['Engineering', 'HR', 'Sales', 'Finance', 'Operations', 'Marketing', 'Customer Support']
 const FILTER_OPTIONS = ['All', 'Holiday', 'Policy', 'Event', 'Urgent', 'General'] as const
@@ -50,28 +44,156 @@ const TYPE_CFG: Record<AnnouncementType, { bg: string; color: string; border: st
   general: { bg: '#f9fafb', color: '#6b7280', border: '#e5e7eb', label: 'General', dot: '#9ca3af' },
 }
 
-const typeBreakdown: { type: AnnouncementType; count: number }[] = [
-  { type: 'holiday', count: 3 }, { type: 'policy', count: 9 },
-  { type: 'event', count: 7 },   { type: 'urgent', count: 5 },
-  { type: 'general', count: 18 },
-]
+// DB priority → UI type
+function priorityToType(priority: string): AnnouncementType {
+  const m: Record<string, AnnouncementType> = {
+    urgent: 'urgent', low: 'holiday', high: 'policy', normal: 'general',
+  }
+  return m[priority?.toLowerCase()] ?? 'general'
+}
 
-const FIELD_STYLE = {
+// UI category → priority for posting
+const CATEGORY_TO_PRIORITY: Record<string, string> = {
+  urgent: 'urgent', holiday: 'low', policy: 'high', event: 'normal', general: 'normal',
+}
+
+// DB audience → readable label
+function audienceLabel(audience: string): string {
+  const m: Record<string, string> = {
+    all: 'All Employees', department: 'By Department',
+    location: 'By Location', designation: 'By Designation',
+  }
+  return m[audience?.toLowerCase()] ?? 'All Employees'
+}
+
+function adaptAnnouncement(a: ApiAnnouncement): Announcement {
+  // Live DB uses: content, announcement_type, target_audience, published_by
+  // Our added columns: body, audience, priority, is_pinned
+  const raw = a as Record<string, unknown>
+  const bodyText   = (raw.content ?? raw.body ?? '') as string
+  const typeStr    = (raw.announcement_type ?? raw.priority ?? 'general') as string
+  const audienceStr = (raw.target_audience ?? raw.audience ?? 'all') as string
+  const publisher  = (raw.published_by_name ?? 'HR') as string
+  const pinned     = (raw.is_pinned ?? false) as boolean
+  const priority   = (raw.priority ?? 'normal') as string
+
+  return {
+    id:        a.id,
+    type:      typeStr === 'urgent' || priority === 'urgent' ? 'urgent'
+               : typeStr === 'holiday' || priority === 'low' ? 'holiday'
+               : typeStr === 'policy'  || priority === 'high' ? 'policy'
+               : typeStr === 'event' ? 'event'
+               : 'general',
+    title:     a.title,
+    body:      bodyText,
+    publisher,
+    date:      new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+    target:    audienceLabel(audienceStr),
+    pinned,
+    urgent:    priority === 'urgent' || typeStr === 'urgent',
+    raw:       a,
+  }
+}
+
+const FIELD_STYLE: React.CSSProperties = {
   width: '100%', borderRadius: 8, border: '1.5px solid #e5e7eb',
   padding: '8px 11px', fontSize: '0.8125rem', color: '#111827',
-  background: '#f9fafb', outline: 'none', boxSizing: 'border-box' as const,
+  background: '#f9fafb', outline: 'none', boxSizing: 'border-box',
   fontFamily: 'inherit', transition: 'border-color 150ms',
 }
-const LABEL_STYLE = {
-  display: 'block', fontSize: '0.7rem', fontWeight: 600 as const,
-  color: '#374151', marginBottom: 5, textTransform: 'uppercase' as const,
+const LABEL_STYLE: React.CSSProperties = {
+  display: 'block', fontSize: '0.7rem', fontWeight: 600,
+  color: '#374151', marginBottom: 5, textTransform: 'uppercase',
   letterSpacing: '0.05em',
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EDIT MODAL
+───────────────────────────────────────────────────────────── */
+function EditModal({ announcement, onClose, onSuccess }: {
+  announcement: Announcement; onClose: () => void; onSuccess: () => void
+}) {
+  const [title, setTitle]     = useState(announcement.title)
+  const [body, setBody]       = useState(announcement.body)
+  const [type, setType]       = useState<AnnouncementType>(announcement.type)
+  const [pinned, setPinned]   = useState(announcement.pinned)
+  const [saving, setSaving]   = useState(false)
+
+  const handleSave = async () => {
+    if (!title.trim() || !body.trim()) { toast.error('Title and message are required'); return }
+    setSaving(true)
+    try {
+      await announcementsApi.patch(announcement.id, {
+        title, content: body, category: type,
+        is_pinned: pinned,
+      })
+      toast.success('Announcement updated')
+      onSuccess()
+      onClose()
+    } catch {
+      toast.error('Failed to update announcement')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div style={{ background: 'white', width: 520, maxWidth: '95vw', maxHeight: '90vh', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1.5px solid #f1f5f9' }}>
+          <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#111827', margin: 0 }}>Edit Announcement</p>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: '1.5px solid #e5e7eb', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }}>
+            <X size={13} />
+          </button>
+        </div>
+        <div style={{ padding: '18px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 13 }}>
+          <div>
+            <label style={LABEL_STYLE}>Title</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} style={FIELD_STYLE} />
+          </div>
+          <div>
+            <label style={LABEL_STYLE}>Type</label>
+            <select value={type} onChange={e => setType(e.target.value as AnnouncementType)} style={{ ...FIELD_STYLE, cursor: 'pointer' }}>
+              <option value="general">General</option>
+              <option value="policy">Policy</option>
+              <option value="event">Event</option>
+              <option value="urgent">Urgent</option>
+              <option value="holiday">Holiday</option>
+            </select>
+          </div>
+          <div>
+            <label style={LABEL_STYLE}>Message</label>
+            <textarea rows={5} value={body} onChange={e => setBody(e.target.value)}
+              style={{ ...FIELD_STYLE, resize: 'none', lineHeight: 1.55 }} />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={pinned} onChange={e => setPinned(e.target.checked)}
+              style={{ accentColor: '#E8622A', width: 14, height: 14 }} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', fontWeight: 600, color: '#374151' }}>
+              <Pin size={12} /> Pin to top
+            </span>
+          </label>
+          <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
+            <button onClick={onClose} disabled={saving} style={{ flex: 1, padding: '9px 16px', borderRadius: 9, border: '1.5px solid #e5e7eb', background: 'white', color: '#374151', fontWeight: 600, cursor: 'pointer', fontSize: '0.8375rem' }}>Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              style={{ flex: 2, padding: '9px 16px', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg, #1E3A5F 0%, #2d5899 100%)', color: 'white', fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', fontSize: '0.8375rem', opacity: saving ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              {saving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={14} />}
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /* ─────────────────────────────────────────────────────────────
    ANNOUNCEMENT CARD
 ───────────────────────────────────────────────────────────── */
-function AnnouncementCard({ a, expanded, onToggle }: { a: Announcement; expanded: boolean; onToggle: () => void }) {
+function AnnouncementCard({ a, expanded, onToggle, onEdit, onDelete }: {
+  a: Announcement; expanded: boolean; onToggle: () => void
+  onEdit: () => void; onDelete: () => void
+}) {
   const [hovered, setHovered] = useState(false)
   const cfg = TYPE_CFG[a.type]
   const preview = a.body.slice(0, 130)
@@ -82,8 +204,7 @@ function AnnouncementCard({ a, expanded, onToggle }: { a: Announcement; expanded
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: '#fff',
-        borderRadius: 12,
+        background: '#fff', borderRadius: 12,
         border: `1.5px solid ${a.urgent ? '#fecaca' : '#f1f5f9'}`,
         borderLeft: `4px solid ${a.urgent ? '#ef4444' : cfg.dot}`,
         boxShadow: hovered ? '0 4px 16px rgba(0,0,0,0.07)' : '0 1px 3px rgba(0,0,0,0.04)',
@@ -104,8 +225,12 @@ function AnnouncementCard({ a, expanded, onToggle }: { a: Announcement; expanded
             </span>
           )}
           <div style={{ display: 'flex', gap: 2, opacity: hovered ? 1 : 0, transition: 'opacity 150ms' }}>
-            <button className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26 }}><Edit size={12} /></button>
-            <button className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26, color: '#dc2626' }}><Trash2 size={12} /></button>
+            <button onClick={onEdit} className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26 }} title="Edit">
+              <Edit size={12} />
+            </button>
+            <button onClick={onDelete} className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26, color: '#dc2626' }} title="Delete">
+              <Trash2 size={12} />
+            </button>
           </div>
         </div>
       </div>
@@ -141,7 +266,15 @@ function AnnouncementCard({ a, expanded, onToggle }: { a: Announcement; expanded
 ───────────────────────────────────────────────────────────── */
 export default function AnnouncementsPage() {
   const [activeFilter, setActiveFilter]   = useState<FilterOption>('All')
-  const [expandedIds, setExpandedIds]     = useState<Set<number>>(new Set())
+  const [expandedIds, setExpandedIds]     = useState<Set<string>>(new Set())
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [loading, setLoading]             = useState(true)
+  const [editTarget, setEditTarget]       = useState<Announcement | null>(null)
+  const [deleteTarget, setDeleteTarget]   = useState<Announcement | null>(null)
+  const [deleting, setDeleting]           = useState(false)
+
+  // Compose form
+  const composeRef                        = useRef<HTMLDivElement>(null)
   const [composeTitle, setComposeTitle]   = useState('')
   const [composeType, setComposeType]     = useState<AnnouncementType>('general')
   const [composeBody, setComposeBody]     = useState('')
@@ -150,35 +283,26 @@ export default function AnnouncementsPage() {
   const [expiresOn, setExpiresOn]         = useState('')
   const [markUrgent, setMarkUrgent]       = useState(false)
   const [pinToTop, setPinToTop]           = useState(false)
-  const [announcements, setAnnouncements] = useState<Announcement[]>(ANNOUNCEMENTS)
   const [posting, setPosting]             = useState(false)
 
-  useEffect(() => {
-    announcementsApi.list().then(res => {
-      if (res.data.length > 0) {
-        const adapted: Announcement[] = res.data.map((a: ApiAnnouncement, idx: number) => ({
-          id: idx + 1,
-          type: (a.category ?? 'general') as AnnouncementType,
-          title: a.title,
-          body: a.content ?? '',
-          publisher: a.created_by_employee
-            ? `${a.created_by_employee.first_name} ${a.created_by_employee.last_name}`
-            : 'HR',
-          date: new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
-          target: a.target_audience ?? 'All Employees',
-          pinned: a.is_pinned ?? false,
-          urgent: a.priority === 'urgent',
-        }))
-        setAnnouncements(adapted)
-      }
-    }).catch(() => {/* keep mock */})
+  const fetchAnnouncements = useCallback(async () => {
+    try {
+      const res = await announcementsApi.list({ limit: 100 })
+      setAnnouncements((res.data ?? []).map(adaptAnnouncement))
+    } catch {
+      toast.error('Failed to load announcements')
+    } finally {
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => { fetchAnnouncements() }, [fetchAnnouncements])
 
   const filtered = activeFilter === 'All'
     ? announcements
     : announcements.filter(a => a.type === activeFilter.toLowerCase())
 
-  const toggleExpand = (id: number) =>
+  const toggleExpand = (id: string) =>
     setExpandedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const toggleDept = (d: string) =>
@@ -190,10 +314,9 @@ export default function AnnouncementsPage() {
     setMarkUrgent(false); setPinToTop(false)
   }
 
-  const handlePostAnnouncement = async () => {
+  const handlePost = async () => {
     if (!composeTitle.trim() || !composeBody.trim()) {
-      toast.error('Title and message are required')
-      return
+      toast.error('Title and message are required'); return
     }
     setPosting(true)
     try {
@@ -202,35 +325,20 @@ export default function AnnouncementsPage() {
         : targetMode === 'department'
           ? Array.from(selectedDepts).join(', ') || 'All Employees'
           : 'By Location'
+
+      const type = markUrgent ? 'urgent' : composeType
       await announcementsApi.create({
-        title: composeTitle,
-        content: composeBody,
-        category: composeType,
+        title:          composeTitle,
+        content:        composeBody,
+        category:       type,
         target_audience: target,
-        priority: markUrgent ? 'urgent' : 'normal',
-        is_pinned: pinToTop,
-        expires_at: expiresOn || null,
-        status: 'published',
+        priority:       CATEGORY_TO_PRIORITY[type] ?? 'normal',
+        is_pinned:      pinToTop,
+        expires_at:     expiresOn || null,
       })
       toast.success('Announcement posted successfully')
       handleReset()
-      // Refresh list
-      const res = await announcementsApi.list()
-      if (res.data.length > 0) {
-        setAnnouncements(res.data.map((a: ApiAnnouncement, idx: number) => ({
-          id: idx + 1,
-          type: (a.category ?? 'general') as AnnouncementType,
-          title: a.title,
-          body: a.content ?? '',
-          publisher: a.created_by_employee
-            ? `${a.created_by_employee.first_name} ${a.created_by_employee.last_name}`
-            : 'HR',
-          date: new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
-          target: a.target_audience ?? 'All Employees',
-          pinned: a.is_pinned ?? false,
-          urgent: a.priority === 'urgent',
-        })))
-      }
+      fetchAnnouncements()
     } catch {
       toast.error('Failed to post announcement')
     } finally {
@@ -238,16 +346,85 @@ export default function AnnouncementsPage() {
     }
   }
 
-  const urgentCount = announcements.filter(a => a.urgent).length
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await announcementsApi.delete(deleteTarget.id)
+      toast.success('Announcement deleted')
+      setDeleteTarget(null)
+      fetchAnnouncements()
+    } catch {
+      toast.error('Failed to delete announcement')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  // Compute live stats
+  const now = new Date()
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const totalCount    = announcements.length
+  const thisMonth     = announcements.filter(a => new Date(a.raw.created_at) >= thisMonthStart).length
+  const pinnedCount   = announcements.filter(a => a.pinned).length
+  const urgentCount   = announcements.filter(a => a.urgent).length
+
+  const typeBreakdown = (['holiday', 'policy', 'event', 'urgent', 'general'] as AnnouncementType[]).map(type => ({
+    type,
+    count: announcements.filter(a => a.type === type).length,
+  }))
 
   return (
     <>
+      {editTarget && (
+        <EditModal
+          announcement={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSuccess={fetchAnnouncements}
+        />
+      )}
+
+      {/* Delete confirm dialog */}
+      {deleteTarget && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: 'white', width: 400, borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.18)', padding: '24px 24px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Trash2 size={16} style={{ color: '#dc2626' }} />
+              </div>
+              <div>
+                <p style={{ fontWeight: 700, color: '#111827', margin: 0, fontSize: '0.9rem' }}>Delete Announcement</p>
+                <p style={{ color: '#6b7280', margin: 0, fontSize: '0.8rem' }}>This action cannot be undone.</p>
+              </div>
+            </div>
+            <p style={{ fontSize: '0.8125rem', color: '#374151', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', margin: '0 0 16px' }}>
+              &ldquo;{deleteTarget.title}&rdquo;
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting}
+                style={{ flex: 1, padding: '8px', borderRadius: 9, border: '1.5px solid #e5e7eb', background: 'white', color: '#374151', fontWeight: 600, cursor: 'pointer', fontSize: '0.8125rem' }}>
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                style={{ flex: 1, padding: '8px', borderRadius: 9, border: 'none', background: '#dc2626', color: 'white', fontWeight: 700, cursor: deleting ? 'not-allowed' : 'pointer', fontSize: '0.8125rem', opacity: deleting ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {deleting ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={13} />}
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Topbar
         title="Announcements"
         subtitle="Post and manage company-wide communications"
         notificationCount={urgentCount}
       >
-        <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button
+          className="btn btn-primary btn-sm"
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          onClick={() => composeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
           <Plus size={14} /> Post Announcement
         </button>
       </Topbar>
@@ -257,12 +434,11 @@ export default function AnnouncementsPage() {
 
           {/* ── LEFT: Feed ── */}
           <div>
-            {/* Header + filter chips */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1rem', fontWeight: 700, color: '#111827', margin: 0 }}>Company Announcements</p>
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, background: '#fff7ed', color: '#E8622A', border: '1px solid #fed7aa', borderRadius: 20, padding: '1px 8px' }}>
-                  {announcements.length}
+                  {totalCount}
                 </span>
               </div>
             </div>
@@ -287,40 +463,57 @@ export default function AnnouncementsPage() {
             </div>
 
             {/* Cards */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {filtered.length === 0 ? (
-                <div className="card" style={{ padding: '48px 24px', textAlign: 'center' }}>
-                  <Bell size={32} style={{ color: '#d1d5db', margin: '0 auto 12px' }} />
-                  <p style={{ fontSize: '0.875rem', color: '#9ca3af' }}>No announcements for this filter.</p>
-                </div>
-              ) : filtered.map(a => (
-                <AnnouncementCard key={a.id} a={a} expanded={expandedIds.has(a.id)} onToggle={() => toggleExpand(a.id)} />
-              ))}
-            </div>
+            {loading ? (
+              <div style={{ padding: '48px 24px', textAlign: 'center' }}>
+                <Loader2 size={28} style={{ color: '#d1d5db', margin: '0 auto 12px', animation: 'spin 1s linear infinite' }} />
+                <p style={{ fontSize: '0.875rem', color: '#9ca3af', margin: 0 }}>Loading announcements…</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {filtered.length === 0 ? (
+                  <div className="card" style={{ padding: '48px 24px', textAlign: 'center' }}>
+                    <Bell size={32} style={{ color: '#d1d5db', margin: '0 auto 12px' }} />
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#6b7280', margin: '0 0 4px' }}>
+                      {totalCount === 0 ? 'No announcements yet' : 'No announcements for this filter'}
+                    </p>
+                    <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: 0 }}>
+                      {totalCount === 0 ? 'Use the compose panel to post the first one.' : 'Try a different filter.'}
+                    </p>
+                  </div>
+                ) : filtered.map(a => (
+                  <AnnouncementCard
+                    key={a.id}
+                    a={a}
+                    expanded={expandedIds.has(a.id)}
+                    onToggle={() => toggleExpand(a.id)}
+                    onEdit={() => setEditTarget(a)}
+                    onDelete={() => setDeleteTarget(a)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── RIGHT: Compose + Stats ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             {/* Compose card */}
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div ref={composeRef} className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 18px', borderBottom: '1.5px solid #f1f5f9', background: '#fafafa' }}>
                 <Megaphone size={14} style={{ color: '#E8622A' }} />
                 <p style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#111827', margin: 0 }}>Post Announcement</p>
               </div>
 
               <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 13 }}>
-                {/* Title */}
                 <div>
                   <label style={LABEL_STYLE}>Title</label>
                   <input type="text" value={composeTitle} onChange={e => setComposeTitle(e.target.value)}
                     placeholder="Announcement title…" style={FIELD_STYLE} />
                 </div>
 
-                {/* Type */}
                 <div>
                   <label style={LABEL_STYLE}>Type</label>
-                  <select value={composeType} onChange={e => setComposeType(e.target.value as AnnouncementType)} className="form-select" style={{ width: '100%' }}>
+                  <select value={composeType} onChange={e => setComposeType(e.target.value as AnnouncementType)} style={{ ...FIELD_STYLE, cursor: 'pointer' }}>
                     <option value="general">General</option>
                     <option value="policy">Policy</option>
                     <option value="event">Event</option>
@@ -329,7 +522,6 @@ export default function AnnouncementsPage() {
                   </select>
                 </div>
 
-                {/* Message */}
                 <div>
                   <label style={LABEL_STYLE}>Message</label>
                   <textarea rows={4} value={composeBody} onChange={e => setComposeBody(e.target.value)}
@@ -337,7 +529,6 @@ export default function AnnouncementsPage() {
                     style={{ ...FIELD_STYLE, resize: 'none', lineHeight: 1.55 }} />
                 </div>
 
-                {/* Target Audience */}
                 <div>
                   <label style={LABEL_STYLE}>Target Audience</label>
                   <div style={{ display: 'flex', gap: 12, marginBottom: targetMode !== 'all' ? 10 : 0 }}>
@@ -375,13 +566,11 @@ export default function AnnouncementsPage() {
                   )}
                 </div>
 
-                {/* Expires On */}
                 <div>
                   <label style={LABEL_STYLE}>Expires On <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: '#9ca3af' }}>(optional)</span></label>
                   <input type="date" value={expiresOn} onChange={e => setExpiresOn(e.target.value)} style={FIELD_STYLE} />
                 </div>
 
-                {/* Flags */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                     <input type="checkbox" checked={markUrgent} onChange={e => setMarkUrgent(e.target.checked)}
@@ -399,10 +588,10 @@ export default function AnnouncementsPage() {
                   </label>
                 </div>
 
-                {/* Actions */}
                 <div style={{ display: 'flex', gap: 8, paddingTop: 2 }}>
-                  <button onClick={handleReset} className="btn btn-outline btn-sm" style={{ flex: 1 }} disabled={posting}>Save Draft</button>
-                  <button onClick={handlePostAnnouncement} className="btn btn-primary btn-sm" style={{ flex: 2 }} disabled={posting}>
+                  <button onClick={handleReset} className="btn btn-outline btn-sm" style={{ flex: 1 }} disabled={posting}>Clear</button>
+                  <button onClick={handlePost} className="btn btn-primary btn-sm" style={{ flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} disabled={posting}>
+                    {posting ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : null}
                     {posting ? 'Posting…' : 'Post Now'}
                   </button>
                 </div>
@@ -417,13 +606,12 @@ export default function AnnouncementsPage() {
               </div>
 
               <div style={{ padding: '16px 18px' }}>
-                {/* 4 KPI tiles */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                   {[
-                    { label: 'Total',        value: 42, icon: Megaphone, color: '#E8622A', bg: '#fff7ed', border: '#fed7aa' },
-                    { label: 'This Month',   value: 8,  icon: Calendar,  color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-                    { label: 'Pinned',       value: 2,  icon: Pin,       color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
-                    { label: 'Unread Urgent',value: 1,  icon: AlertCircle, color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
+                    { label: 'Total',       value: totalCount,  icon: Megaphone,   color: '#E8622A', bg: '#fff7ed', border: '#fed7aa' },
+                    { label: 'This Month',  value: thisMonth,   icon: Calendar,    color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+                    { label: 'Pinned',      value: pinnedCount, icon: Pin,         color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+                    { label: 'Urgent',      value: urgentCount, icon: AlertCircle, color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
                   ].map(({ label, value, icon: Icon, color, bg, border }) => (
                     <div key={label} style={{ padding: '10px 12px', borderRadius: 10, background: bg, border: `1.5px solid ${border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div style={{ width: 30, height: 30, borderRadius: 8, background: `${color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -443,12 +631,13 @@ export default function AnnouncementsPage() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {typeBreakdown.map(({ type, count }) => {
                       const cfg = TYPE_CFG[type]
+                      const max = Math.max(...typeBreakdown.map(t => t.count), 1)
                       return (
                         <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
                           <span style={{ fontSize: '0.75rem', color: '#4b5563', flex: 1 }}>{cfg.label}</span>
                           <div style={{ height: 5, flex: 3, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${(count / 42) * 100}%`, background: cfg.dot, borderRadius: 99 }} />
+                            <div style={{ height: '100%', width: `${(count / max) * 100}%`, background: cfg.dot, borderRadius: 99 }} />
                           </div>
                           <span style={{ fontSize: '0.7rem', fontWeight: 700, color: cfg.color, minWidth: 14, textAlign: 'right' }}>{count}</span>
                         </div>

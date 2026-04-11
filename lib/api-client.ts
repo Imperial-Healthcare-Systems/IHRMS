@@ -149,16 +149,31 @@ export interface ExpenseClaim {
 export interface Asset {
   id: string; name: string; asset_code: string; category: string; brand: string | null
   model: string | null; serial_number: string | null; purchase_date: string | null
-  purchase_cost: number | null; condition: string; status: string; assigned_to: string | null
-  assigned_date: string | null; location: string | null; notes: string | null
-  assigned_employee: { id: string; first_name: string; last_name: string; emp_id: string } | null
+  purchase_value: number | null; condition: string; status: string; assigned_to: string | null
+  assigned_at: string | null; location: string | null; notes: string | null; created_at: string
+  assigned_employee: {
+    id: string; first_name: string; last_name: string; emp_id: string
+    department: { name: string } | null
+  } | null
+}
+
+export interface AssetActionPayload {
+  action?: 'assign' | 'unassign' | 'maintenance' | 'restore' | 'dispose'
+  assigned_to?: string    // employee UUID for action: assign
+  name?: string; brand?: string; model?: string; serial_number?: string
+  condition?: string; location?: string; notes?: string
+  purchase_value?: number; purchase_date?: string
 }
 
 export interface Announcement {
-  id: string; title: string; content: string; category: string; priority: string
-  is_pinned: boolean; target_audience: string; published_at: string | null; expires_at: string | null
-  status: string; created_at: string
-  created_by_employee: { id: string; first_name: string; last_name: string } | null
+  id: string; title: string
+  // Live DB columns
+  content?: string; announcement_type?: string; target_audience?: string
+  published_by?: string; is_published?: boolean; published_at?: string
+  // Added columns (our migrations)
+  body?: string; audience?: string; priority?: string; is_pinned?: boolean
+  expires_at?: string | null; created_at: string; updated_at: string
+  created_by_employee?: { id: string; first_name: string; last_name: string } | null
 }
 
 export interface ComplianceRecord {
@@ -379,43 +394,126 @@ export const reimbursementsApi = {
 // ─── assets ──────────────────────────────────────────────────────────────────
 
 export const assetsApi = {
-  list: (params: { status?: string; category?: string; assigned_to?: string; limit?: number } = {}) =>
+  list: (params: { status?: string; category?: string; search?: string; assigned_to?: string; limit?: number; offset?: number } = {}) =>
     apiFetch<{ data: Asset[]; count: number }>(`/api/assets${qs(params)}`),
 
-  create: (payload: Partial<Asset>) =>
+  get: (id: string) =>
+    apiFetch<{ data: Asset }>(`/api/assets/${id}`),
+
+  create: (payload: {
+    name: string; category: string; brand?: string | null; model?: string | null
+    serial_number?: string | null; purchase_date?: string | null; purchase_value?: number | null
+    condition?: string; location?: string | null; notes?: string | null
+  }) =>
     apiFetch<{ data: Asset }>('/api/assets', { method: 'POST', body: JSON.stringify(payload) }),
 
-  update: (id: string, payload: Partial<Asset>) =>
-    apiFetch<{ data: Asset }>(`/api/assets/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  patch: (id: string, payload: AssetActionPayload) =>
+    apiFetch<{ data: Asset }>(`/api/assets/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  delete: (id: string) =>
+    apiFetch<{ message: string }>(`/api/assets/${id}`, { method: 'DELETE' }),
 }
 
 // ─── announcements ───────────────────────────────────────────────────────────
 
+export interface AnnouncementPayload {
+  title?: string; body?: string; content?: string; category?: string; type?: string
+  target_audience?: string; audience?: string; is_pinned?: boolean
+  priority?: string; is_urgent?: boolean; expires_at?: string | null
+}
+
 export const announcementsApi = {
-  list: (params: { category?: string; status?: string; limit?: number } = {}) =>
+  list: (params: { audience?: string; priority?: string; active_only?: boolean; limit?: number; offset?: number } = {}) =>
     apiFetch<{ data: Announcement[]; count: number }>(`/api/announcements${qs(params)}`),
 
-  create: (payload: Partial<Announcement>) =>
+  create: (payload: AnnouncementPayload) =>
     apiFetch<{ data: Announcement }>('/api/announcements', { method: 'POST', body: JSON.stringify(payload) }),
 
-  update: (id: string, payload: Partial<Announcement>) =>
-    apiFetch<{ data: Announcement }>(`/api/announcements/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  patch: (id: string, payload: AnnouncementPayload) =>
+    apiFetch<{ data: Announcement }>(`/api/announcements/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  delete: (id: string) =>
+    apiFetch<{ message: string }>(`/api/announcements/${id}`, { method: 'DELETE' }),
 }
 
 // ─── compliance ───────────────────────────────────────────────────────────────
 
+export interface ComplianceSummary {
+  total_active: number
+  esic_eligible: number
+  compliant_count: number
+  action_required: number
+  due_this_month: number
+  current_month: number
+  current_year: number
+  payslip_count: number
+  totals: {
+    epf_employee: number; epf_employer: number
+    esic_employee: number; esic_employer: number
+    pt: number; tds: number; gross: number
+  }
+}
+
+export interface ComplianceAddPayload {
+  compliance_type: string
+  period_month?: number
+  period_year?: number
+  due_date?: string
+  amount?: number
+  status?: string
+  remarks?: string
+}
+
 export const complianceApi = {
-  epf:  (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[] }>(`/api/compliance/epf${qs(params)}`),
-  esic: (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[] }>(`/api/compliance/esic${qs(params)}`),
-  pt:   (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[] }>(`/api/compliance/pt${qs(params)}`),
-  tds:  (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[] }>(`/api/compliance/tds${qs(params)}`),
+  summary: () => apiFetch<ComplianceSummary>('/api/compliance/summary'),
+  epf:  (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[]; month: number; year: number; count: number }>(`/api/compliance/epf${qs(params)}`),
+  esic: (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[]; month: number; year: number; count: number }>(`/api/compliance/esic${qs(params)}`),
+  pt:   (params: { year?: number; month?: number } = {}) => apiFetch<{ data: unknown[]; summary: unknown; month: number; year: number }>(`/api/compliance/pt${qs(params)}`),
+  tds:  (params: { fy?: string } = {}) => apiFetch<{ fy: string; quarters: unknown[]; total_tds: number; total_gross: number }>(`/api/compliance/tds${qs(params)}`),
+  addRecord: (payload: ComplianceAddPayload) =>
+    apiFetch<{ data: unknown }>('/api/compliance/records', { method: 'POST', body: JSON.stringify(payload) }),
+  records: (params: { limit?: number } = {}) => apiFetch<{ data: unknown[]; count: number }>(`/api/compliance/records${qs(params)}`),
 }
 
 // ─── reports ─────────────────────────────────────────────────────────────────
 
+export interface ReportResponse {
+  report_type: string
+  generated_at: string
+  record_count: number
+  format: string
+  data: Record<string, unknown>[]
+}
+
+export interface AnalyticsResponse {
+  headcount_trend:         { month: string; value: number }[]
+  payroll_trend:           { month: string; value: number; label: string }[]
+  department_distribution: { dept: string; count: number; pct: number; color: string }[]
+  total_active:            number
+}
+
 export const reportsApi = {
-  generate: (params: { type: string; from?: string; to?: string; department_id?: string; format?: string }) =>
-    apiFetch<{ data: unknown; type: string; generated_at: string }>(`/api/reports${qs(params)}`),
+  /** List available report types */
+  list: () =>
+    apiFetch<{ available_reports: unknown[]; formats: string[] }>('/api/reports'),
+
+  /** Generate a report — POST */
+  generate: (payload: {
+    report_type: string
+    date_from?:      string
+    date_to?:        string
+    department_ids?: string[]
+    fields?:         string[]
+    format?:         string
+  }) =>
+    apiFetch<ReportResponse>('/api/reports', {
+      method: 'POST',
+      body:   JSON.stringify(payload),
+    }),
+
+  /** Analytics summary (headcount trend, payroll trend, dept distribution) */
+  analytics: () =>
+    apiFetch<AnalyticsResponse>('/api/reports/analytics'),
 }
 
 // ─── onboarding ──────────────────────────────────────────────────────────────

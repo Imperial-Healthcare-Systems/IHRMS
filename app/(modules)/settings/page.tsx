@@ -189,35 +189,91 @@ function NoteBlock({ text }: { text: string }) {
   )
 }
 
-function SaveButton({ label = 'Save Changes', onClick }: { label?: string; onClick?: () => void }) {
+function SaveButton({
+  label = 'Save Changes',
+  onClick,
+  saving = false,
+  saved = false,
+}: {
+  label?: string
+  onClick?: () => void
+  saving?: boolean
+  saved?: boolean
+}) {
   return (
-    <button onClick={onClick} className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+    <button
+      data-panel-save="true"
+      onClick={onClick}
+      disabled={saving}
+      className="btn btn-primary btn-sm"
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 7, opacity: saving ? 0.7 : 1 }}
+    >
       <Save size={14} />
-      {label}
+      {saving ? 'Saving…' : saved ? 'Saved!' : label}
     </button>
   )
+}
+
+async function saveSettings(key: string, value: unknown): Promise<void> {
+  const res = await fetch(`/api/settings/${key}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to save')
+  }
+}
+
+async function loadSettings<T>(key: string): Promise<T | null> {
+  const res = await fetch(`/api/settings/${key}`)
+  if (!res.ok) return null
+  const j = await res.json()
+  return (j as { data: T | null }).data ?? null
 }
 
 /* ─────────────────────────────────────────────────────────────
    PANEL: COMPANY PROFILE
 ───────────────────────────────────────────────────────────── */
+const COMPANY_DEFAULTS = {
+  companyName: 'Imperia Technologies Pvt. Ltd.',
+  companyCode: 'IMPL',
+  industry: 'IT/ITES',
+  companySize: '201-500',
+  address: '12th Floor, Prestige Tower, MG Road',
+  city: 'Bengaluru',
+  state: 'Karnataka',
+  pincode: '560001',
+  cin: 'U72900KA2018PTC123456',
+  pan: 'AABCI1234D',
+  tan: 'BLRX12345B',
+  epf: 'MH/BAN/123456/000',
+  esic: '52-00-123456-000',
+  fiscalYear: 'April-March',
+}
+
 function CompanyProfilePanel() {
-  const [form, setForm] = useState({
-    companyName: 'Imperia Technologies Pvt. Ltd.',
-    companyCode: 'IMPL',
-    industry: 'IT/ITES',
-    companySize: '201-500',
-    address: '12th Floor, Prestige Tower, MG Road',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560001',
-    cin: 'U72900KA2018PTC123456',
-    pan: 'AABCI1234D',
-    tan: 'BLRX12345B',
-    epf: 'MH/BAN/123456/000',
-    esic: '52-00-123456-000',
-    fiscalYear: 'April-March',
-  })
+  const [form, setForm] = useState(COMPANY_DEFAULTS)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+
+  useEffect(() => {
+    loadSettings<typeof COMPANY_DEFAULTS>('company').then((data) => {
+      if (data) setForm((f) => ({ ...f, ...data }))
+    }).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      await saveSettings('company', form)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch { /* silent — still show defaults */ }
+    finally { setSaving(false) }
+  }
 
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -350,7 +406,7 @@ function CompanyProfilePanel() {
       </div>
 
       <div>
-        <SaveButton label="Save Company Profile" />
+        <SaveButton label="Save Company Profile" onClick={handleSave} saving={saving} saved={saved} />
       </div>
     </div>
   )
@@ -436,6 +492,32 @@ function PayrollSettingsPanel() {
   const [otRate, setOtRate] = useState('1.5')
   const [metroCities, setMetroCities] = useState(['Mumbai', 'Delhi', 'Kolkata', 'Chennai'])
   const [newCity, setNewCity] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+
+  useEffect(() => {
+    type P = { payCycle: string; processingDay: string; deliveryEmail: boolean; deliveryPortal: boolean; deliveryPhysical: boolean; taxRegime: string; workingDays: string; otRate: string; metroCities: string[] }
+    loadSettings<P>('payroll').then((d) => {
+      if (!d) return
+      if (d.payCycle)       setPayCycle(d.payCycle)
+      if (d.processingDay)  setProcessingDay(d.processingDay)
+      if (d.deliveryEmail  !== undefined) setDeliveryEmail(d.deliveryEmail)
+      if (d.deliveryPortal !== undefined) setDeliveryPortal(d.deliveryPortal)
+      if (d.deliveryPhysical !== undefined) setDeliveryPhysical(d.deliveryPhysical)
+      if (d.taxRegime)      setTaxRegime(d.taxRegime)
+      if (d.workingDays)    setWorkingDays(d.workingDays)
+      if (d.otRate)         setOtRate(d.otRate)
+      if (d.metroCities)    setMetroCities(d.metroCities)
+    }).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true); setSaved(false)
+    try {
+      await saveSettings('payroll', { payCycle, processingDay, deliveryEmail, deliveryPortal, deliveryPhysical, taxRegime, workingDays, otRate, metroCities })
+      setSaved(true); setTimeout(() => setSaved(false), 2500)
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
 
   const removeCity = (city: string) => setMetroCities((c) => c.filter((x) => x !== city))
   const addCity = () => {
@@ -567,7 +649,7 @@ function PayrollSettingsPanel() {
         </div>
       </div>
 
-      <div><SaveButton label="Save Payroll Settings" /></div>
+      <div><SaveButton label="Save Payroll Settings" onClick={handleSave} saving={saving} saved={saved} /></div>
     </div>
   )
 }
@@ -588,6 +670,27 @@ function WorkingHoursPanel() {
   const [grace, setGrace] = useState('15')
   const [halfDay, setHalfDay] = useState('4')
   const [workingDays, setWorkingDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri'])
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+
+  useEffect(() => {
+    type W = { stdHours: string; grace: string; halfDay: string; workingDays: string[] }
+    loadSettings<W>('working').then((d) => {
+      if (!d) return
+      if (d.stdHours)    setStdHours(d.stdHours)
+      if (d.grace)       setGrace(d.grace)
+      if (d.halfDay)     setHalfDay(d.halfDay)
+      if (d.workingDays) setWorkingDays(d.workingDays)
+    }).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true); setSaved(false)
+    try {
+      await saveSettings('working', { stdHours, grace, halfDay, workingDays })
+      setSaved(true); setTimeout(() => setSaved(false), 2500)
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
 
   const toggleDay = (d: string) =>
     setWorkingDays((ds) => ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d])
@@ -695,7 +798,7 @@ function WorkingHoursPanel() {
         </div>
       </div>
 
-      <div><SaveButton label="Save Working Hours" /></div>
+      <div><SaveButton label="Save Working Hours" onClick={handleSave} saving={saving} saved={saved} /></div>
     </div>
   )
 }
@@ -780,6 +883,22 @@ const INITIAL_NOTIF: NotifRow[] = [
 
 function NotificationsPanel() {
   const [rows, setRows] = useState<NotifRow[]>(INITIAL_NOTIF)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+
+  useEffect(() => {
+    loadSettings<NotifRow[]>('notifications').then((data) => {
+      if (Array.isArray(data) && data.length) setRows(data)
+    }).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true); setSaved(false)
+    try {
+      await saveSettings('notifications', rows)
+      setSaved(true); setTimeout(() => setSaved(false), 2500)
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
 
   const toggle = (idx: number, channel: keyof Omit<NotifRow, 'label'>) =>
     setRows((rs) => rs.map((r, i) => i === idx ? { ...r, [channel]: !r[channel] } : r))
@@ -811,7 +930,7 @@ function NotificationsPanel() {
         </table>
       </div>
 
-      <div><SaveButton label="Save Notification Preferences" /></div>
+      <div><SaveButton label="Save Notification Preferences" onClick={handleSave} saving={saving} saved={saved} /></div>
     </div>
   )
 }
@@ -819,88 +938,265 @@ function NotificationsPanel() {
 /* ─────────────────────────────────────────────────────────────
    PANEL: USER MANAGEMENT
 ───────────────────────────────────────────────────────────── */
-const ADMIN_USERS = [
-  { name: 'Deepa Srinivas', empId: 'EMP/2022/001', role: 'Super Admin', roleColor: '#dc2626', roleBg: '#fef2f2', dept: 'HR', lastLogin: '2 hours ago', status: 'Active', canDeactivate: true },
-  { name: 'Anita Verma', empId: 'EMP/2022/005', role: 'HR Admin', roleColor: '#1E3A5F', roleBg: '#eff6ff', dept: 'HR', lastLogin: '1 day ago', status: 'Active', canDeactivate: false },
-  { name: 'Kiran Reddy', empId: 'EMP/2023/012', role: 'Manager', roleColor: '#16a34a', roleBg: '#f0fdf4', dept: 'Engineering', lastLogin: '3 hours ago', status: 'Active', canDeactivate: false },
-  { name: 'Ritu Sharma', empId: 'EMP/2023/019', role: 'HR Admin', roleColor: '#1E3A5F', roleBg: '#eff6ff', dept: 'HR', lastLogin: '5 hours ago', status: 'Active', canDeactivate: false },
-  { name: 'Pradeep Nair', empId: 'EMP/2023/045', role: 'Manager', roleColor: '#16a34a', roleBg: '#f0fdf4', dept: 'Sales', lastLogin: '2 days ago', status: 'Active', canDeactivate: false },
-]
-
 const PERM_MODULES = ['Dashboard', 'Employees', 'Recruitment', 'Attendance', 'Leaves', 'Payroll', 'Performance', 'Reports', 'Compliance', 'Settings']
 
-const ROLE_PERMS: Record<string, Record<string, boolean>> = {
-  'Super Admin': Object.fromEntries(PERM_MODULES.map((m) => [m, true])),
-  'HR Admin': Object.fromEntries(PERM_MODULES.map((m) => [m, m !== 'Settings'])),
+const DEFAULT_ROLE_PERMS: Record<string, Record<string, boolean>> = {
+  'Super Admin':     Object.fromEntries(PERM_MODULES.map((m) => [m, true])),
+  'HR Admin':        Object.fromEntries(PERM_MODULES.map((m) => [m, m !== 'Settings'])),
   'Operations Head': Object.fromEntries(PERM_MODULES.map((m) => [m, ['Dashboard', 'Attendance', 'Leaves', 'Performance', 'Reports'].includes(m)])),
-  'Manager': Object.fromEntries(PERM_MODULES.map((m) => [m, ['Dashboard', 'Attendance', 'Leaves', 'Performance'].includes(m)])),
-  'Employee': Object.fromEntries(PERM_MODULES.map((m) => [m, ['Dashboard', 'Attendance', 'Leaves'].includes(m)])),
+  'Manager':         Object.fromEntries(PERM_MODULES.map((m) => [m, ['Dashboard', 'Attendance', 'Leaves', 'Performance'].includes(m)])),
+  'Employee':        Object.fromEntries(PERM_MODULES.map((m) => [m, ['Dashboard', 'Attendance', 'Leaves'].includes(m)])),
 }
 
+const ROLE_OPTIONS = [
+  { value: 'super_admin',     label: 'Super Admin' },
+  { value: 'hr_admin',        label: 'HR Admin' },
+  { value: 'operations_head', label: 'Operations Head' },
+  { value: 'manager',         label: 'Manager' },
+  { value: 'payroll_admin',   label: 'Payroll Admin' },
+  { value: 'employee',        label: 'Employee' },
+]
+
+function roleDisplay(role: string): { label: string; color: string; bg: string } {
+  const map: Record<string, { label: string; color: string; bg: string }> = {
+    super_admin:     { label: 'Super Admin',     color: '#dc2626', bg: '#fef2f2' },
+    hr_admin:        { label: 'HR Admin',         color: '#1E3A5F', bg: '#eff6ff' },
+    operations_head: { label: 'Operations Head',  color: '#d97706', bg: '#fffbeb' },
+    manager:         { label: 'Manager',          color: '#16a34a', bg: '#f0fdf4' },
+    payroll_admin:   { label: 'Payroll Admin',    color: '#7c3aed', bg: '#f5f3ff' },
+    finance_admin:   { label: 'Finance Admin',    color: '#0891b2', bg: '#ecfeff' },
+    employee:        { label: 'Employee',         color: '#6b7280', bg: '#f3f4f6' },
+  }
+  return map[role] ?? { label: role, color: '#374151', bg: '#f3f4f6' }
+}
+
+type AdminUser = {
+  id: string
+  emp_id: string
+  first_name: string
+  last_name: string
+  email: string
+  role: string
+  is_admin: boolean
+  status: string
+  department: string
+  updated_at: string
+}
+
+type SearchResult = { id: string; name: string; emp_id: string; email: string; role: string; is_admin: boolean; department: string }
+
 function UserManagementPanel() {
+  const [users, setUsers]               = useState<AdminUser[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState('')
+
+  // Add User modal
+  const [showAdd, setShowAdd]           = useState(false)
+  const [searchQ, setSearchQ]           = useState('')
+  const [searchRes, setSearchRes]       = useState<SearchResult[]>([])
+  const [searching, setSearching]       = useState(false)
+  const [selectedEmp, setSelectedEmp]   = useState<SearchResult | null>(null)
+  const [newRole, setNewRole]           = useState('hr_admin')
+  const [addSaving, setAddSaving]       = useState(false)
+  const [addErr, setAddErr]             = useState('')
+
+  // Edit modal
+  const [editUser, setEditUser]         = useState<AdminUser | null>(null)
+  const [editRole, setEditRole]         = useState('')
+  const [editSaving, setEditSaving]     = useState(false)
+  const [editErr, setEditErr]           = useState('')
+
+  // Permissions matrix
+  const [perms, setPerms]               = useState(DEFAULT_ROLE_PERMS)
+  const [permSaving, setPermSaving]     = useState(false)
+  const [permSaved, setPermSaved]       = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const res = await fetch('/api/admin-users')
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Failed to load')
+      setUsers(j.data ?? [])
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load')
+    } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    load()
+    loadSettings<Record<string, Record<string, boolean>>>('role_permissions').then((d) => {
+      if (d && Object.keys(d).length) setPerms(d)
+    }).catch(() => {})
+  }, [load])
+
+  // Search employees — only fires when no employee is selected
+  useEffect(() => {
+    if (selectedEmp) return // already selected, don't re-search
+    if (!searchQ.trim() || searchQ.length < 2) { setSearchRes([]); return }
+    const t = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch('/api/admin-users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'search', q: searchQ }),
+        })
+        const j = await res.json()
+        setSearchRes(j.data ?? [])
+      } catch { setSearchRes([]) }
+      finally { setSearching(false) }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [searchQ, selectedEmp])
+
+  const handleAdd = async () => {
+    if (!selectedEmp) { setAddErr('Select an employee first'); return }
+    setAddSaving(true); setAddErr('')
+    try {
+      const res = await fetch('/api/admin-users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', employee_id: selectedEmp.id, role: newRole }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Failed')
+      setShowAdd(false); setSearchQ(''); setSelectedEmp(null); setNewRole('hr_admin')
+      load()
+    } catch (e: unknown) {
+      setAddErr(e instanceof Error ? e.message : 'Failed')
+    } finally { setAddSaving(false) }
+  }
+
+  const handleEdit = async () => {
+    if (!editUser) return
+    setEditSaving(true); setEditErr('')
+    try {
+      const res = await fetch(`/api/admin-users/${editUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: editRole, is_admin: editRole !== 'employee' }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Failed')
+      setEditUser(null); load()
+    } catch (e: unknown) {
+      setEditErr(e instanceof Error ? e.message : 'Failed')
+    } finally { setEditSaving(false) }
+  }
+
+  const handleDeactivate = async (u: AdminUser) => {
+    if (!confirm(`Remove admin access for ${u.first_name} ${u.last_name}?`)) return
+    try {
+      await fetch(`/api/admin-users/${u.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_admin: false }),
+      })
+      load()
+    } catch { /* silent */ }
+  }
+
+  const togglePerm = (role: string, mod: string) =>
+    setPerms((p) => ({ ...p, [role]: { ...p[role], [mod]: !p[role]?.[mod] } }))
+
+  const handleSavePerms = async () => {
+    setPermSaving(true); setPermSaved(false)
+    try {
+      await saveSettings('role_permissions', perms)
+      setPermSaved(true); setTimeout(() => setPermSaved(false), 2500)
+    } catch { /* silent */ } finally { setPermSaving(false) }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       <SectionHeader title="User Management" description="Manage admin roles and system access permissions" />
 
-      {/* Admin Users Table */}
+      {/* ── Admin Users Table ── */}
       <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-800)', margin: 0 }}>Admin Users</h4>
-          <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-800)', margin: 0 }}>
+            Admin Users {!loading && <span style={{ color: 'var(--color-gray-400)', fontWeight: 400, fontSize: '0.8125rem' }}>({users.length})</span>}
+          </h4>
+          <button className="btn btn-primary btn-sm" onClick={() => { setShowAdd(true); setSearchQ(''); setSelectedEmp(null); setAddErr('') }} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Plus size={13} /> Add User
           </button>
         </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
-          <thead>
-            <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
-              {['User', 'EMP ID', 'Role', 'Department', 'Last Login', 'Status', 'Actions'].map((h) => (
-                <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {ADMIN_USERS.map((u, i) => (
-              <tr key={u.empId} style={{ borderBottom: i < ADMIN_USERS.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
-                <td style={{ padding: '12px 16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8125rem', fontWeight: 600, color: '#4338ca', flexShrink: 0 }}>
-                      {u.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                    </div>
-                    <span style={{ fontWeight: 500, color: 'var(--color-gray-900)' }}>{u.name}</span>
-                  </div>
-                </td>
-                <td style={{ padding: '12px 16px', color: 'var(--color-gray-600)', fontFamily: 'monospace' }}>{u.empId}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ background: u.roleBg, color: u.roleColor, padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600 }}>{u.role}</span>
-                </td>
-                <td style={{ padding: '12px 16px', color: 'var(--color-gray-700)' }}>{u.dept}</td>
-                <td style={{ padding: '12px 16px', color: 'var(--color-gray-500)' }}>{u.lastLogin}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#16a34a', fontSize: '0.75rem', fontWeight: 500 }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
-                    {u.status}
-                  </span>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button style={{ color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                      <Edit2 style={{ width: 13, height: 13 }} /> Edit
-                    </button>
-                    {u.canDeactivate && (
-                      <button style={{ color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>Deactivate</button>
-                    )}
-                  </div>
-                </td>
+
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading…</div>
+        ) : error ? (
+          <div style={{ padding: 20, color: '#dc2626', fontSize: '0.875rem', background: '#fef2f2', margin: 16, borderRadius: 8 }}>{error}</div>
+        ) : users.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>No admin users found. Click <strong>Add User</strong> to add one.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+            <thead>
+              <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
+                {['User', 'EMP ID', 'Role', 'Department', 'Status', 'Actions'].map((h) => (
+                  <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u, i) => {
+                const rd = roleDisplay(u.role)
+                const isActive = (u.status ?? '').toLowerCase() === 'active'
+                return (
+                  <tr key={u.id} style={{ borderBottom: i < users.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
+                    <td style={{ padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8125rem', fontWeight: 600, color: '#4338ca', flexShrink: 0 }}>
+                          {u.first_name[0]}{u.last_name[0]}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 500, color: 'var(--color-gray-900)' }}>{u.first_name} {u.last_name}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 16px', color: 'var(--color-gray-600)', fontFamily: 'monospace', fontSize: '0.75rem' }}>{u.emp_id || '—'}</td>
+                    <td style={{ padding: '12px 16px' }}>
+                      <span style={{ background: rd.bg, color: rd.color, padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600 }}>{rd.label}</span>
+                    </td>
+                    <td style={{ padding: '12px 16px', color: 'var(--color-gray-700)' }}>{u.department}</td>
+                    <td style={{ padding: '12px 16px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: isActive ? '#16a34a' : '#6b7280', fontSize: '0.75rem', fontWeight: 500 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: isActive ? '#22c55e' : '#9ca3af', display: 'inline-block' }} />
+                        {isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={() => { setEditUser(u); setEditRole(u.role); setEditErr('') }}
+                          style={{ color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                        >
+                          <Edit2 style={{ width: 13, height: 13 }} /> Edit
+                        </button>
+                        {u.role !== 'super_admin' && (
+                          <button
+                            onClick={() => handleDeactivate(u)}
+                            style={{ color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}
+                          >
+                            Deactivate
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* Role Permissions Matrix */}
+      {/* ── Role Permissions Matrix ── */}
       <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-gray-200)' }}>
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-800)', margin: 0 }}>Role Permissions Matrix</h4>
+          <SaveButton label="Save Permissions" onClick={handleSavePerms} saving={permSaving} saved={permSaved} />
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem', minWidth: 800 }}>
@@ -913,15 +1209,21 @@ function UserManagementPanel() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(ROLE_PERMS).map(([role, perms], i, arr) => (
+              {Object.entries(perms).map(([role, modPerms], i, arr) => (
                 <tr key={role} style={{ borderBottom: i < arr.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
                   <td style={{ padding: '11px 16px', fontWeight: 600, color: 'var(--color-gray-800)' }}>{role}</td>
                   {PERM_MODULES.map((m) => (
                     <td key={m} style={{ padding: '11px 10px', textAlign: 'center' }}>
-                      {perms[m]
-                        ? <CheckCircle2 style={{ width: 17, height: 17, color: '#22c55e', display: 'inline-block' }} />
-                        : <XCircle style={{ width: 17, height: 17, color: '#e5e7eb', display: 'inline-block' }} />
-                      }
+                      <button
+                        onClick={() => togglePerm(role, m)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4, display: 'inline-flex' }}
+                        title={modPerms?.[m] ? 'Click to revoke' : 'Click to grant'}
+                      >
+                        {modPerms?.[m]
+                          ? <CheckCircle2 style={{ width: 18, height: 18, color: '#22c55e' }} />
+                          : <XCircle style={{ width: 18, height: 18, color: '#d1d5db' }} />
+                        }
+                      </button>
                     </td>
                   ))}
                 </tr>
@@ -930,6 +1232,141 @@ function UserManagementPanel() {
           </table>
         </div>
       </div>
+
+      {/* ── Add User Modal ── */}
+      {showAdd && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.15)', maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)' }}>Add Admin User</h4>
+              <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)' }}><X size={18} /></button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <FieldLabel>Search Employee</FieldLabel>
+
+                {/* Selected employee badge */}
+                {selectedEmp ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 600, color: '#4338ca', flexShrink: 0 }}>
+                      {selectedEmp.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#15803d' }}>{selectedEmp.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#16a34a' }}>{selectedEmp.emp_id} · {selectedEmp.department}</div>
+                    </div>
+                    <button
+                      onClick={() => { setSelectedEmp(null); setSearchQ(''); setSearchRes([]) }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: 2 }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      value={searchQ}
+                      onChange={(e) => setSearchQ(e.target.value)}
+                      placeholder="Type name, EMP ID or email…"
+                      autoFocus
+                      style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                    {(searchRes.length > 0 || searching) && (
+                      <div style={{ border: '1px solid var(--color-gray-200)', borderRadius: 8, marginTop: 4, maxHeight: 220, overflowY: 'auto', background: '#fff', boxShadow: '0 4px 16px rgba(0,0,0,0.1)' }}>
+                        {searching ? (
+                          <div style={{ padding: '14px 16px', fontSize: '0.8125rem', color: 'var(--color-gray-400)' }}>Searching…</div>
+                        ) : searchRes.length === 0 ? (
+                          <div style={{ padding: '14px 16px', fontSize: '0.8125rem', color: 'var(--color-gray-400)' }}>No employees found</div>
+                        ) : searchRes.map((r) => (
+                          <button
+                            key={r.id}
+                            onClick={() => { setSelectedEmp(r); setSearchQ(''); setSearchRes([]) }}
+                            style={{ display: 'flex', width: '100%', gap: 10, padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', borderBottom: '1px solid #f9fafb' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#f9fafb')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                          >
+                            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8125rem', fontWeight: 600, color: '#4338ca', flexShrink: 0 }}>
+                              {r.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 500, fontSize: '0.875rem', color: 'var(--color-gray-900)' }}>{r.name}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>{r.emp_id} · {r.department}</div>
+                            </div>
+                            {r.is_admin && (
+                              <span style={{ fontSize: '0.7rem', color: '#16a34a', background: '#dcfce7', padding: '2px 6px', borderRadius: 4, alignSelf: 'center' }}>Admin</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div>
+                <FieldLabel>Assign Role</FieldLabel>
+                <Select value={newRole} onChange={setNewRole} options={ROLE_OPTIONS.filter(r => r.value !== 'employee')} />
+              </div>
+            </div>
+
+            {addErr && <div style={{ marginTop: 12, fontSize: '0.8125rem', color: '#dc2626', background: '#fef2f2', borderRadius: 6, padding: '8px 12px' }}>{addErr}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowAdd(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>Cancel</button>
+              <button
+                onClick={handleAdd}
+                disabled={addSaving}
+                className="btn btn-primary btn-sm"
+                style={{ padding: '8px 18px', opacity: addSaving ? 0.7 : 1 }}
+              >
+                {addSaving ? 'Adding…' : 'Add User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Role Modal ── */}
+      {editUser && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)' }}>Edit Role</h4>
+              <button onClick={() => setEditUser(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)' }}><X size={18} /></button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--color-gray-50)', borderRadius: 8, marginBottom: 20 }}>
+              <div style={{ width: 38, height: 38, borderRadius: '50%', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.875rem', fontWeight: 600, color: '#4338ca' }}>
+                {editUser.first_name[0]}{editUser.last_name[0]}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, color: 'var(--color-gray-900)' }}>{editUser.first_name} {editUser.last_name}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>{editUser.emp_id} · {editUser.department}</div>
+              </div>
+            </div>
+
+            <div>
+              <FieldLabel>Role</FieldLabel>
+              <Select value={editRole} onChange={setEditRole} options={ROLE_OPTIONS} />
+            </div>
+
+            {editErr && <div style={{ marginTop: 12, fontSize: '0.8125rem', color: '#dc2626', background: '#fef2f2', borderRadius: 6, padding: '8px 12px' }}>{editErr}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setEditUser(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>Cancel</button>
+              <button
+                onClick={handleEdit}
+                disabled={editSaving}
+                className="btn btn-primary btn-sm"
+                style={{ padding: '8px 18px', opacity: editSaving ? 0.7 : 1 }}
+              >
+                {editSaving ? 'Saving…' : 'Save Role'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1284,8 +1721,16 @@ function DepartmentsPanel() {
 /* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────────────────────── */
+// Panels that have a SaveButton — topbar "Save Changes" delegates to it
+const SAVEABLE_PANELS: Panel[] = ['company', 'payroll', 'working', 'notifications', 'users']
+
 export default function SettingsPage() {
   const [activePanel, setActivePanel] = useState<Panel>('company')
+
+  const handleTopbarSave = () => {
+    const btn = document.querySelector<HTMLButtonElement>('[data-panel-save="true"]')
+    btn?.click()
+  }
 
   const renderPanel = () => {
     switch (activePanel) {
@@ -1308,10 +1753,16 @@ export default function SettingsPage() {
         subtitle="System configuration and preferences"
         notificationCount={0}
         actions={
-          <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-            <Save size={14} />
-            Save Changes
-          </button>
+          SAVEABLE_PANELS.includes(activePanel) ? (
+            <button
+              onClick={handleTopbarSave}
+              className="btn btn-primary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}
+            >
+              <Save size={14} />
+              Save Changes
+            </button>
+          ) : null
         }
       />
 

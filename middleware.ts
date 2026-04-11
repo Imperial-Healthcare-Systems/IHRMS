@@ -1,14 +1,61 @@
 import { withAuth } from 'next-auth/middleware'
+import { NextResponse } from 'next/server'
+import type { NextRequestWithAuth } from 'next-auth/middleware'
 
-export default withAuth({
-  pages: {
-    signIn: '/login',
-    error: '/login',
+// Role → allowed route prefixes
+// Routes not listed here are accessible to all authenticated users (e.g. /dashboard, /profile)
+const ROUTE_ROLES: Record<string, string[]> = {
+  '/payroll':       ['super_admin', 'hr_admin', 'payroll_admin'],
+  '/settings':      ['super_admin', 'hr_admin'],
+  '/recruitment':   ['super_admin', 'hr_admin'],
+  '/reports':       ['super_admin', 'hr_admin', 'operations_head'],
+  '/compliance':    ['super_admin', 'hr_admin'],
+  '/warnings':      ['super_admin', 'hr_admin', 'manager'],
+  '/onboarding':    ['super_admin', 'hr_admin'],
+  '/exit':          ['super_admin', 'hr_admin'],
+  '/reimbursements':['super_admin', 'hr_admin', 'finance_admin'],
+  '/employees':     ['super_admin', 'hr_admin', 'operations_head', 'manager'],
+  '/performance':   ['super_admin', 'hr_admin', 'operations_head', 'manager'],
+  '/attendance':    ['super_admin', 'hr_admin', 'operations_head', 'manager', 'employee'],
+  '/leaves':        ['super_admin', 'hr_admin', 'operations_head', 'manager', 'employee'],
+  '/announcements': ['super_admin', 'hr_admin', 'operations_head', 'manager', 'employee'],
+  '/assets':        ['super_admin', 'hr_admin'],
+}
+
+export default withAuth(
+  function middleware(req: NextRequestWithAuth) {
+    const { token } = req.nextauth
+    const role = (token?.role as string | null | undefined) ?? 'employee'
+    const pathname = req.nextUrl.pathname
+
+    // Find the most specific matching route prefix
+    const matchedPrefix = Object.keys(ROUTE_ROLES)
+      .filter((prefix) => pathname.startsWith(prefix))
+      .sort((a, b) => b.length - a.length)[0]  // longest match wins
+
+    if (matchedPrefix) {
+      const allowedRoles = ROUTE_ROLES[matchedPrefix]
+      if (!allowedRoles.includes(role)) {
+        // Redirect to dashboard with an "access denied" query param
+        const url = req.nextUrl.clone()
+        url.pathname = '/dashboard'
+        url.searchParams.set('denied', matchedPrefix.replace('/', ''))
+        return NextResponse.redirect(url)
+      }
+    }
+
+    return NextResponse.next()
   },
-  callbacks: {
-    authorized: ({ token }) => !!token,
-  },
-})
+  {
+    pages: {
+      signIn: '/login',
+      error: '/login',
+    },
+    callbacks: {
+      authorized: ({ token }) => !!token,
+    },
+  }
+)
 
 export const config = {
   matcher: [

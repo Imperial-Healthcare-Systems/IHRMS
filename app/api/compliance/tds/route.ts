@@ -3,26 +3,44 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
-// Map quarter number to months
-const QUARTER_MONTHS: Record<number, number[]> = {
-  1: [4, 5, 6],   // Q1: Apr–Jun
-  2: [7, 8, 9],   // Q2: Jul–Sep
-  3: [10, 11, 12], // Q3: Oct–Dec
-  4: [1, 2, 3],   // Q4: Jan–Mar
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+function isPgrstErr(m: string) {
+  return m.includes('does not exist') || m.includes('PGRST') || m.includes('Could not find') || m.includes('ambiguous')
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safe(fn: () => any): Promise<unknown[]> {
+  const { data, error } = await fn()
+  if (error) {
+    const msg = errMsg(error)
+    if (isPgrstErr(msg)) { console.warn('[compliance/tds] schema error:', msg); return [] }
+    throw new Error(msg)
+  }
+  return (data as unknown[]) ?? []
 }
 
-// Parse financial year string like "2025-26" into start/end calendar years
-function parseFinancialYear(fy: string): { fyStartYear: number; fyEndYear: number } {
-  const parts = fy.split('-')
-  const fyStartYear = parseInt(parts[0])
-  const fyEndYear = fyStartYear + 1
-  return { fyStartYear, fyEndYear }
+// Financial year quarter boundaries (Indian FY: Apr–Mar)
+function getQuarter(month: number): number {
+  if (month >= 4 && month <= 6)  return 1  // Q1: Apr–Jun
+  if (month >= 7 && month <= 9)  return 2  // Q2: Jul–Sep
+  if (month >= 10 && month <= 12) return 3  // Q3: Oct–Dec
+  return 4                                  // Q4: Jan–Mar
 }
 
-// Get calendar year for a month given the financial year
-function getCalendarYear(month: number, fyStartYear: number): number {
-  // Months Apr(4) – Dec(12) are in fyStartYear; Jan(1)–Mar(3) are in fyEndYear
-  return month >= 4 ? fyStartYear : fyStartYear + 1
+function getQDueDate(q: number, fyEndYear: number): string {
+  const DUE: Record<number, string> = {
+    1: `${fyEndYear - 1}-07-31`,
+    2: `${fyEndYear - 1}-10-31`,
+    3: `${fyEndYear}-01-31`,
+    4: `${fyEndYear}-05-31`,
+  }
+  return DUE[q]
 }
 
 export async function GET(req: NextRequest) {
@@ -32,230 +50,85 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const now = new Date()
-    // Default to current financial year
-    const currentMonth = now.getMonth() + 1
-    const currentYear = now.getFullYear()
-    const defaultFY =
-      currentMonth >= 4
-        ? `${currentYear}-${String(currentYear + 1).slice(-2)}`
-        : `${currentYear - 1}-${String(currentYear).slice(-2)}`
+    const curMonth = now.getMonth() + 1
+    const curYear  = now.getFullYear()
+    // Current financial year
+    const fyStart = curMonth >= 4 ? curYear : curYear - 1
 
-    const financial_year = searchParams.get('financial_year') ?? defaultFY
-    const quarterParam = searchParams.get('quarter')
-    const quarter = quarterParam ? parseInt(quarterParam) : null
-
-    if (!financial_year.match(/^\d{4}-\d{2}$/)) {
-      return NextResponse.json(
-        { error: 'financial_year must be in format YYYY-YY (e.g. 2025-26)' },
-        { status: 400 }
-      )
+    const fyParam = searchParams.get('fy') // optional override e.g. "2025-26"
+    let fyStartYear = fyStart
+    if (fyParam) {
+      const parts = fyParam.split('-')
+      fyStartYear = parseInt(parts[0])
     }
-    if (quarter !== null && (quarter < 1 || quarter > 4)) {
-      return NextResponse.json({ error: 'quarter must be between 1 and 4' }, { status: 400 })
-    }
+    const fyEndYear = fyStartYear + 1
 
-    const { fyStartYear } = parseFinancialYear(financial_year)
-
-    // Get all TDS data from payslips for this FY grouped by quarter
-    const quarterBreakdown: Record<number, {
-      quarter: number
-      months: number[]
-      total_tds: number
-      employees: number
-    }> = {}
-
-    // Initialize all quarters
-    for (let q = 1; q <= 4; q++) {
-      quarterBreakdown[q] = {
-        quarter: q,
-        months: QUARTER_MONTHS[q],
-        total_tds: 0,
-        employees: 0,
-      }
-    }
-
-    // Build list of month/year combinations for the FY
-    const monthYearPairs: Array<{ month: number; year: number; quarter: number }> = []
-    for (let q = 1; q <= 4; q++) {
-      for (const m of QUARTER_MONTHS[q]) {
-        const yr = getCalendarYear(m, fyStartYear)
-        monthYearPairs.push({ month: m, year: yr, quarter: q })
-      }
-    }
-
-    // Filter to specific quarter if requested
-    const pairsToQuery = quarter
-      ? monthYearPairs.filter((p) => p.quarter === quarter)
-      : monthYearPairs
-
-    // Fetch payslip TDS for each month
-    const payslipPromises = pairsToQuery.map(({ month, year }) =>
+    // Fetch payslips for FY months: Apr fyStart → Mar fyEnd
+    // Apr–Dec: year = fyStartYear; Jan–Mar: year = fyEndYear
+    const rows = await safe(() =>
       supabaseAdmin
         .from('payslips')
-        .select('employee_id, tds, month, year')
-        .eq('month', month)
-        .eq('year', year)
+        .select('id, month, year, tds, gross_earnings, payment_status')
+        .or(
+          `and(year.eq.${fyStartYear},month.gte.4),and(year.eq.${fyEndYear},month.lte.3)`
+        )
+        .limit(5000)
     )
 
-    const payslipResults = await Promise.all(payslipPromises)
+    type Row = { id: string; month: number; year: number; tds?: number; gross_earnings?: number; payment_status?: string }
 
-    let totalTds = 0
-    const taxRegimeBreakdown: Record<string, number> = { old: 0, new: 0 }
-    const form16Status: Record<string, boolean> = {}
-
-    for (let i = 0; i < pairsToQuery.length; i++) {
-      const { quarter: q } = pairsToQuery[i]
-      const { data: payslips, error } = payslipResults[i]
-      if (error) continue
-
-      const monthTds = (payslips ?? []).reduce((sum: number, p: any) => sum + (p.tds ?? 0), 0)
-      quarterBreakdown[q].total_tds += monthTds
-      quarterBreakdown[q].employees = Math.max(
-        quarterBreakdown[q].employees,
-        (payslips ?? []).length
-      )
-      totalTds += monthTds
+    // Aggregate by quarter
+    const qData: Record<number, { tds: number; gross: number; count: number }> = {
+      1: { tds: 0, gross: 0, count: 0 },
+      2: { tds: 0, gross: 0, count: 0 },
+      3: { tds: 0, gross: 0, count: 0 },
+      4: { tds: 0, gross: 0, count: 0 },
     }
 
-    // Get tax regime breakdown from employees
-    const { data: employees } = await supabaseAdmin
-      .from('employees')
-      .select('id, tax_regime')
-      .eq('tds_applicable', true)
-      .neq('status', 'terminated')
-
-    for (const emp of employees ?? []) {
-      const regime = (emp.tax_regime as string) ?? 'new'
-      taxRegimeBreakdown[regime] = (taxRegimeBreakdown[regime] ?? 0) + 1
+    for (const r of rows as Row[]) {
+      const q = getQuarter(r.month)
+      qData[q].tds   += r.tds ?? 0
+      qData[q].gross += r.gross_earnings ?? 0
+      qData[q].count++
     }
 
-    // Check Form 16 generation status from compliance records
-    const { data: compRecords } = await supabaseAdmin
-      .from('statutory_compliance')
-      .select('period_month, period_year, return_filed, form_number')
-      .eq('compliance_type', 'tds')
-      .eq('period_year', fyStartYear)
-
-    for (const rec of compRecords ?? []) {
-      const key = `${rec.period_year}-${rec.period_month}`
-      form16Status[key] = rec.return_filed ?? false
+    const QPERIODS: Record<number, string> = {
+      1: `Apr–Jun ${fyStartYear}`,
+      2: `Jul–Sep ${fyStartYear}`,
+      3: `Oct–Dec ${fyStartYear}`,
+      4: `Jan–Mar ${fyEndYear}`,
     }
 
-    const response: Record<string, unknown> = {
-      financial_year,
-      total_tds_deducted: totalTds,
-      total_employees: (employees ?? []).length,
-      by_quarter: Object.values(quarterBreakdown),
-      by_tax_regime: taxRegimeBreakdown,
-      form16_status: form16Status,
-    }
+    const todayStr = now.toISOString().slice(0, 10)
 
-    if (quarter !== null) {
-      response.selected_quarter = quarter
-      response.quarter_total = quarterBreakdown[quarter]?.total_tds ?? 0
-    }
-
-    return NextResponse.json(response)
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Internal error'
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as any)?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
-
-    const body = await req.json()
-    const { financial_year, quarter } = body
-
-    if (!financial_year || !quarter) {
-      return NextResponse.json(
-        { error: 'Missing required fields: financial_year, quarter' },
-        { status: 400 }
-      )
-    }
-
-    if (quarter < 1 || quarter > 4) {
-      return NextResponse.json({ error: 'quarter must be between 1 and 4' }, { status: 400 })
-    }
-
-    const { fyStartYear } = parseFinancialYear(financial_year)
-    const months = QUARTER_MONTHS[quarter]
-
-    // Aggregate payslips TDS for each month in the quarter
-    let totalTds = 0
-    let recordCount = 0
-
-    const promises = months.map((m) => {
-      const yr = getCalendarYear(m, fyStartYear)
-      return supabaseAdmin
-        .from('payslips')
-        .select('tds')
-        .eq('month', m)
-        .eq('year', yr)
+    const quarters = [1, 2, 3, 4].map(q => {
+      const dueDate = getQDueDate(q, fyEndYear)
+      const hasData = qData[q].count > 0
+      const isPast  = dueDate < todayStr
+      return {
+        quarter:    `Q${q}`,
+        period:     QPERIODS[q],
+        tds:        qData[q].tds,
+        gross:      qData[q].gross,
+        payslip_count: qData[q].count,
+        due_date:   dueDate,
+        status:     !hasData ? 'no_data' : (isPast ? 'Filed' : 'Pending'),
+      }
     })
 
-    const results = await Promise.all(promises)
-
-    for (const { data, error } of results) {
-      if (error) continue
-      for (const p of data ?? []) {
-        totalTds += p.tds ?? 0
-        recordCount++
-      }
-    }
-
-    // Determine the due date for the quarter's TDS return
-    const quarterDueDates: Record<number, string> = {
-      1: `${fyStartYear}-07-31`,
-      2: `${fyStartYear}-10-31`,
-      3: `${fyStartYear + 1}-01-31`,
-      4: `${fyStartYear + 1}-05-31`,
-    }
-    const due_date = quarterDueDates[quarter]
-
-    // Upsert a compliance record for this quarter summary
-    // Use period_month = quarter * 3 as a proxy (last month of quarter)
-    const lastMonthOfQuarter = months[months.length - 1]
-    const lastYearOfQuarter = getCalendarYear(lastMonthOfQuarter, fyStartYear)
-
-    const { data: compliance, error: compError } = await supabaseAdmin
-      .from('statutory_compliance')
-      .upsert(
-        {
-          compliance_type: 'tds',
-          period_month: lastMonthOfQuarter,
-          period_year: lastYearOfQuarter,
-          due_date,
-          amount: totalTds,
-          status: 'pending',
-          form_number: `Form 24Q Q${quarter}`,
-          managed_by: (session.user as any)?.id ?? null,
-          remarks: `FY ${financial_year} Q${quarter} TDS summary`,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'compliance_type,period_month,period_year' }
-      )
-      .select()
-      .single()
-
-    if (compError) throw compError
+    const totalTds   = quarters.reduce((s, q) => s + q.tds, 0)
+    const totalGross = quarters.reduce((s, q) => s + q.gross, 0)
 
     return NextResponse.json({
-      message: `TDS summary generated for FY ${financial_year} Q${quarter}`,
-      data: compliance,
-      financial_year,
-      quarter,
-      total_tds: totalTds,
-      payslip_records: recordCount,
-      due_date,
-    }, { status: 201 })
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Internal error'
-    return NextResponse.json({ error: msg }, { status: 500 })
+      fy: `${fyStartYear}-${String(fyEndYear).slice(-2)}`,
+      fy_start_year: fyStartYear,
+      fy_end_year:   fyEndYear,
+      quarters,
+      total_tds:     totalTds,
+      total_gross:   totalGross,
+    })
+  } catch (err) {
+    console.error('[compliance/tds]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

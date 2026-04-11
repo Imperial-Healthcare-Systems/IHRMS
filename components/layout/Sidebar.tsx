@@ -39,7 +39,23 @@ interface NavGroup {
   items: NavItem[]
 }
 
-const navGroups: NavGroup[] = [
+interface NavItemConfig {
+  label: string
+  href: string
+  icon: React.ElementType
+  badge?: number
+  roles?: string[]  // if omitted, accessible to all authenticated users
+}
+
+interface NavGroupConfig {
+  title: string
+  items: NavItemConfig[]
+}
+
+// Mirrors middleware.ts ROUTE_ROLES — keep in sync
+const ALL_ROLES = ['super_admin', 'hr_admin', 'payroll_admin', 'finance_admin', 'operations_head', 'manager', 'employee']
+
+const navGroupConfigs: NavGroupConfig[] = [
   {
     title: 'Overview',
     items: [
@@ -49,41 +65,41 @@ const navGroups: NavGroup[] = [
   {
     title: 'Workforce',
     items: [
-      { label: 'Employees', href: '/employees', icon: Users },
-      { label: 'Recruitment', href: '/recruitment', icon: UserPlus },
-      { label: 'Attendance', href: '/attendance', icon: Clock },
-      { label: 'Leaves', href: '/leaves', icon: Calendar },
+      { label: 'Employees',   href: '/employees',   icon: Users,     roles: ['super_admin', 'hr_admin', 'operations_head', 'manager'] },
+      { label: 'Recruitment', href: '/recruitment',  icon: UserPlus,  roles: ['super_admin', 'hr_admin'] },
+      { label: 'Attendance',  href: '/attendance',   icon: Clock,     roles: ALL_ROLES },
+      { label: 'Leaves',      href: '/leaves',       icon: Calendar,  roles: ALL_ROLES },
     ],
   },
   {
     title: 'Finance',
     items: [
-      { label: 'Payroll', href: '/payroll', icon: IndianRupee },
-      { label: 'Reimbursements', href: '/reimbursements', icon: Receipt },
+      { label: 'Payroll',         href: '/payroll',         icon: IndianRupee, roles: ['super_admin', 'hr_admin', 'payroll_admin'] },
+      { label: 'Reimbursements',  href: '/reimbursements',  icon: Receipt,     roles: ['super_admin', 'hr_admin', 'finance_admin'] },
     ],
   },
   {
     title: 'Performance',
     items: [
-      { label: 'Reviews', href: '/performance', icon: Star },
-      { label: 'Warnings & Actions', href: '/warnings', icon: AlertTriangle },
+      { label: 'Reviews',          href: '/performance', icon: Star,          roles: ['super_admin', 'hr_admin', 'operations_head', 'manager'] },
+      { label: 'Warnings & Actions', href: '/warnings',  icon: AlertTriangle, roles: ['super_admin', 'hr_admin', 'manager'] },
     ],
   },
   {
     title: 'Lifecycle',
     items: [
-      { label: 'Onboarding', href: '/onboarding', icon: UserCheck },
-      { label: 'Exit Management', href: '/exit', icon: LogOut },
+      { label: 'Onboarding',     href: '/onboarding', icon: UserCheck, roles: ['super_admin', 'hr_admin'] },
+      { label: 'Exit Management', href: '/exit',       icon: LogOut,    roles: ['super_admin', 'hr_admin'] },
     ],
   },
   {
     title: 'Admin',
     items: [
-      { label: 'Reports', href: '/reports', icon: BarChart3 },
-      { label: 'Compliance', href: '/compliance', icon: Shield },
-      { label: 'Assets', href: '/assets', icon: Package },
-      { label: 'Announcements', href: '/announcements', icon: Bell },
-      { label: 'Settings', href: '/settings', icon: Settings },
+      { label: 'Reports',       href: '/reports',       icon: BarChart3, roles: ['super_admin', 'hr_admin', 'operations_head'] },
+      { label: 'Compliance',    href: '/compliance',    icon: Shield,    roles: ['super_admin', 'hr_admin'] },
+      { label: 'Assets',        href: '/assets',        icon: Package,   roles: ['super_admin', 'hr_admin'] },
+      { label: 'Announcements', href: '/announcements', icon: Bell,      roles: ALL_ROLES },
+      { label: 'Settings',      href: '/settings',      icon: Settings,  roles: ['super_admin', 'hr_admin'] },
     ],
   },
 ]
@@ -99,13 +115,31 @@ function getInitials(name?: string | null) {
 /* ─────────────────────────────────────────────
    Component
 ───────────────────────────────────────────── */
+const ROLE_LABELS: Record<string, string> = {
+  super_admin:     'Super Admin',
+  hr_admin:        'HR Administrator',
+  operations_head: 'Operations Head',
+  manager:         'Manager',
+  payroll_admin:   'Payroll Admin',
+  finance_admin:   'Finance Admin',
+  employee:        'Employee',
+}
+
 export function Sidebar() {
   const pathname = usePathname()
   const { data: session } = useSession()
 
-  const userName = session?.user?.name ?? 'User'
-  const userEmail = session?.user?.email ?? ''
-  const userImage = session?.user?.image
+  const userName  = session?.user?.name ?? 'User'
+  const userImage = session?.user?.image ?? null
+  const userRole  = ((session?.user as Record<string, unknown>)?.role as string | null) ?? 'employee'
+
+  // Filter nav items to only those the current role can access
+  const navGroups = navGroupConfigs
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.roles || item.roles.includes(userRole)),
+    }))
+    .filter((group) => group.items.length > 0)
 
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
@@ -163,7 +197,7 @@ export function Sidebar() {
         className="flex-1 overflow-y-auto"
         style={{ padding: '8px 10px', scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.08) transparent' }}
       >
-        {navGroups.map((group, gi) => (
+        {navGroups.map((group: { title: string; items: NavItemConfig[] }, gi: number) => (
           <div key={group.title} style={{ marginBottom: 4, marginTop: gi === 0 ? 4 : 12 }}>
             {/* Group Label */}
             <p style={{
@@ -291,7 +325,7 @@ export function Sidebar() {
             <p style={{ fontSize: 12, fontWeight: 600, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.3 }}>
               {userName}
             </p>
-            <p style={{ fontSize: 10, color: '#4B6080', lineHeight: 1.3 }}>HR Administrator</p>
+            <p style={{ fontSize: 10, color: '#4B6080', lineHeight: 1.3 }}>{ROLE_LABELS[userRole] ?? userRole}</p>
           </div>
 
           {/* Sign out */}

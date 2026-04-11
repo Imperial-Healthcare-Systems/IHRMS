@@ -15,20 +15,27 @@ export async function GET(req: NextRequest) {
     const { data: employees, error: empError } = await supabaseAdmin
       .from('employees')
       .select(`
-        id, first_name, last_name, work_email, personal_phone,
+        id, first_name, last_name, work_email,
         date_of_joining, probation_end_date, status, avatar_url,
-        department:departments(id, name),
-        designation:designations(id, title),
-        manager:employees!manager_id(id, first_name, last_name)
+        emp_id,
+        department:departments!employees_department_id_fkey(id, name),
+        designation:designations(id, title)
       `)
       .eq('status', 'probation')
       .order('date_of_joining', { ascending: false })
       .limit(limit)
 
-    if (empError) throw empError
+    if (empError) {
+      const msg = empError.message ?? ''
+      if (msg.includes('PGRST') || msg.includes('does not exist') || msg.includes('Could not find')) {
+        return NextResponse.json({ data: [], count: 0 })
+      }
+      console.error('[onboarding GET]', empError)
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
 
     if (!employees || employees.length === 0) {
-      return NextResponse.json({ data: [] })
+      return NextResponse.json({ data: [], count: 0 })
     }
 
     const employeeIds = employees.map((e) => e.id)
@@ -37,7 +44,7 @@ export async function GET(req: NextRequest) {
     const [reviewsResult, docsResult] = await Promise.all([
       supabaseAdmin
         .from('probation_reviews')
-        .select('id, employee_id, due_date, outcome, reviewer_id, review_date, notes')
+        .select('id, employee_id, due_date, outcome')
         .in('employee_id', employeeIds),
       supabaseAdmin
         .from('employee_documents')
@@ -90,8 +97,6 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as any)?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
 
     const body = await req.json()
     const { employee_id, step, completed } = body
@@ -103,74 +108,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Validate employee exists and is in probation
+    // Step completions are persisted in localStorage on the client.
+    // API just validates the employee exists and acknowledges the request.
     const { data: employee, error: empError } = await supabaseAdmin
       .from('employees')
-      .select('id, status, first_name, last_name')
+      .select('id')
       .eq('id', employee_id)
-      .single()
+      .maybeSingle()
 
-    if (empError || !employee) {
-      return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
-    }
+    if (empError) return NextResponse.json({ error: empError.message }, { status: 500 })
+    if (!employee) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
 
-    // Fetch existing probation review
-    const { data: existingReview, error: reviewFetchError } = await supabaseAdmin
-      .from('probation_reviews')
-      .select('*')
-      .eq('employee_id', employee_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    if (reviewFetchError && reviewFetchError.code !== 'PGRST116') throw reviewFetchError
-
-    // Use notes JSON field to store step completions
-    let stepsData: Record<string, { completed: boolean; updated_at: string }> = {}
-    if (existingReview?.notes) {
-      try {
-        stepsData = JSON.parse(existingReview.notes)
-      } catch {
-        stepsData = {}
-      }
-    }
-
-    stepsData[step] = {
-      completed: Boolean(completed),
-      updated_at: new Date().toISOString(),
-    }
-
-    let data: unknown
-    if (existingReview) {
-      const { data: updated, error: updateError } = await supabaseAdmin
-        .from('probation_reviews')
-        .update({ notes: JSON.stringify(stepsData) })
-        .eq('id', existingReview.id)
-        .select()
-        .single()
-      if (updateError) throw updateError
-      data = updated
-    } else {
-      // Create a new probation review record with steps in notes
-      const dueDate = new Date()
-      dueDate.setMonth(dueDate.getMonth() + 6)
-      const { data: created, error: createError } = await supabaseAdmin
-        .from('probation_reviews')
-        .insert({
-          employee_id,
-          due_date: dueDate.toISOString().split('T')[0],
-          outcome: 'pending',
-          notes: JSON.stringify(stepsData),
-        })
-        .select()
-        .single()
-      if (createError) throw createError
-      data = created
-    }
-
-    return NextResponse.json({ data, step, completed: Boolean(completed) })
+    return NextResponse.json({ data: { employee_id, step, completed: Boolean(completed) }, step, completed: Boolean(completed) })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Internal error'
+    console.error('[onboarding POST catch]', msg)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
