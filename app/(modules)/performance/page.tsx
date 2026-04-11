@@ -1,169 +1,97 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 import { Topbar } from '@/components/layout/Topbar'
-import { performanceApi, type PerformanceReview as ApiPerformanceReview } from '@/lib/api-client'
 import toast from 'react-hot-toast'
-import {
-  RefreshCw,
-  Clock,
-  CheckCircle,
-  TrendingUp,
-  X,
-  ChevronDown,
-  Plus,
-  Star,
-  Target,
-  Users,
-  BarChart2,
-  Edit2,
-  Eye,
-} from 'lucide-react'
+import { RefreshCw, Clock, CheckCircle, TrendingUp, X, Plus, Star } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
    TYPES
 ───────────────────────────────────────────────────────────── */
 type Tab = 'cycles' | 'teamreviews' | 'ratings' | 'goals'
-type ReviewStatus = 'In Progress' | 'Completed' | 'Not Started'
-type AppraisalStatus = 'Draft' | 'Submitted' | 'Acknowledged' | 'Completed'
-type GoalStatus = 'On Track' | 'In Progress' | 'At Risk' | 'Completed' | 'Not Started'
 
 interface ReviewCycle {
-  id: number
+  id: string
   name: string
-  period: string
-  type: string
-  status: ReviewStatus
+  cycle_type: string
+  period_from: string
+  period_to: string
+  due_date: string | null
+  status: 'active' | 'completed' | 'cancelled'
+  description: string | null
   participants: number
   completion: number
-  dueDate: string
 }
 
-interface TeamReview {
-  id: number
-  employee: string
-  department: string
-  period: string
-  selfAssessment: string
-  managerReview: string
-  rating: string
-  status: AppraisalStatus
+interface ApiReview {
+  id: string
+  cycle: string
+  cycle_id: string | null
+  review_period_from: string
+  review_period_to: string
+  self_rating: number | null
+  manager_rating: number | null
+  final_rating: number | null
+  kra_scores: Record<string, { self?: number; manager?: number; comment?: string }> | null
+  goals: Array<{ name: string; target: string; achieved?: string; progress?: number }> | null
+  next_goals: string[] | null
+  strengths: string | null
+  areas_of_improvement: string | null
+  training_needs: string[] | null
+  promotion_recommended: boolean | null
+  increment_recommended: number | null
+  manager_comments: string | null
+  status: string
+  employee_acknowledged_at: string | null
+  employee: { id: string; first_name: string; last_name: string; emp_id: string; email: string; department: { name: string } | null; designation: { title: string } | null } | null
+  reviewer: { id: string; first_name: string; last_name: string; emp_id: string } | null
+  created_at: string
 }
 
-interface RatingBand {
-  label: string
-  score: number
-  count: number
-  percentage: number
-  color: string
-  bg: string
+const KRA_ROWS = ['Job Knowledge', 'Target Achievement', 'Communication', 'Leadership', 'Initiative', 'Teamwork']
+
+const CYCLE_TYPE_MAP: Record<string, string> = {
+  annual: 'Annual', half_yearly: 'Half-Year', quarterly: 'Quarterly', probation: 'Probation', pip: 'PIP',
+}
+const CYCLE_TYPE_TO_DB: Record<string, string> = {
+  Annual: 'annual', 'Mid-Year': 'half_yearly', Quarterly: 'quarterly', Probation: 'probation', PIP: 'pip',
 }
 
-interface DeptRating {
-  dept: string
-  avg: number
-  topPerformer: string
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+function fmtPeriod(from: string, to: string) {
+  const f = new Date(from), t = new Date(to)
+  return `${f.toLocaleString('en-IN', { month: 'short', year: 'numeric' })} – ${t.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`
+}
+function ratingLabel(n: number | null | undefined) {
+  if (!n) return '—'
+  const map: Record<number, string> = { 5: 'Exceptional', 4: 'Exceeds', 3: 'Meets', 2: 'Needs Improvement', 1: 'Unsatisfactory' }
+  return `${n} – ${map[n] ?? n}`
 }
 
-interface GoalKRA {
-  id: number
-  name: string
-  progress: number
-  target: string
-  achieved: string
-  status: GoalStatus
-}
-
-/* ─────────────────────────────────────────────────────────────
-   MOCK DATA
-───────────────────────────────────────────────────────────── */
-const REVIEW_CYCLES: ReviewCycle[] = [
-  { id: 1, name: 'Annual Appraisal 2025-26', period: 'Apr 2025 – Mar 2026', type: 'Annual', status: 'In Progress', participants: 248, completion: 75, dueDate: 'Mar 31, 2026' },
-  { id: 2, name: 'Mid-Year Review H2', period: 'Oct – Dec 2025', type: 'Mid-Year', status: 'Completed', participants: 248, completion: 100, dueDate: 'Dec 31, 2025' },
-  { id: 3, name: 'Probation Review Q1 2026', period: 'Jan – Mar 2026', type: 'Probation', status: 'In Progress', participants: 15, completion: 60, dueDate: 'Mar 31, 2026' },
-]
-
-const TEAM_REVIEWS: TeamReview[] = [
-  { id: 1, employee: 'Arjun Patel', department: 'Engineering', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Pending', rating: '—', status: 'Submitted' },
-  { id: 2, employee: 'Sunita Rao', department: 'HR', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Submitted', rating: '4 – Exceeds', status: 'Acknowledged' },
-  { id: 3, employee: 'Mohammed Irfan', department: 'Sales', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Submitted', rating: '3 – Meets', status: 'Completed' },
-  { id: 4, employee: 'Deepika Sharma', department: 'Finance', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Not Started', managerReview: 'Pending', rating: '—', status: 'Draft' },
-  { id: 5, employee: 'Vikram Nair', department: 'Operations', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Submitted', rating: '5 – Exceptional', status: 'Completed' },
-  { id: 6, employee: 'Sonia Kapoor', department: 'Marketing', period: 'Apr 2025 – Mar 2026', selfAssessment: 'In Progress', managerReview: 'Pending', rating: '—', status: 'Draft' },
-  { id: 7, employee: 'Ravi Shankar', department: 'Engineering', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Submitted', rating: '3 – Meets', status: 'Acknowledged' },
-  { id: 8, employee: 'Kavita Pillai', department: 'Customer Support', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Submitted', rating: '2 – Needs Improvement', status: 'Completed' },
-  { id: 9, employee: 'Priya Menon', department: 'Engineering', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Submitted', managerReview: 'Pending', rating: '—', status: 'Submitted' },
-  { id: 10, employee: 'Ajay Gupta', department: 'Sales', period: 'Apr 2025 – Mar 2026', selfAssessment: 'Not Started', managerReview: 'Pending', rating: '—', status: 'Draft' },
-]
-
-const RATING_BANDS: RatingBand[] = [
-  { label: 'Exceptional', score: 5, count: 18, percentage: 7.3, color: '#7c3aed', bg: '#f5f3ff' },
-  { label: 'Exceeds Expectations', score: 4, count: 52, percentage: 21.0, color: '#2563eb', bg: '#eff6ff' },
-  { label: 'Meets Expectations', score: 3, count: 142, percentage: 57.3, color: '#16a34a', bg: '#f0fdf4' },
-  { label: 'Needs Improvement', score: 2, count: 28, percentage: 11.3, color: '#d97706', bg: '#fffbeb' },
-  { label: 'Unsatisfactory', score: 1, count: 8, percentage: 3.2, color: '#dc2626', bg: '#fef2f2' },
-]
-
-const DEPT_RATINGS: DeptRating[] = [
-  { dept: 'Engineering', avg: 3.8, topPerformer: 'Vikram Nair' },
-  { dept: 'Sales', avg: 3.5, topPerformer: 'Rohan Malhotra' },
-  { dept: 'HR', avg: 3.9, topPerformer: 'Sunita Rao' },
-  { dept: 'Finance', avg: 3.6, topPerformer: 'Anita Joshi' },
-  { dept: 'Operations', avg: 3.4, topPerformer: 'Kiran Bhat' },
-  { dept: 'Marketing', avg: 3.7, topPerformer: 'Nisha Verma' },
-  { dept: 'Customer Support', avg: 3.2, topPerformer: 'Suresh Reddy' },
-]
-
-const GOALS: GoalKRA[] = [
-  { id: 1, name: 'Revenue Target', progress: 87, target: '₹50L', achieved: '₹43.5L', status: 'On Track' },
-  { id: 2, name: 'Customer Satisfaction Score', progress: 92, target: '4.5/5', achieved: '4.1/5', status: 'On Track' },
-  { id: 3, name: 'Team Development', progress: 67, target: '4 trainings', achieved: '3 done', status: 'In Progress' },
-  { id: 4, name: 'Process Improvement', progress: 50, target: '2 process docs', achieved: '1 done', status: 'At Risk' },
-  { id: 5, name: 'Cross-functional Projects', progress: 100, target: '2 projects', achieved: '2 done', status: 'Completed' },
-  { id: 6, name: 'Certification', progress: 0, target: 'AWS Certified', achieved: 'Not started', status: 'Not Started' },
-]
-
-const KRA_ROWS = [
-  'Job Knowledge',
-  'Target Achievement',
-  'Communication',
-  'Leadership',
-  'Initiative',
-  'Teamwork',
-]
-
-/* ─────────────────────────────────────────────────────────────
-   HELPERS / SMALL COMPONENTS
-───────────────────────────────────────────────────────────── */
+/* ── Small UI components ── */
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; color: string }> = {
+    active:        { bg: '#fffbeb', color: '#d97706' },
     'In Progress': { bg: '#fffbeb', color: '#d97706' },
-    'Completed': { bg: '#f0fdf4', color: '#16a34a' },
-    'Not Started': { bg: '#f9fafb', color: '#6b7280' },
-    'Draft': { bg: '#f9fafb', color: '#6b7280' },
-    'Submitted': { bg: '#eff6ff', color: '#2563eb' },
-    'Acknowledged': { bg: '#faf5ff', color: '#7c3aed' },
+    completed:     { bg: '#f0fdf4', color: '#16a34a' },
+    Completed:     { bg: '#f0fdf4', color: '#16a34a' },
+    cancelled:     { bg: '#fef2f2', color: '#dc2626' },
+    draft:         { bg: '#f9fafb', color: '#6b7280' },
+    Draft:         { bg: '#f9fafb', color: '#6b7280' },
+    submitted:     { bg: '#eff6ff', color: '#2563eb' },
+    Submitted:     { bg: '#eff6ff', color: '#2563eb' },
+    acknowledged:  { bg: '#faf5ff', color: '#7c3aed' },
+    Acknowledged:  { bg: '#faf5ff', color: '#7c3aed' },
   }
   const s = map[status] ?? { bg: '#f3f4f6', color: '#374151' }
+  const label = status.charAt(0).toUpperCase() + status.slice(1)
   return (
-    <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>
-      {status}
-    </span>
-  )
-}
-
-function GoalStatusBadge({ status }: { status: GoalStatus }) {
-  const map: Record<GoalStatus, { bg: string; color: string }> = {
-    'On Track': { bg: '#f0fdf4', color: '#16a34a' },
-    'In Progress': { bg: '#fffbeb', color: '#d97706' },
-    'At Risk': { bg: '#fef2f2', color: '#dc2626' },
-    'Completed': { bg: '#eff6ff', color: '#2563eb' },
-    'Not Started': { bg: '#f9fafb', color: '#6b7280' },
-  }
-  const s = map[status]
-  return (
-    <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>
-      {status}
+    <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999, border: `1px solid ${s.color}22` }}>
+      {label}
     </span>
   )
 }
@@ -190,96 +118,284 @@ function SummaryCard({ label, value, icon: Icon, color }: { label: string; value
   )
 }
 
+function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.48)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(4px)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+function ModalHeader({ title, sub, onClose }: { title: string; sub?: string; onClose: () => void }) {
+  return (
+    <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
+      <div>
+        <h2 style={{ fontWeight: 700, color: '#111827', fontSize: '1.05rem', margin: 0 }}>{title}</h2>
+        {sub && <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '3px 0 0' }}>{sub}</p>}
+      </div>
+      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 4, borderRadius: 6, display: 'flex' }}><X size={18} /></button>
+    </div>
+  )
+}
+function ModalFooter({ children }: { children: React.ReactNode }) {
+  return <div style={{ padding: '16px 28px', borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>{children}</div>
+}
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
+      {children}
+    </div>
+  )
+}
+
+const INP: React.CSSProperties = { width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: '0.875rem', color: '#111827', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+const BTN_PRIMARY: React.CSSProperties = { background: '#E8622A', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }
+const BTN_OUTLINE: React.CSSProperties = { background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 20px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }
+
 /* ─────────────────────────────────────────────────────────────
    MAIN PAGE
 ───────────────────────────────────────────────────────────── */
 export default function PerformancePage() {
+  const { data: session } = useSession()
+  const sessionUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
+  const isAdmin       = (session?.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+
   const [activeTab, setActiveTab] = useState<Tab>('cycles')
+
+  /* ── Data state ── */
+  const [cycles,  setCycles]  = useState<ReviewCycle[]>([])
+  const [reviews, setReviews] = useState<ApiReview[]>([])
+  const [loading, setLoading] = useState(true)
+
+  /* ── Cycle modal ── */
   const [showCycleModal, setShowCycleModal] = useState(false)
+  const [cycleName,  setCycleName]  = useState('')
+  const [cycleFrom,  setCycleFrom]  = useState('')
+  const [cycleTo,    setCycleTo]    = useState('')
+  const [cycleDue,   setCycleDue]   = useState('')
+  const [cycleType,  setCycleType]  = useState('Annual')
+  const [cycleDesc,  setCycleDesc]  = useState('')
+  const [savingCycle, setSavingCycle] = useState(false)
+
+  /* ── Review fill modal ── */
   const [showReviewModal, setShowReviewModal] = useState(false)
-  const [selectedReview, setSelectedReview] = useState<TeamReview | null>(null)
-  const [showGoalModal, setShowGoalModal] = useState(false)
-
-  // Review modal form state
-  const [kraRatings, setKraRatings] = useState<Record<string, number>>({})
-  const [kraComments, setKraComments] = useState<Record<string, string>>({})
-  const [overallRating, setOverallRating] = useState('')
+  const [activeReview,    setActiveReview]    = useState<ApiReview | null>(null)
+  const [kraRatings,   setKraRatings]   = useState<Record<string, number>>({})
+  const [kraComments,  setKraComments]  = useState<Record<string, string>>({})
+  const [managerRating,   setManagerRating]   = useState<number>(0)
   const [managerComments, setManagerComments] = useState('')
-  const [nextGoals, setNextGoals] = useState(['', '', ''])
+  const [nextGoals,    setNextGoals]    = useState(['', '', ''])
   const [incrementPct, setIncrementPct] = useState('')
-  const [promote, setPromote] = useState(false)
-
-  // Cycle modal state
-  const [cycleName, setCycleName] = useState('')
-  const [cycleStart, setCycleStart] = useState('')
-  const [cycleEnd, setCycleEnd] = useState('')
-  const [cycleType, setCycleType] = useState('Annual')
-  const [cycleDesc, setCycleDesc] = useState('')
-
-  const [teamReviews, setTeamReviews] = useState<TeamReview[]>(TEAM_REVIEWS)
+  const [promote,      setPromote]      = useState(false)
   const [submittingReview, setSubmittingReview] = useState(false)
 
-  useEffect(() => {
-    performanceApi.list({ limit: 100 }).then(res => {
-      if (res.data.length > 0) {
-        const adapted: TeamReview[] = res.data.map((r: ApiPerformanceReview, idx: number) => ({
-          id: idx + 1,
-          employee: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
-          department: r.employee?.department?.name ?? 'Unknown',
-          period: r.review_period ?? 'Current',
-          selfAssessment: r.status === 'submitted' || r.status === 'completed' ? 'Submitted' : 'Not Started',
-          managerReview: r.reviewer_id ? 'Submitted' : 'Pending',
-          rating: r.rating ? `${r.rating}` : '—',
-          status: r.status === 'completed' ? 'Completed' : r.status === 'submitted' ? 'Submitted' : 'Draft' as AppraisalStatus,
-        }))
-        setTeamReviews(adapted)
-      }
-    }).catch(() => {/* keep mock */})
-  }, [])
+  /* ── Goal modal ── */
+  const [showGoalModal, setShowGoalModal] = useState(false)
+  const [goalName,   setGoalName]   = useState('')
+  const [goalTarget, setGoalTarget] = useState('')
+  const [goalDue,    setGoalDue]    = useState('')
+  const [goalDesc,   setGoalDesc]   = useState('')
+  const [savingGoal, setSavingGoal] = useState(false)
 
-  const handleSubmitReview = async () => {
-    if (!selectedReview) return
+  /* ─── Fetch ─── */
+  const fetchAll = useCallback(async () => {
+    if (!sessionUserId) return
+    setLoading(true)
+    try {
+      const [cRes, rRes] = await Promise.all([
+        fetch('/api/performance/cycles'),
+        fetch(`/api/performance/reviews?limit=200`),
+      ])
+      const cJson = await cRes.json()
+      const rJson = await rRes.json()
+      setCycles(cJson.data ?? [])
+      setReviews(rJson.data ?? [])
+    } catch { /* silent */ }
+    finally { setLoading(false) }
+  }, [sessionUserId])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  /* ─── Derived stats ─── */
+  const activeCycles         = cycles.filter(c => c.status === 'active').length
+  const pendingReviews       = reviews.filter(r => r.status === 'draft' || r.status === 'submitted').length
+  const completedReviews     = reviews.filter(r => r.status === 'completed' || r.status === 'acknowledged').length
+  const promotionsRecommended = reviews.filter(r => r.promotion_recommended).length
+
+  // Team reviews = reviews where current user is reviewer
+  const teamReviews = reviews.filter(r => r.reviewer?.id === sessionUserId || isAdmin)
+
+  // My reviews = reviews where I am the employee
+  const myReviews = reviews.filter(r => r.employee?.id === sessionUserId)
+
+  // Rating distribution from final/manager ratings
+  const ratedReviews = reviews.filter(r => r.final_rating ?? r.manager_rating)
+  const ratingCounts: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+  for (const r of ratedReviews) {
+    const score = r.final_rating ?? r.manager_rating ?? 0
+    if (score >= 1 && score <= 5) ratingCounts[score]++
+  }
+  const totalRated = ratedReviews.length || 1
+
+  const RATING_BANDS = [
+    { label: 'Exceptional',          score: 5, color: '#7c3aed', bg: '#f5f3ff' },
+    { label: 'Exceeds Expectations', score: 4, color: '#2563eb', bg: '#eff6ff' },
+    { label: 'Meets Expectations',   score: 3, color: '#16a34a', bg: '#f0fdf4' },
+    { label: 'Needs Improvement',    score: 2, color: '#d97706', bg: '#fffbeb' },
+    { label: 'Unsatisfactory',       score: 1, color: '#dc2626', bg: '#fef2f2' },
+  ].map(b => ({ ...b, count: ratingCounts[b.score], percentage: Math.round((ratingCounts[b.score] / totalRated) * 100) }))
+
+  // Dept average ratings
+  const deptMap: Record<string, { total: number; count: number; top: string; topScore: number }> = {}
+  for (const r of ratedReviews) {
+    const dept = r.employee?.department?.name ?? 'Unknown'
+    const score = r.final_rating ?? r.manager_rating ?? 0
+    const name = r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown'
+    if (!deptMap[dept]) deptMap[dept] = { total: 0, count: 0, top: '', topScore: 0 }
+    deptMap[dept].total += score
+    deptMap[dept].count++
+    if (score > deptMap[dept].topScore) { deptMap[dept].topScore = score; deptMap[dept].top = name }
+  }
+  const deptRatings = Object.entries(deptMap).map(([dept, v]) => ({ dept, avg: v.count ? v.total / v.count : 0, top: v.top }))
+
+  /* ─── Action handlers ─── */
+  async function handleStartCycle() {
+    if (!cycleName || !cycleFrom || !cycleTo) { toast.error('Name, period from and to are required'); return }
+    setSavingCycle(true)
+    try {
+      const res = await fetch('/api/performance/cycles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cycleName, cycle_type: CYCLE_TYPE_TO_DB[cycleType] ?? 'annual', period_from: cycleFrom, period_to: cycleTo, due_date: cycleDue || null, description: cycleDesc || null }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      toast.success('Review cycle started!')
+      setCycles(prev => [{ ...json.data }, ...prev])
+      setShowCycleModal(false)
+      setCycleName(''); setCycleFrom(''); setCycleTo(''); setCycleDue(''); setCycleDesc('')
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to start cycle') }
+    finally { setSavingCycle(false) }
+  }
+
+  async function handleCloseCycle(cycleId: string) {
+    try {
+      const res = await fetch(`/api/performance/cycles/${cycleId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'completed' }),
+      })
+      if (!res.ok) { const j = await res.json(); throw new Error(j.error) }
+      setCycles(prev => prev.map(c => c.id === cycleId ? { ...c, status: 'completed' } : c))
+      toast.success('Cycle closed')
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to close cycle') }
+  }
+
+  function openFillReview(review: ApiReview) {
+    setActiveReview(review)
+    // Pre-populate from existing data
+    const kra = review.kra_scores ?? {}
+    const ratings: Record<string, number> = {}
+    const comments: Record<string, string> = {}
+    for (const k of KRA_ROWS) {
+      if (kra[k]?.manager) ratings[k] = kra[k].manager!
+      if (kra[k]?.comment) comments[k] = kra[k].comment!
+    }
+    setKraRatings(ratings)
+    setKraComments(comments)
+    setManagerRating(review.manager_rating ?? 0)
+    setManagerComments(review.manager_comments ?? '')
+    setNextGoals(review.next_goals?.length ? [...review.next_goals, '', ''].slice(0, 3) : ['', '', ''])
+    setIncrementPct(review.increment_recommended ? String(review.increment_recommended) : '')
+    setPromote(review.promotion_recommended ?? false)
+    setShowReviewModal(true)
+  }
+
+  async function handleSubmitReview(submitStatus: 'draft' | 'submitted') {
+    if (!activeReview) return
     setSubmittingReview(true)
     try {
-      const overallScore = Object.values(kraRatings).length
-        ? Object.values(kraRatings).reduce((a, b) => a + b, 0) / Object.values(kraRatings).length
-        : null
-      await performanceApi.create({
-        review_period: selectedReview.period,
-        review_type: 'Annual',
-        rating: overallRating,
-        overall_score: overallScore,
-        comments: managerComments,
-        status: 'completed',
+      const kraScores: Record<string, { self?: number; manager?: number; comment?: string }> = {}
+      for (const k of KRA_ROWS) {
+        kraScores[k] = { manager: kraRatings[k] ?? undefined, comment: kraComments[k] || undefined }
+      }
+      const goalsArr = nextGoals.filter(Boolean).map(g => ({ name: g }))
+
+      let reviewId = activeReview.id
+      // If no existing id (shouldn't happen normally), create first
+      const payload: Record<string, unknown> = {
+        kra_scores:             kraScores,
+        manager_rating:         managerRating || null,
+        manager_comments:       managerComments || null,
+        promotion_recommended:  promote,
+        increment_recommended:  incrementPct ? parseFloat(incrementPct) : null,
+        next_goals:             nextGoals.filter(Boolean),
+        goals:                  goalsArr.length ? goalsArr : activeReview.goals,
+        status:                 submitStatus,
+      }
+
+      const res = await fetch(`/api/performance/reviews/${reviewId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       })
-      toast.success('Review submitted successfully')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+
+      toast.success(submitStatus === 'submitted' ? 'Review submitted!' : 'Draft saved!')
       setShowReviewModal(false)
-      setOverallRating(''); setManagerComments(''); setKraRatings({}); setKraComments({})
-    } catch {
-      toast.error('Failed to submit review')
-    } finally {
-      setSubmittingReview(false)
-    }
+      setReviews(prev => prev.map(r => r.id === reviewId ? { ...r, ...payload, status: submitStatus } : r))
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to save review') }
+    finally { setSubmittingReview(false) }
+  }
+
+  async function handleAddGoal() {
+    if (!goalName || !goalTarget) { toast.error('Goal name and target are required'); return }
+    // Add goal to the user's latest review, or create one if none exists
+    const myReview = myReviews[0]
+    if (!myReview) { toast.error('No active review found for your profile'); return }
+    setSavingGoal(true)
+    try {
+      const existing = myReview.goals ?? []
+      const newGoal = { name: goalName, target: goalTarget, due_date: goalDue || null, description: goalDesc || null, achieved: '', progress: 0 }
+      const res = await fetch(`/api/performance/reviews/${myReview.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goals: [...existing, newGoal] }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error)
+      toast.success('Goal added!')
+      setReviews(prev => prev.map(r => r.id === myReview.id ? { ...r, goals: json.data.goals } : r))
+      setShowGoalModal(false)
+      setGoalName(''); setGoalTarget(''); setGoalDue(''); setGoalDesc('')
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to add goal') }
+    finally { setSavingGoal(false) }
   }
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'cycles', label: 'Review Cycles' },
+    { key: 'cycles',      label: 'Review Cycles' },
     { key: 'teamreviews', label: 'My Team Reviews' },
-    { key: 'ratings', label: 'Performance Ratings' },
-    { key: 'goals', label: 'Goals & KRAs' },
+    { key: 'ratings',     label: 'Performance Ratings' },
+    { key: 'goals',       label: 'Goals & KRAs' },
   ]
+
+  /* ─── Goals from my review ─── */
+  const myGoals = myReviews.flatMap(r => r.goals ?? [])
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface-bg)' }}>
       <Topbar
         title="Performance Management"
+        subtitle="Manage review cycles, appraisals, and goals"
         actions={
-          <button
-            onClick={() => setShowCycleModal(true)}
-            style={{ background: '#E8622A', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <Plus size={15} /> Start Review Cycle
-          </button>
+          isAdmin ? (
+            <button onClick={() => setShowCycleModal(true)} style={{ background: '#E8622A', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Plus size={15} /> Start Review Cycle
+            </button>
+          ) : undefined
         }
       />
 
@@ -287,31 +403,17 @@ export default function PerformancePage() {
 
         {/* Summary Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 28 }}>
-          <SummaryCard label="Active Review Cycles" value={2} icon={RefreshCw} color={{ bg: '#eff6ff', icon: '#2563eb', border: '#bfdbfe' }} />
-          <SummaryCard label="Reviews Pending" value={34} icon={Clock} color={{ bg: '#fffbeb', icon: '#d97706', border: '#fde68a' }} />
-          <SummaryCard label="Reviews Completed" value={186} icon={CheckCircle} color={{ bg: '#f0fdf4', icon: '#16a34a', border: '#bbf7d0' }} />
-          <SummaryCard label="Promotions Recommended" value={8} icon={TrendingUp} color={{ bg: '#faf5ff', icon: '#7c3aed', border: '#e9d5ff' }} />
+          <SummaryCard label="Active Review Cycles"    value={loading ? '…' : activeCycles}          icon={RefreshCw}   color={{ bg: '#eff6ff', icon: '#2563eb', border: '#bfdbfe' }} />
+          <SummaryCard label="Reviews Pending"         value={loading ? '…' : pendingReviews}         icon={Clock}       color={{ bg: '#fffbeb', icon: '#d97706', border: '#fde68a' }} />
+          <SummaryCard label="Reviews Completed"       value={loading ? '…' : completedReviews}       icon={CheckCircle} color={{ bg: '#f0fdf4', icon: '#16a34a', border: '#bbf7d0' }} />
+          <SummaryCard label="Promotions Recommended"  value={loading ? '…' : promotionsRecommended}  icon={TrendingUp}  color={{ bg: '#faf5ff', icon: '#7c3aed', border: '#e9d5ff' }} />
         </div>
 
         {/* Tabs */}
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
           <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb' }}>
             {TABS.map(t => (
-              <button
-                key={t.key}
-                onClick={() => setActiveTab(t.key)}
-                style={{
-                  padding: '14px 24px',
-                  fontSize: '0.875rem',
-                  fontWeight: 600,
-                  color: activeTab === t.key ? '#E8622A' : '#6b7280',
-                  borderBottom: activeTab === t.key ? '2px solid #E8622A' : '2px solid transparent',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
+              <button key={t.key} onClick={() => setActiveTab(t.key)} style={{ padding: '14px 24px', fontSize: '0.875rem', fontWeight: 600, color: activeTab === t.key ? '#E8622A' : '#6b7280', borderTop: 'none', borderLeft: 'none', borderRight: 'none', borderBottom: `2px solid ${activeTab === t.key ? '#E8622A' : 'transparent'}`, background: 'none', cursor: 'pointer' }}>
                 {t.label}
               </button>
             ))}
@@ -322,43 +424,59 @@ export default function PerformancePage() {
             {/* ── TAB 1: Review Cycles ── */}
             {activeTab === 'cycles' && (
               <div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f9fafb' }}>
-                        {['Cycle Name', 'Period', 'Type', 'Status', 'Participants', 'Completion %', 'Due Date', 'Actions'].map(h => (
-                          <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {REVIEW_CYCLES.map((cycle, i) => (
-                        <tr key={cycle.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{cycle.name}</td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280' }}>{cycle.period}</td>
-                          <td style={{ padding: '12px 14px', color: '#374151' }}>{cycle.type}</td>
-                          <td style={{ padding: '12px 14px' }}><StatusBadge status={cycle.status} /></td>
-                          <td style={{ padding: '12px 14px', color: '#374151', textAlign: 'center' }}>{cycle.participants}</td>
-                          <td style={{ padding: '12px 14px', minWidth: 120 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <ProgressBar value={cycle.completion} color={cycle.completion === 100 ? '#16a34a' : '#2563eb'} />
-                              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{cycle.completion}%</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{cycle.dueDate}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}>View</button>
-                              {cycle.status === 'In Progress' && (
-                                <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>Close</button>
-                              )}
-                            </div>
-                          </td>
+                {loading ? (
+                  <p style={{ color: '#6b7280', padding: 24, textAlign: 'center' }}>Loading cycles…</p>
+                ) : cycles.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px' }}>
+                    <RefreshCw size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
+                    <p style={{ color: '#6b7280', fontWeight: 500 }}>No review cycles yet.</p>
+                    {isAdmin && <button onClick={() => setShowCycleModal(true)} style={{ ...BTN_PRIMARY, marginTop: 16 }}>Start First Cycle</button>}
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          {['Cycle Name', 'Period', 'Type', 'Status', 'Participants', 'Completion %', 'Due Date', 'Actions'].map(h => (
+                            <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {cycles.map((cycle, i) => (
+                          <tr key={cycle.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                            <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{cycle.name}</td>
+                            <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtPeriod(cycle.period_from, cycle.period_to)}</td>
+                            <td style={{ padding: '12px 14px', color: '#374151' }}>{CYCLE_TYPE_MAP[cycle.cycle_type] ?? cycle.cycle_type}</td>
+                            <td style={{ padding: '12px 14px' }}><StatusBadge status={cycle.status} /></td>
+                            <td style={{ padding: '12px 14px', color: '#374151', textAlign: 'center' }}>{cycle.participants}</td>
+                            <td style={{ padding: '12px 14px', minWidth: 130 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <ProgressBar value={cycle.completion} color={cycle.completion === 100 ? '#16a34a' : '#2563eb'} />
+                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{cycle.completion}%</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDate(cycle.due_date)}</td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                {cycle.status === 'active' && isAdmin && (
+                                  <button
+                                    onClick={() => handleCloseCycle(cycle.id)}
+                                    style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}
+                                  >Close</button>
+                                )}
+                                <button
+                                  onClick={() => { setActiveTab('teamreviews') }}
+                                  style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
+                                >View</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
@@ -366,128 +484,140 @@ export default function PerformancePage() {
             {activeTab === 'teamreviews' && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Showing appraisal status for your direct reports — Annual Appraisal 2025-26</p>
+                  <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                    {isAdmin ? `All reviews — ${reviews.length} total` : `Your direct reports — ${teamReviews.length} reviews`}
+                  </p>
                 </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f9fafb' }}>
-                        {['Employee', 'Department', 'Review Period', 'Self Assessment', 'Manager Review', 'Rating', 'Status', 'Actions'].map(h => (
-                          <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teamReviews.map((r, i) => (
-                        <tr key={r.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{r.employee}</td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280' }}>{r.department}</td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280', fontSize: '0.8rem' }}>{r.period}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{ fontSize: '0.78rem', fontWeight: 500, color: r.selfAssessment === 'Submitted' ? '#16a34a' : '#d97706' }}>{r.selfAssessment}</span>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{ fontSize: '0.78rem', fontWeight: 500, color: r.managerReview === 'Submitted' ? '#16a34a' : '#d97706' }}>{r.managerReview}</span>
-                          </td>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#374151', fontSize: '0.8rem' }}>{r.rating}</td>
-                          <td style={{ padding: '12px 14px' }}><StatusBadge status={r.status} /></td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              {(r.status === 'Draft' || r.status === 'Submitted') ? (
-                                <button
-                                  onClick={() => { setSelectedReview(r); setShowReviewModal(true) }}
-                                  style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#E8622A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
-                                >Fill Review</button>
-                              ) : (
-                                <button
-                                  onClick={() => { setSelectedReview(r); setShowReviewModal(true) }}
-                                  style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
-                                >View</button>
-                              )}
-                            </div>
-                          </td>
+                {loading ? <p style={{ color: '#6b7280', textAlign: 'center', padding: 32 }}>Loading…</p>
+                : teamReviews.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
+                    <p style={{ fontWeight: 500 }}>No team reviews found.</p>
+                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Reviews will appear here once they are assigned to you as a reviewer.</p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          {['Employee', 'Department', 'Review Period', 'Self Rating', 'Manager Rating', 'Status', 'Actions'].map(h => (
+                            <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {teamReviews.map((r, i) => (
+                          <tr key={r.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                            <td style={{ padding: '12px 14px' }}>
+                              <p style={{ fontWeight: 600, color: '#111827', margin: 0 }}>{r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : '—'}</p>
+                              <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: '2px 0 0' }}>{r.employee?.emp_id ?? ''}</p>
+                            </td>
+                            <td style={{ padding: '12px 14px', color: '#6b7280' }}>{r.employee?.department?.name ?? '—'}</td>
+                            <td style={{ padding: '12px 14px', color: '#6b7280', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{fmtPeriod(r.review_period_from, r.review_period_to)}</td>
+                            <td style={{ padding: '12px 14px' }}>
+                              {r.self_rating ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  {[1,2,3,4,5].map(s => <Star key={s} size={11} fill={s <= r.self_rating! ? '#f59e0b' : 'none'} color={s <= r.self_rating! ? '#f59e0b' : '#d1d5db'} />)}
+                                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginLeft: 4 }}>{r.self_rating}</span>
+                                </div>
+                              ) : <span style={{ color: '#d97706', fontSize: '0.8rem', fontWeight: 500 }}>Pending</span>}
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              {r.manager_rating ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  {[1,2,3,4,5].map(s => <Star key={s} size={11} fill={s <= r.manager_rating! ? '#E8622A' : 'none'} color={s <= r.manager_rating! ? '#E8622A' : '#d1d5db'} />)}
+                                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginLeft: 4 }}>{r.manager_rating}</span>
+                                </div>
+                              ) : <span style={{ color: '#d97706', fontSize: '0.8rem', fontWeight: 500 }}>Pending</span>}
+                            </td>
+                            <td style={{ padding: '12px 14px' }}><StatusBadge status={r.status} /></td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <button
+                                onClick={() => openFillReview(r)}
+                                style={{
+                                  fontSize: '0.78rem', padding: '5px 12px', borderRadius: 6, fontWeight: 600, cursor: 'pointer',
+                                  ...(r.status === 'draft' || r.status === 'submitted'
+                                    ? { background: '#E8622A', color: '#fff', border: 'none' }
+                                    : { background: '#fff', color: '#374151', border: '1px solid #e5e7eb' })
+                                }}
+                              >{r.status === 'draft' || r.status === 'submitted' ? 'Fill Review' : 'View'}</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
             {/* ── TAB 3: Performance Ratings ── */}
             {activeTab === 'ratings' && (
               <div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
-                  {/* Rating Distribution */}
-                  <div>
-                    <h3 style={{ fontWeight: 700, color: '#111827', marginBottom: 18, fontSize: '1rem' }}>Company-wide Rating Distribution</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      {RATING_BANDS.map(band => (
-                        <div key={band.score}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>
-                              {band.label} ({band.score})
-                            </span>
-                            <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{band.count} employees — {band.percentage}%</span>
-                          </div>
-                          <div style={{ width: '100%', height: 28, background: '#f3f4f6', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
-                            <div
-                              style={{
-                                width: `${band.percentage}%`,
-                                height: '100%',
-                                background: band.color,
-                                borderRadius: 6,
-                                display: 'flex',
-                                alignItems: 'center',
-                                paddingLeft: 10,
-                                transition: 'width 0.5s ease',
-                              }}
-                            >
-                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{band.percentage}%</span>
+                {ratedReviews.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
+                    <p style={{ fontWeight: 500 }}>No rated reviews yet.</p>
+                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Ratings will appear here once manager reviews are submitted.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
+                    {/* Rating Distribution */}
+                    <div>
+                      <h3 style={{ fontWeight: 700, color: '#111827', marginBottom: 18, fontSize: '1rem' }}>Company-wide Rating Distribution</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {RATING_BANDS.map(band => (
+                          <div key={band.score}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>{band.label} ({band.score})</span>
+                              <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{band.count} employees — {band.percentage}%</span>
+                            </div>
+                            <div style={{ width: '100%', height: 28, background: '#f3f4f6', borderRadius: 6, overflow: 'hidden' }}>
+                              <div style={{ width: `${band.percentage}%`, height: '100%', background: band.color, borderRadius: 6, display: 'flex', alignItems: 'center', paddingLeft: 10, minWidth: band.count > 0 ? 40 : 0 }}>
+                                {band.count > 0 && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{band.percentage}%</span>}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: 20, padding: 14, background: '#f0fdf4', borderRadius: 10, border: '1px solid #bbf7d0' }}>
-                      <p style={{ fontSize: '0.8rem', color: '#15803d', fontWeight: 500 }}>
-                        <strong>Bell Curve Insight:</strong> 57.3% of employees meet expectations — indicating a healthy, normally distributed performance spread. Only 3.2% are rated Unsatisfactory, suggesting strong talent quality across the organisation.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Department-wise ratings */}
-                  <div>
-                    <h3 style={{ fontWeight: 700, color: '#111827', marginBottom: 18, fontSize: '1rem' }}>Department-wise Average Ratings</h3>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                      <thead>
-                        <tr style={{ background: '#f9fafb' }}>
-                          {['Department', 'Avg Rating', 'Top Performer'].map(h => (
-                            <th key={h} style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {DEPT_RATINGS.map((d, i) => (
-                          <tr key={d.dept} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                            <td style={{ padding: '11px 14px', fontWeight: 600, color: '#374151' }}>{d.dept}</td>
-                            <td style={{ padding: '11px 14px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <div style={{ display: 'flex', gap: 2 }}>
-                                  {[1,2,3,4,5].map(s => (
-                                    <Star key={s} size={12} fill={s <= Math.round(d.avg) ? '#f59e0b' : 'none'} color={s <= Math.round(d.avg) ? '#f59e0b' : '#d1d5db'} />
-                                  ))}
-                                </div>
-                                <span style={{ fontWeight: 700, color: '#374151' }}>{d.avg.toFixed(1)}</span>
-                              </div>
-                            </td>
-                            <td style={{ padding: '11px 14px', color: '#6b7280' }}>{d.topPerformer}</td>
-                          </tr>
                         ))}
-                      </tbody>
-                    </table>
+                      </div>
+                      <div style={{ marginTop: 20, padding: 14, background: '#f0fdf4', borderRadius: 10, border: '1px solid #bbf7d0' }}>
+                        <p style={{ fontSize: '0.8rem', color: '#15803d', fontWeight: 500 }}>
+                          <strong>Summary:</strong> {ratedReviews.length} reviews rated out of {reviews.length} total. Average rating: {ratedReviews.length ? (ratedReviews.reduce((a, r) => a + (r.final_rating ?? r.manager_rating ?? 0), 0) / ratedReviews.length).toFixed(1) : '—'}.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Department ratings */}
+                    <div>
+                      <h3 style={{ fontWeight: 700, color: '#111827', marginBottom: 18, fontSize: '1rem' }}>Department-wise Average Ratings</h3>
+                      {deptRatings.length === 0 ? (
+                        <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>No department data yet.</p>
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                          <thead>
+                            <tr style={{ background: '#f9fafb' }}>
+                              {['Department', 'Avg Rating', 'Top Performer'].map(h => (
+                                <th key={h} style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {deptRatings.map((d, i) => (
+                              <tr key={d.dept} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                <td style={{ padding: '11px 14px', fontWeight: 600, color: '#374151' }}>{d.dept}</td>
+                                <td style={{ padding: '11px 14px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    {[1,2,3,4,5].map(s => <Star key={s} size={12} fill={s <= Math.round(d.avg) ? '#f59e0b' : 'none'} color={s <= Math.round(d.avg) ? '#f59e0b' : '#d1d5db'} />)}
+                                    <span style={{ fontWeight: 700, color: '#374151' }}>{d.avg.toFixed(1)}</span>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '11px 14px', color: '#6b7280' }}>{d.top || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
@@ -495,53 +625,49 @@ export default function PerformancePage() {
             {activeTab === 'goals' && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Your goals for Annual Appraisal 2025-26</p>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <button
-                      onClick={() => setShowGoalModal(true)}
-                      style={{ fontSize: '0.875rem', padding: '8px 16px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
-                    >
-                      <Plus size={14} /> Add New Goal
-                    </button>
-                    <button style={{ fontSize: '0.875rem', padding: '8px 16px', borderRadius: 8, border: 'none', background: '#E8622A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
-                      Request Review
-                    </button>
+                  <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Your goals linked to active performance reviews</p>
+                  <button onClick={() => setShowGoalModal(true)} style={{ ...BTN_OUTLINE, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem' }}>
+                    <Plus size={14} /> Add New Goal
+                  </button>
+                </div>
+                {myGoals.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
+                    <p style={{ fontWeight: 500 }}>No goals yet.</p>
+                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Add goals to your active performance review.</p>
+                    <button onClick={() => setShowGoalModal(true)} style={{ ...BTN_PRIMARY, marginTop: 16 }}>Add First Goal</button>
                   </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-                  {GOALS.map(goal => {
-                    const barColor =
-                      goal.status === 'Completed' ? '#2563eb' :
-                      goal.status === 'On Track' ? '#16a34a' :
-                      goal.status === 'In Progress' ? '#d97706' :
-                      goal.status === 'At Risk' ? '#dc2626' : '#9ca3af'
-                    return (
-                      <div key={goal.id} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                          <h4 style={{ fontWeight: 700, color: '#111827', fontSize: '0.9rem' }}>{goal.name}</h4>
-                          <GoalStatusBadge status={goal.status} />
-                        </div>
-                        <div style={{ marginBottom: 10 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                            <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>Progress</span>
-                            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: barColor }}>{goal.progress}%</span>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 18 }}>
+                    {myGoals.map((goal, idx) => {
+                      const progress = goal.progress ?? 0
+                      const barColor = progress >= 100 ? '#2563eb' : progress >= 70 ? '#16a34a' : progress >= 40 ? '#d97706' : '#dc2626'
+                      return (
+                        <div key={idx} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 20 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                            <h4 style={{ fontWeight: 700, color: '#111827', fontSize: '0.9rem', margin: 0 }}>{goal.name}</h4>
                           </div>
-                          <ProgressBar value={goal.progress} color={barColor} />
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
-                          <div style={{ background: '#f9fafb', borderRadius: 8, padding: '8px 12px' }}>
-                            <p style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 500, marginBottom: 2 }}>Target</p>
-                            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>{goal.target}</p>
+                          <div style={{ marginBottom: 10 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                              <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>Progress</span>
+                              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: barColor }}>{progress}%</span>
+                            </div>
+                            <ProgressBar value={progress} color={barColor} />
                           </div>
-                          <div style={{ background: '#f9fafb', borderRadius: 8, padding: '8px 12px' }}>
-                            <p style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 500, marginBottom: 2 }}>Achieved</p>
-                            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>{goal.achieved}</p>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+                            <div style={{ background: '#f9fafb', borderRadius: 8, padding: '8px 12px' }}>
+                              <p style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 500, marginBottom: 2 }}>Target</p>
+                              <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>{goal.target}</p>
+                            </div>
+                            <div style={{ background: '#f9fafb', borderRadius: 8, padding: '8px 12px' }}>
+                              <p style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 500, marginBottom: 2 }}>Achieved</p>
+                              <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>{goal.achieved || '—'}</p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -553,89 +679,95 @@ export default function PerformancePage() {
       {showCycleModal && (
         <ModalOverlay onClose={() => setShowCycleModal(false)}>
           <div style={{ width: 520 }}>
-            <ModalHeader title="Start New Review Cycle" onClose={() => setShowCycleModal(false)} />
-            <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <FormField label="Cycle Name">
-                <input value={cycleName} onChange={e => setCycleName(e.target.value)} placeholder="e.g. Annual Appraisal 2026-27" style={inputStyle} />
+            <ModalHeader title="Start New Review Cycle" sub="Create a new performance appraisal cycle for your organisation" onClose={() => setShowCycleModal(false)} />
+            <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', maxHeight: '70vh' }}>
+              <FormField label="Cycle Name *">
+                <input value={cycleName} onChange={e => setCycleName(e.target.value)} placeholder="e.g. Annual Appraisal 2026-27" style={INP} />
               </FormField>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                <FormField label="Period Start">
-                  <input type="date" value={cycleStart} onChange={e => setCycleStart(e.target.value)} style={inputStyle} />
+                <FormField label="Period From *">
+                  <input type="date" value={cycleFrom} onChange={e => setCycleFrom(e.target.value)} style={INP} />
                 </FormField>
-                <FormField label="Period End">
-                  <input type="date" value={cycleEnd} onChange={e => setCycleEnd(e.target.value)} style={inputStyle} />
+                <FormField label="Period To *">
+                  <input type="date" value={cycleTo} onChange={e => setCycleTo(e.target.value)} style={INP} />
                 </FormField>
               </div>
-              <FormField label="Review Type">
-                <select value={cycleType} onChange={e => setCycleType(e.target.value)} style={inputStyle}>
-                  <option>Annual</option>
-                  <option>Mid-Year</option>
-                  <option>Probation</option>
-                  <option>Quarterly</option>
-                </select>
-              </FormField>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <FormField label="Review Type *">
+                  <select value={cycleType} onChange={e => setCycleType(e.target.value)} style={INP}>
+                    <option>Annual</option>
+                    <option>Mid-Year</option>
+                    <option>Quarterly</option>
+                    <option>Probation</option>
+                    <option>PIP</option>
+                  </select>
+                </FormField>
+                <FormField label="Due Date">
+                  <input type="date" value={cycleDue} onChange={e => setCycleDue(e.target.value)} style={INP} />
+                </FormField>
+              </div>
               <FormField label="Description">
-                <textarea value={cycleDesc} onChange={e => setCycleDesc(e.target.value)} rows={3} placeholder="Brief description of this review cycle..." style={{ ...inputStyle, resize: 'vertical' }} />
+                <textarea value={cycleDesc} onChange={e => setCycleDesc(e.target.value)} rows={3} placeholder="Brief description of this review cycle…" style={{ ...INP, resize: 'vertical' }} />
               </FormField>
             </div>
             <ModalFooter>
-              <button onClick={() => setShowCycleModal(false)} style={btnOutline}>Cancel</button>
-              <button onClick={() => setShowCycleModal(false)} style={btnPrimary}>Save Cycle</button>
+              <button onClick={() => setShowCycleModal(false)} style={BTN_OUTLINE}>Cancel</button>
+              <button onClick={handleStartCycle} disabled={savingCycle} style={{ ...BTN_PRIMARY, opacity: savingCycle ? 0.7 : 1 }}>{savingCycle ? 'Creating…' : 'Start Cycle'}</button>
             </ModalFooter>
           </div>
         </ModalOverlay>
       )}
 
       {/* ── Modal: Fill Review ── */}
-      {showReviewModal && selectedReview && (
+      {showReviewModal && activeReview && (
         <ModalOverlay onClose={() => setShowReviewModal(false)}>
-          <div style={{ width: 700, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <ModalHeader title={`Performance Review — ${selectedReview.employee}`} onClose={() => setShowReviewModal(false)} />
+          <div style={{ width: 720, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <ModalHeader
+              title={`Performance Review — ${activeReview.employee ? `${activeReview.employee.first_name} ${activeReview.employee.last_name}` : 'Employee'}`}
+              sub={`${activeReview.employee?.department?.name ?? ''} · ${fmtPeriod(activeReview.review_period_from, activeReview.review_period_to)}`}
+              onClose={() => setShowReviewModal(false)}
+            />
             <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1 }}>
-              {/* Employee info */}
-              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: '14px 18px', marginBottom: 22, display: 'flex', gap: 20 }}>
+
+              {/* Employee info banner */}
+              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: '14px 18px', marginBottom: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
-                  <p style={{ fontWeight: 700, color: '#0c4a6e' }}>{selectedReview.employee}</p>
-                  <p style={{ fontSize: '0.8rem', color: '#0369a1' }}>{selectedReview.department} · {selectedReview.period}</p>
+                  <p style={{ fontWeight: 700, color: '#0c4a6e', margin: 0 }}>
+                    {activeReview.employee ? `${activeReview.employee.first_name} ${activeReview.employee.last_name}` : '—'}
+                  </p>
+                  <p style={{ fontSize: '0.8rem', color: '#0369a1', margin: '2px 0 0' }}>
+                    {activeReview.employee?.designation?.title ?? ''} · {activeReview.employee?.emp_id ?? ''}
+                  </p>
                 </div>
-                <div style={{ marginLeft: 'auto' }}>
-                  <StatusBadge status={selectedReview.status} />
-                </div>
+                <StatusBadge status={activeReview.status} />
               </div>
 
-              {/* KRA Section */}
-              <h4 style={{ fontWeight: 700, color: '#111827', marginBottom: 12, fontSize: '0.95rem' }}>KRA Ratings</h4>
+              {/* KRA Ratings */}
+              <h4 style={{ fontWeight: 700, color: '#111827', marginBottom: 12, fontSize: '0.95rem' }}>KRA Ratings (Manager Assessment)</h4>
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', marginBottom: 20 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                   <thead>
                     <tr style={{ background: '#f9fafb' }}>
                       <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem' }}>KRA</th>
-                      <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600, color: '#374151', fontSize: '0.8rem', width: 160 }}>Rating (1-5)</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600, color: '#374151', fontSize: '0.8rem', width: 170 }}>Rating (1–5)</th>
                       <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem' }}>Comments</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {KRA_ROWS.map((kra, i) => (
+                    {KRA_ROWS.map(kra => (
                       <tr key={kra} style={{ borderTop: '1px solid #f3f4f6' }}>
                         <td style={{ padding: '10px 14px', fontWeight: 500, color: '#374151' }}>{kra}</td>
-                        <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                        <td style={{ padding: '10px 14px' }}>
                           <div style={{ display: 'flex', justifyContent: 'center', gap: 4 }}>
                             {[1,2,3,4,5].map(n => (
-                              <button
-                                key={n}
-                                onClick={() => setKraRatings(prev => ({ ...prev, [kra]: n }))}
-                                style={{ width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem', background: kraRatings[kra] === n ? '#E8622A' : '#f3f4f6', color: kraRatings[kra] === n ? '#fff' : '#6b7280', transition: 'all 0.1s' }}
+                              <button key={n} onClick={() => setKraRatings(p => ({ ...p, [kra]: n }))}
+                                style={{ width: 30, height: 30, borderRadius: 6, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem', background: kraRatings[kra] === n ? '#E8622A' : '#f3f4f6', color: kraRatings[kra] === n ? '#fff' : '#6b7280' }}
                               >{n}</button>
                             ))}
                           </div>
                         </td>
                         <td style={{ padding: '8px 14px' }}>
-                          <input
-                            placeholder="Comment..."
-                            value={kraComments[kra] || ''}
-                            onChange={e => setKraComments(prev => ({ ...prev, [kra]: e.target.value }))}
-                            style={{ ...inputStyle, padding: '6px 10px', fontSize: '0.8rem' }}
-                          />
+                          <input placeholder="Comment…" value={kraComments[kra] || ''} onChange={e => setKraComments(p => ({ ...p, [kra]: e.target.value }))} style={{ ...INP, padding: '6px 10px', fontSize: '0.8rem' }} />
                         </td>
                       </tr>
                     ))}
@@ -643,163 +775,77 @@ export default function PerformancePage() {
                 </table>
               </div>
 
-              {/* Overall Rating */}
+              {/* Overall + Increment */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                <FormField label="Overall Rating">
-                  <select value={overallRating} onChange={e => setOverallRating(e.target.value)} style={inputStyle}>
-                    <option value="">Select Rating</option>
-                    <option>Exceptional</option>
-                    <option>Exceeds Expectations</option>
-                    <option>Meets Expectations</option>
-                    <option>Needs Improvement</option>
-                    <option>Unsatisfactory</option>
-                  </select>
+                <FormField label="Overall Manager Rating (1–5)">
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[1,2,3,4,5].map(n => (
+                      <button key={n} onClick={() => setManagerRating(n)}
+                        style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', background: managerRating === n ? '#E8622A' : '#f3f4f6', color: managerRating === n ? '#fff' : '#6b7280' }}
+                      >{n}</button>
+                    ))}
+                  </div>
+                  {managerRating > 0 && <p style={{ fontSize: '0.75rem', color: '#E8622A', marginTop: 4, fontWeight: 600 }}>{ratingLabel(managerRating)}</p>}
                 </FormField>
                 <FormField label="Increment % Recommendation">
-                  <input type="number" value={incrementPct} onChange={e => setIncrementPct(e.target.value)} placeholder="e.g. 12" style={inputStyle} />
+                  <input type="number" value={incrementPct} onChange={e => setIncrementPct(e.target.value)} placeholder="e.g. 12" style={INP} />
                 </FormField>
               </div>
 
-              <FormField label="Manager Comments">
-                <textarea value={managerComments} onChange={e => setManagerComments(e.target.value)} rows={3} placeholder="Overall performance summary, key strengths, areas of improvement..." style={{ ...inputStyle, resize: 'vertical' }} />
-              </FormField>
+              <div style={{ marginBottom: 16 }}>
+                <FormField label="Manager Comments">
+                  <textarea value={managerComments} onChange={e => setManagerComments(e.target.value)} rows={3} placeholder="Overall performance summary, strengths, areas of improvement…" style={{ ...INP, resize: 'vertical' }} />
+                </FormField>
+              </div>
 
               <h4 style={{ fontWeight: 700, color: '#111827', margin: '18px 0 10px', fontSize: '0.95rem' }}>Goals for Next Period</h4>
               {nextGoals.map((g, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
-                  <input
-                    value={g}
-                    onChange={e => setNextGoals(prev => prev.map((p, j) => j === i ? e.target.value : p))}
-                    placeholder={`Goal ${i + 1}`}
-                    style={inputStyle}
-                  />
+                  <input value={g} onChange={e => setNextGoals(p => p.map((v, j) => j === i ? e.target.value : v))} placeholder={`Goal ${i + 1}`} style={INP} />
                 </div>
               ))}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-                <input type="checkbox" id="promote" checked={promote} onChange={e => setPromote(e.target.checked)} style={{ width: 16, height: 16, cursor: 'pointer' }} />
-                <label htmlFor="promote" style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151', cursor: 'pointer' }}>Recommend for Promotion</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16, padding: '12px 14px', background: '#faf5ff', borderRadius: 8, border: '1px solid #e9d5ff' }}>
+                <input type="checkbox" id="promote" checked={promote} onChange={e => setPromote(e.target.checked)} style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#7c3aed' }} />
+                <label htmlFor="promote" style={{ fontSize: '0.875rem', fontWeight: 600, color: '#6d28d9', cursor: 'pointer' }}>Recommend for Promotion</label>
               </div>
             </div>
+
             <ModalFooter>
-              <button onClick={() => setShowReviewModal(false)} style={btnOutline}>Cancel</button>
-              <button style={{ ...btnOutline, borderColor: '#d97706', color: '#d97706' }}>Save as Draft</button>
-              <button onClick={handleSubmitReview} disabled={submittingReview} style={btnPrimary}>{submittingReview ? 'Submitting…' : 'Submit Review'}</button>
+              <button onClick={() => setShowReviewModal(false)} style={BTN_OUTLINE}>Cancel</button>
+              <button onClick={() => handleSubmitReview('draft')} disabled={submittingReview} style={{ ...BTN_OUTLINE, borderColor: '#d97706', color: '#d97706', opacity: submittingReview ? 0.7 : 1 }}>Save as Draft</button>
+              <button onClick={() => handleSubmitReview('submitted')} disabled={submittingReview} style={{ ...BTN_PRIMARY, opacity: submittingReview ? 0.7 : 1 }}>{submittingReview ? 'Saving…' : 'Submit Review'}</button>
             </ModalFooter>
           </div>
         </ModalOverlay>
       )}
 
-      {/* ── Modal: Add New Goal ── */}
+      {/* ── Modal: Add Goal ── */}
       {showGoalModal && (
         <ModalOverlay onClose={() => setShowGoalModal(false)}>
           <div style={{ width: 480 }}>
-            <ModalHeader title="Add New Goal / KRA" onClose={() => setShowGoalModal(false)} />
+            <ModalHeader title="Add New Goal / KRA" sub="Goal will be linked to your active performance review" onClose={() => setShowGoalModal(false)} />
             <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <FormField label="KRA / Goal Name">
-                <input placeholder="e.g. Revenue Target" style={inputStyle} />
+              <FormField label="Goal / KRA Name *">
+                <input value={goalName} onChange={e => setGoalName(e.target.value)} placeholder="e.g. Revenue Target" style={INP} />
               </FormField>
-              <FormField label="Target">
-                <input placeholder="e.g. ₹50L or 4.5/5" style={inputStyle} />
-              </FormField>
-              <FormField label="Weightage (%)">
-                <input type="number" placeholder="e.g. 20" style={inputStyle} />
+              <FormField label="Target *">
+                <input value={goalTarget} onChange={e => setGoalTarget(e.target.value)} placeholder="e.g. ₹50L or 4.5/5" style={INP} />
               </FormField>
               <FormField label="Due Date">
-                <input type="date" style={inputStyle} />
+                <input type="date" value={goalDue} onChange={e => setGoalDue(e.target.value)} style={INP} />
               </FormField>
               <FormField label="Description">
-                <textarea rows={2} placeholder="Brief description of this goal..." style={{ ...inputStyle, resize: 'vertical' }} />
+                <textarea rows={2} value={goalDesc} onChange={e => setGoalDesc(e.target.value)} placeholder="Brief description of this goal…" style={{ ...INP, resize: 'vertical' }} />
               </FormField>
             </div>
             <ModalFooter>
-              <button onClick={() => setShowGoalModal(false)} style={btnOutline}>Cancel</button>
-              <button onClick={() => setShowGoalModal(false)} style={btnPrimary}>Add Goal</button>
+              <button onClick={() => setShowGoalModal(false)} style={BTN_OUTLINE}>Cancel</button>
+              <button onClick={handleAddGoal} disabled={savingGoal} style={{ ...BTN_PRIMARY, opacity: savingGoal ? 0.7 : 1 }}>{savingGoal ? 'Adding…' : 'Add Goal'}</button>
             </ModalFooter>
           </div>
         </ModalOverlay>
       )}
     </div>
   )
-}
-
-/* ─────────────────────────────────────────────────────────────
-   SHARED MODAL COMPONENTS
-───────────────────────────────────────────────────────────── */
-function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div
-      onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-    >
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
-  return (
-    <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-      <h2 style={{ fontWeight: 700, color: '#111827', fontSize: '1.05rem' }}>{title}</h2>
-      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <X size={18} />
-      </button>
-    </div>
-  )
-}
-
-function ModalFooter({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ padding: '16px 28px', borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
-      {children}
-    </div>
-  )
-}
-
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
-      {children}
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────
-   SHARED STYLES
-───────────────────────────────────────────────────────────── */
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '9px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 8,
-  fontSize: '0.875rem',
-  color: '#111827',
-  background: '#fff',
-  outline: 'none',
-  boxSizing: 'border-box',
-}
-
-const btnPrimary: React.CSSProperties = {
-  background: '#E8622A',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 8,
-  padding: '9px 20px',
-  fontWeight: 600,
-  fontSize: '0.875rem',
-  cursor: 'pointer',
-}
-
-const btnOutline: React.CSSProperties = {
-  background: '#fff',
-  color: '#374151',
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: '9px 20px',
-  fontWeight: 600,
-  fontSize: '0.875rem',
-  cursor: 'pointer',
 }

@@ -1,169 +1,96 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 import { Topbar } from '@/components/layout/Topbar'
-import { warningsApi, employeesApi, type WarningLetter, type Employee as ApiEmployee } from '@/lib/api-client'
 import toast from 'react-hot-toast'
 import {
-  AlertTriangle,
-  Award,
-  UserX,
-  Target,
-  X,
-  Plus,
-  Eye,
-  Edit2,
-  ToggleLeft,
-  CheckCircle,
-  Info,
-  Zap,
-  Shield,
-  Clock,
+  AlertTriangle, Award, UserX, X, Plus, Shield, Zap, Clock, CheckCircle,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
    TYPES
 ───────────────────────────────────────────────────────────── */
 type WarnTab = 'warnings' | 'appreciation' | 'termination' | 'rules'
-type WarningLevel = 'Verbal' | '1st Written' | '2nd Written' | 'Final'
-type WarnStatus = 'Draft' | 'Issued' | 'Acknowledged'
-type ApprecCategory = 'Excellence' | 'Teamwork' | 'Innovation' | 'Customer' | 'Leadership'
-type TermStatus = 'Draft' | 'Under Review' | 'Approved' | 'Executed'
 
-interface WarningEntry {
-  id: number
-  employee: string
-  department: string
-  level: WarningLevel
-  date: string
+interface ApiWarning {
+  id: string
   subject: string
-  status: WarnStatus
-  prevWarnings: number
+  issued_date: string
+  description: string | null
+  status: string
+  acknowledged_at: string | null
+  employee_remarks: string | null
+  [key: string]: unknown   // allow extra columns returned by SELECT *
+  employee: {
+    id: string; first_name: string; last_name: string; emp_id: string
+    department: { id: string; name: string } | null
+    designation: { id: string; title: string } | null
+  } | null
+  issued_by: { id: string; first_name: string; last_name: string; emp_id: string } | null
+  created_at: string
+  updated_at: string
 }
 
-interface ApprecEntry {
-  id: number
-  employee: string
-  department: string
-  category: ApprecCategory
-  date: string
+interface ApiEmployee {
+  id: string; first_name: string; last_name: string; emp_id: string
+  department: { id: string; name: string } | null
+}
+
+interface ApiAppreciation {
+  id: string
+  category: string
   subject: string
-  isPublic: boolean
-  givenBy: string
-}
-
-interface TermCase {
-  id: number
-  employee: string
-  department: string
-  reason: string
-  trigger: 'Auto' | 'Manual'
-  warningCount: number
-  status: TermStatus
-  createdDate: string
-}
-
-interface AutoRule {
-  id: number
-  name: string
-  condition: string
-  action: string
-  active: boolean
-  lastTriggered: string
+  description: string | null
+  is_public: boolean
+  created_at: string
+  employee: { id: string; first_name: string; last_name: string; emp_id: string; department: { name: string } | null } | null
+  given_by:  { id: string; first_name: string; last_name: string; emp_id: string } | null
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MOCK DATA
+   STATIC DATA (Rules only — no DB table)
 ───────────────────────────────────────────────────────────── */
-const WARNINGS: WarningEntry[] = [
-  { id: 1, employee: 'Karan Desai', department: 'Engineering', level: 'Final', date: 'Mar 10, 2026', subject: 'Repeated Absenteeism & Insubordination', status: 'Issued', prevWarnings: 2 },
-  { id: 2, employee: 'Meena Joshi', department: 'Sales', level: '2nd Written', date: 'Feb 22, 2026', subject: 'Target Miss Q3 — Second Occurrence', status: 'Acknowledged', prevWarnings: 1 },
-  { id: 3, employee: 'Suresh Reddy', department: 'Customer Support', level: '1st Written', date: 'Feb 10, 2026', subject: 'Poor Customer Handling — Recorded Call', status: 'Issued', prevWarnings: 0 },
-  { id: 4, employee: 'Pooja Iyer', department: 'Finance', level: 'Verbal', date: 'Jan 28, 2026', subject: 'Late Submission of Financial Reports', status: 'Draft', prevWarnings: 0 },
-  { id: 5, employee: 'Aditya Rao', department: 'Operations', level: '1st Written', date: 'Jan 15, 2026', subject: 'Violation of Safety Protocol', status: 'Issued', prevWarnings: 0 },
-  { id: 6, employee: 'Lakshmi Nair', department: 'HR', level: 'Verbal', date: 'Jan 5, 2026', subject: 'Confidentiality Breach (Minor)', status: 'Acknowledged', prevWarnings: 0 },
-  { id: 7, employee: 'Rahul Sharma', department: 'Engineering', level: '1st Written', date: 'Dec 20, 2025', subject: 'Code Commit Without Review — Production Incident', status: 'Issued', prevWarnings: 0 },
-  { id: 8, employee: 'Farhan Khan', department: 'Sales', level: '2nd Written', date: 'Dec 5, 2025', subject: 'Misrepresentation of Discount Rates to Client', status: 'Issued', prevWarnings: 1 },
-  { id: 9, employee: 'Priti Gupta', department: 'Marketing', level: 'Verbal', date: 'Nov 18, 2025', subject: 'Delayed Campaign Deliverables', status: 'Draft', prevWarnings: 0 },
-  { id: 10, employee: 'Sandeep Malhotra', department: 'Operations', level: '1st Written', date: 'Nov 5, 2025', subject: 'Attendance: 8 absences in Oct without leave approval', status: 'Acknowledged', prevWarnings: 0 },
-]
-
-const APPRECIATIONS: ApprecEntry[] = [
-  { id: 1, employee: 'Vikram Nair', department: 'Operations', category: 'Excellence', date: 'Mar 28, 2026', subject: 'Outstanding Logistics Optimization — Saved ₹8L', isPublic: true, givenBy: 'Priya Menon (Manager)' },
-  { id: 2, employee: 'Sunita Rao', department: 'HR', category: 'Leadership', date: 'Mar 20, 2026', subject: 'Led successful POSH compliance training for 200+ employees', isPublic: true, givenBy: 'HR Director' },
-  { id: 3, employee: 'Arjun Patel', department: 'Engineering', category: 'Innovation', date: 'Mar 15, 2026', subject: 'Developed AI-powered attendance anomaly detection tool', isPublic: true, givenBy: 'CTO' },
-  { id: 4, employee: 'Nisha Verma', department: 'Marketing', category: 'Customer', date: 'Mar 8, 2026', subject: 'Campaign achieved 340% ROI — highest in company history', isPublic: false, givenBy: 'CMO' },
-  { id: 5, employee: 'Rohan Malhotra', department: 'Sales', category: 'Excellence', date: 'Feb 25, 2026', subject: 'Closed ₹1.2Cr deal single-handedly — Q4 champion', isPublic: true, givenBy: 'Sales VP' },
-  { id: 6, employee: 'Anita Joshi', department: 'Finance', category: 'Teamwork', date: 'Feb 18, 2026', subject: 'Completed year-end audit 5 days ahead of schedule', isPublic: false, givenBy: 'CFO' },
-  { id: 7, employee: 'Kiran Bhat', department: 'Operations', category: 'Teamwork', date: 'Feb 10, 2026', subject: 'Coordinated seamless warehouse migration across 3 locations', isPublic: false, givenBy: 'COO' },
-  { id: 8, employee: 'Mohammed Irfan', department: 'Sales', category: 'Customer', date: 'Jan 30, 2026', subject: 'Achieved 100% customer retention in assigned territory', isPublic: true, givenBy: 'Sales VP' },
-  { id: 9, employee: 'Deepika Sharma', department: 'Finance', category: 'Innovation', date: 'Jan 22, 2026', subject: 'Automated GST reconciliation — saves 40 hours/month', isPublic: false, givenBy: 'CFO' },
-  { id: 10, employee: 'Sonia Kapoor', department: 'Marketing', category: 'Excellence', date: 'Jan 15, 2026', subject: 'Launched brand refresh project on time and under budget', isPublic: true, givenBy: 'CMO' },
-]
-
-const TERM_CASES: TermCase[] = [
-  { id: 1, employee: 'Karan Desai', department: 'Engineering', reason: 'Performance and Conduct Issues (3 formal warnings in 2026)', trigger: 'Auto', warningCount: 3, status: 'Under Review', createdDate: 'Mar 10, 2026' },
-]
-
-const AUTO_RULES: AutoRule[] = [
-  { id: 1, name: 'Warning Threshold', condition: '3 warnings within a calendar year', action: 'Generate termination draft and send for HR approval', active: true, lastTriggered: 'Mar 10, 2026' },
-  { id: 2, name: 'Attendance Rule', condition: 'Absent > 5 consecutive days without approved leave', action: 'Auto-generate 1st Written Warning and notify manager', active: true, lastTriggered: 'Jan 6, 2026' },
-  { id: 3, name: 'Probation Failure', condition: 'Probation review rating: Unsatisfactory', action: 'Extend probation by 3 months OR initiate exit process', active: true, lastTriggered: 'Never' },
-  { id: 4, name: 'Appraisal Action', condition: 'Annual review rating: Unsatisfactory (1)', action: 'Auto-create PIP (Performance Improvement Plan) with 90-day timeline', active: true, lastTriggered: 'Dec 31, 2025' },
+const AUTO_RULES = [
+  { id: 1, name: 'Warning Threshold',   condition: '3 warnings within a calendar year',             action: 'Generate termination draft and send for HR approval',                    active: true,  lastTriggered: 'Mar 10, 2026' },
+  { id: 2, name: 'Attendance Rule',     condition: 'Absent > 5 consecutive days without leave',     action: 'Auto-generate 1st Written Warning and notify manager',                   active: true,  lastTriggered: 'Jan 6, 2026'  },
+  { id: 3, name: 'Probation Failure',   condition: 'Probation review rating: Unsatisfactory',       action: 'Extend probation by 3 months OR initiate exit process',                  active: true,  lastTriggered: 'Never'         },
+  { id: 4, name: 'Appraisal Action',    condition: 'Annual review rating: Unsatisfactory (1)',      action: 'Auto-create PIP (Performance Improvement Plan) with 90-day timeline',    active: true,  lastTriggered: 'Dec 31, 2025' },
 ]
 
 /* ─────────────────────────────────────────────────────────────
    HELPERS
 ───────────────────────────────────────────────────────────── */
-function WarningLevelBadge({ level }: { level: WarningLevel }) {
-  const map: Record<WarningLevel, { bg: string; color: string }> = {
-    'Verbal': { bg: '#f3f4f6', color: '#4b5563' },
-    '1st Written': { bg: '#fffbeb', color: '#d97706' },
-    '2nd Written': { bg: '#fff7ed', color: '#ea580c' },
-    'Final': { bg: '#fef2f2', color: '#dc2626' },
-  }
-  const s = map[level]
-  return (
-    <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999, whiteSpace: 'nowrap' }}>
-      {level}
-    </span>
-  )
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-function WarnStatusBadge({ status }: { status: WarnStatus }) {
-  const map: Record<WarnStatus, { bg: string; color: string }> = {
-    'Draft': { bg: '#f3f4f6', color: '#6b7280' },
-    'Issued': { bg: '#fffbeb', color: '#d97706' },
-    'Acknowledged': { bg: '#f0fdf4', color: '#16a34a' },
+/* ── Badge components ── */
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { bg: string; color: string }> = {
+    issued:       { bg: '#fffbeb', color: '#d97706' },
+    acknowledged: { bg: '#f0fdf4', color: '#16a34a' },
+    draft:        { bg: '#f3f4f6', color: '#6b7280' },
   }
-  const s = map[status]
-  return <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>{status}</span>
+  const s = map[status.toLowerCase()] ?? { bg: '#f3f4f6', color: '#6b7280' }
+  const label = status.charAt(0).toUpperCase() + status.slice(1)
+  return <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>{label}</span>
 }
 
-function ApprecCategoryBadge({ category }: { category: ApprecCategory }) {
-  const map: Record<ApprecCategory, { bg: string; color: string }> = {
-    'Excellence': { bg: '#fffbeb', color: '#d97706' },
-    'Teamwork': { bg: '#eff6ff', color: '#2563eb' },
-    'Innovation': { bg: '#faf5ff', color: '#7c3aed' },
-    'Customer': { bg: '#ecfdf5', color: '#059669' },
-    'Leadership': { bg: '#fff1f2', color: '#e11d48' },
+function ApprecCategoryBadge({ category }: { category: string }) {
+  const map: Record<string, { bg: string; color: string }> = {
+    Excellence: { bg: '#fffbeb', color: '#d97706' },
+    Teamwork:   { bg: '#eff6ff', color: '#2563eb' },
+    Innovation: { bg: '#faf5ff', color: '#7c3aed' },
+    Customer:   { bg: '#ecfdf5', color: '#059669' },
+    Leadership: { bg: '#fff1f2', color: '#e11d48' },
   }
-  const s = map[category]
+  const s = map[category] ?? { bg: '#f3f4f6', color: '#374151' }
   return <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999 }}>{category}</span>
 }
 
-function TermStatusBadge({ status }: { status: TermStatus }) {
-  const map: Record<TermStatus, { bg: string; color: string }> = {
-    'Draft': { bg: '#f3f4f6', color: '#6b7280' },
-    'Under Review': { bg: '#fffbeb', color: '#d97706' },
-    'Approved': { bg: '#fff1f2', color: '#dc2626' },
-    'Executed': { bg: '#fef2f2', color: '#991b1b' },
-  }
-  const s = map[status]
-  return <span style={{ background: s.bg, color: s.color, fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>{status}</span>
-}
-
-function SummaryCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: { bg: string; icon: string; border: string } }) {
+function SummaryCard({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ElementType; color: { bg: string; icon: string; border: string } }) {
   return (
     <div style={{ background: '#fff', border: `1px solid ${color.border}`, borderRadius: 12, padding: '18px 22px', display: 'flex', alignItems: 'flex-start', gap: 16 }}>
       <div style={{ width: 44, height: 44, borderRadius: 10, background: color.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -177,86 +104,199 @@ function SummaryCard({ label, value, icon: Icon, color }: { label: string; value
   )
 }
 
+function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.48)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(4px)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+function ModalHeader({ title, sub, onClose }: { title: string; sub?: string; onClose: () => void }) {
+  return (
+    <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
+      <div>
+        <h2 style={{ fontWeight: 700, color: '#111827', fontSize: '1.05rem', margin: 0 }}>{title}</h2>
+        {sub && <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '3px 0 0' }}>{sub}</p>}
+      </div>
+      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 4, borderRadius: 6, display: 'flex' }}><X size={18} /></button>
+    </div>
+  )
+}
+function ModalFooter({ children }: { children: React.ReactNode }) {
+  return <div style={{ padding: '16px 28px', borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>{children}</div>
+}
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
+      {children}
+    </div>
+  )
+}
+
+const INP: React.CSSProperties = { width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: '0.875rem', color: '#111827', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+const BTN_PRIMARY: React.CSSProperties = { background: '#E8622A', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }
+const BTN_OUTLINE: React.CSSProperties = { background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, padding: '9px 20px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }
+const BTN_DANGER: React.CSSProperties = { background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }
+
 /* ─────────────────────────────────────────────────────────────
    MAIN PAGE
 ───────────────────────────────────────────────────────────── */
 export default function WarningsPage() {
+  const { data: session } = useSession()
+  const sessionUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
+  const isAdmin       = (session?.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+
   const [activeTab, setActiveTab] = useState<WarnTab>('warnings')
-  const [showWarnModal, setShowWarnModal] = useState(false)
-  const [showApprecModal, setShowApprecModal] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  /* ── Data ── */
+  const [warnings,      setWarnings]      = useState<ApiWarning[]>([])
+  const [appreciations, setAppreciations] = useState<ApiAppreciation[]>([])
+  const [employees,     setEmployees]     = useState<ApiEmployee[]>([])
+
+  /* ── Warning detail modal ── */
+  const [selectedWarn, setSelectedWarn] = useState<ApiWarning | null>(null)
   const [showWarnDetail, setShowWarnDetail] = useState(false)
-  const [selectedWarn, setSelectedWarn] = useState<WarningEntry | null>(null)
-  const [showTermModal, setShowTermModal] = useState(false)
-  const [selectedTerm, setSelectedTerm] = useState<TermCase | null>(null)
 
-  // Warning form
-  const [warnEmployee, setWarnEmployee] = useState('')
-  const [warnLevel, setWarnLevel] = useState('1st Written')
-  const [warnDate, setWarnDate] = useState('')
-  const [warnSubject, setWarnSubject] = useState('')
-  const [incidentDate, setIncidentDate] = useState('')
-  const [warnDesc, setWarnDesc] = useState('')
-  const [savingWarn, setSavingWarn] = useState(false)
+  /* ── Issue Warning modal ── */
+  const [showWarnModal, setShowWarnModal] = useState(false)
+  const [warnEmployeeId, setWarnEmployeeId] = useState('')
+  const [incidentDate,  setIncidentDate]    = useState('')
+  const [warnSubject,   setWarnSubject]     = useState('')
+  const [warnDesc,      setWarnDesc]        = useState('')
+  const [savingWarn,    setSavingWarn]      = useState(false)
 
-  // Appreciation form
-  const [apprecEmployee, setApprecEmployee] = useState('')
-  const [apprecCategory, setApprecCategory] = useState('Excellence')
-  const [apprecSubject, setApprecSubject] = useState('')
-  const [apprecDesc, setApprecDesc] = useState('')
-  const [apprecPublic, setApprecPublic] = useState(true)
+  /* ── Appreciation modal ── */
+  const [showApprecModal, setShowApprecModal] = useState(false)
+  const [apprecEmployee,  setApprecEmployee]  = useState('')
+  const [apprecCategory,  setApprecCategory]  = useState('Excellence')
+  const [apprecSubject,   setApprecSubject]   = useState('')
+  const [apprecDesc,      setApprecDesc]      = useState('')
+  const [apprecPublic,    setApprecPublic]    = useState(true)
+  const [savingApprec] = useState(false)
 
-  // Rules state
+  /* ── Rules toggles ── */
   const [ruleToggles, setRuleToggles] = useState<Record<number, boolean>>(
     Object.fromEntries(AUTO_RULES.map(r => [r.id, r.active]))
   )
 
-  // Live data
-  const [apiWarnings, setApiWarnings] = useState<WarningLetter[]>([])
-  const [employees, setEmployees] = useState<ApiEmployee[]>([])
-
-  useEffect(() => {
-    warningsApi.list({ limit: 50 }).then(r => setApiWarnings(r.data)).catch(console.error)
-    employeesApi.list({ limit: 100 }).then(r => setEmployees(r.data)).catch(console.error)
+  /* ─── Fetch ─── */
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [wRes, eRes] = await Promise.all([
+        fetch('/api/warnings?limit=100'),
+        fetch('/api/employees?limit=200'),
+      ])
+      const wJson = await wRes.json()
+      const eJson = await eRes.json()
+      setWarnings(wJson.data ?? [])
+      setEmployees(eJson.data ?? [])
+    } catch { /* silent */ }
+    finally { setLoading(false) }
   }, [])
 
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  /* ─── Derived stats ─── */
+  const currentYear = new Date().getFullYear()
+  const thisYearWarnings = warnings.filter(w => (w.issued_date as string)?.startsWith(String(currentYear)))
+  const issuedCount      = thisYearWarnings.filter(w => w.status === 'issued').length
+  const acknowledgedCount= thisYearWarnings.filter(w => w.status === 'acknowledged').length
+
+  // Employees with 3+ warnings → auto-termination
+  const warnCountByEmp: Record<string, { count: number; emp: ApiWarning['employee']; latest: string }> = {}
+  for (const w of thisYearWarnings) {
+    if (!w.employee) continue
+    const eid = w.employee.id
+    const wDate = (w.issued_date as string) ?? ''
+    if (!warnCountByEmp[eid]) warnCountByEmp[eid] = { count: 0, emp: w.employee, latest: wDate }
+    warnCountByEmp[eid].count++
+    if (wDate > warnCountByEmp[eid].latest) warnCountByEmp[eid].latest = wDate
+  }
+  const termCases = Object.values(warnCountByEmp).filter(v => v.count >= 3)
+
+  /* ─── Handlers ─── */
   async function handleIssueWarning() {
-    if (!warnEmployee || !warnSubject || !warnDesc) return
+    if (!warnEmployeeId || !warnSubject || !warnDesc) { toast.error('Employee, subject and description are required'); return }
     setSavingWarn(true)
     try {
-      await warningsApi.create({
-        warning_type: warnLevel,
-        severity: warnLevel.includes('Final') ? 'critical' : warnLevel.includes('2nd') ? 'major' : 'minor',
-        incident_date: incidentDate || new Date().toISOString().split('T')[0],
-        issued_date: warnDate || new Date().toISOString().split('T')[0],
-        subject: warnSubject,
-        description: warnDesc,
-        acknowledgement_required: true,
-        status: 'issued',
-      } as Partial<WarningLetter>)
-      toast.success('Warning letter issued successfully')
+      const res = await fetch('/api/warnings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id:  warnEmployeeId,
+          issued_by:    sessionUserId,
+          date:         incidentDate || new Date().toISOString().split('T')[0],
+          subject:      warnSubject,
+          description:  warnDesc,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+
+      toast.success(json.auto_termination_triggered ? 'Warning issued — Auto-termination draft triggered!' : 'Warning letter issued successfully')
       setShowWarnModal(false)
-      setWarnEmployee(''); setWarnSubject(''); setWarnDesc(''); setWarnDate(''); setIncidentDate('')
-      warningsApi.list({ limit: 50 }).then(r => setApiWarnings(r.data)).catch(console.error)
+      setWarnEmployeeId(''); setIncidentDate('')
+      setWarnSubject(''); setWarnDesc('')
+      fetchAll()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to issue warning')
     } finally { setSavingWarn(false) }
   }
 
-  void apiWarnings; void employees
+  async function handleIssueFromDraft(id: string) {
+    try {
+      const res = await fetch('/api/warnings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'issue' }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      toast.success('Warning issued')
+      setWarnings(prev => prev.map(w => w.id === id ? { ...w, status: 'issued' } : w))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to issue warning')
+    }
+  }
 
-  const publicAppreciations = APPRECIATIONS.filter(a => a.isPublic).slice(0, 3)
+  async function handleAcknowledge(id: string) {
+    try {
+      const res = await fetch('/api/warnings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'acknowledge' }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      toast.success('Warning acknowledged')
+      setWarnings(prev => prev.map(w => w.id === id ? { ...w, status: 'acknowledged' } : w))
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to acknowledge')
+    }
+  }
 
   const TABS: { key: WarnTab; label: string }[] = [
-    { key: 'warnings', label: 'Warning Letters' },
+    { key: 'warnings',     label: 'Warning Letters' },
     { key: 'appreciation', label: 'Appreciation Notes' },
-    { key: 'termination', label: 'Termination Cases' },
-    { key: 'rules', label: 'Auto-Trigger Rules' },
+    { key: 'termination',  label: 'Termination Cases' },
+    { key: 'rules',        label: 'Auto-Trigger Rules' },
   ]
+
+  const selectedEmployee = employees.find(e => e.id === warnEmployeeId)
+  const employeeWarnCount = warnEmployeeId
+    ? thisYearWarnings.filter(w => w.employee?.id === warnEmployeeId).length
+    : 0
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface-bg)' }}>
       <Topbar
         title="Warnings & Employee Relations"
+        subtitle="Manage disciplinary actions, appreciation, and compliance"
         actions={
           <div style={{ display: 'flex', gap: 10 }}>
             <button
@@ -265,12 +305,14 @@ export default function WarningsPage() {
             >
               <Award size={14} /> Give Appreciation
             </button>
-            <button
-              onClick={() => setShowWarnModal(true)}
-              style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-            >
-              <AlertTriangle size={14} /> Issue Warning
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setShowWarnModal(true)}
+                style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <AlertTriangle size={14} /> Issue Warning
+              </button>
+            )}
           </div>
         }
       />
@@ -279,10 +321,10 @@ export default function WarningsPage() {
 
         {/* Summary Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 28 }}>
-          <SummaryCard label="Warning Letters Issued" value={12} icon={AlertTriangle} color={{ bg: '#fef2f2', icon: '#dc2626', border: '#fecaca' }} />
-          <SummaryCard label="Appreciation Notes" value={28} icon={Award} color={{ bg: '#f0fdf4', icon: '#16a34a', border: '#bbf7d0' }} />
-          <SummaryCard label="Termination Pending" value={1} icon={UserX} color={{ bg: '#fef2f2', icon: '#dc2626', border: '#fecaca' }} />
-          <SummaryCard label="PIP Active" value={3} icon={Target} color={{ bg: '#fffbeb', icon: '#d97706', border: '#fde68a' }} />
+          <SummaryCard label={`Warnings in ${currentYear}`}   value={loading ? '…' : thisYearWarnings.length} icon={AlertTriangle} color={{ bg: '#fef2f2', icon: '#dc2626', border: '#fecaca' }} />
+          <SummaryCard label="Active (Issued)"                 value={loading ? '…' : issuedCount}             icon={Clock}        color={{ bg: '#fffbeb', icon: '#d97706', border: '#fde68a' }} />
+          <SummaryCard label="Acknowledged"                    value={loading ? '…' : acknowledgedCount}        icon={CheckCircle}  color={{ bg: '#f0fdf4', icon: '#16a34a', border: '#bbf7d0' }} />
+          <SummaryCard label="Auto-Termination Triggered"      value={loading ? '…' : termCases.length}         icon={UserX}        color={{ bg: '#fef2f2', icon: '#dc2626', border: '#fecaca' }} />
         </div>
 
         {/* Tabs */}
@@ -293,18 +335,13 @@ export default function WarningsPage() {
                 key={t.key}
                 onClick={() => setActiveTab(t.key)}
                 style={{
-                  padding: '14px 22px',
-                  fontSize: '0.875rem',
-                  fontWeight: 600,
+                  padding: '14px 22px', fontSize: '0.875rem', fontWeight: 600,
                   color: activeTab === t.key ? '#E8622A' : '#6b7280',
-                  borderBottom: activeTab === t.key ? '2px solid #E8622A' : '2px solid transparent',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
+                  borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                  borderBottom: `2px solid ${activeTab === t.key ? '#E8622A' : 'transparent'}`,
+                  background: 'none', cursor: 'pointer',
                 }}
-              >
-                {t.label}
-              </button>
+              >{t.label}</button>
             ))}
           </div>
 
@@ -313,7 +350,6 @@ export default function WarningsPage() {
             {/* ── TAB 1: Warning Letters ── */}
             {activeTab === 'warnings' && (
               <div>
-                {/* Auto-termination banner */}
                 <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                   <AlertTriangle size={18} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
                   <p style={{ fontSize: '0.875rem', color: '#991b1b', fontWeight: 500, margin: 0 }}>
@@ -321,212 +357,230 @@ export default function WarningsPage() {
                   </p>
                 </div>
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f9fafb' }}>
-                        {['Employee', 'Department', 'Warning Level', 'Date', 'Subject', 'Status', 'Actions'].map(h => (
-                          <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {WARNINGS.map((w, i) => (
-                        <tr key={w.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ fontWeight: 600, color: '#111827' }}>{w.employee}</div>
-                            {w.prevWarnings > 0 && (
-                              <div style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 500 }}>{w.prevWarnings} prior warning{w.prevWarnings > 1 ? 's' : ''} in 2026</div>
-                            )}
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280' }}>{w.department}</td>
-                          <td style={{ padding: '12px 14px' }}><WarningLevelBadge level={w.level} /></td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{w.date}</td>
-                          <td style={{ padding: '12px 14px', color: '#374151', maxWidth: 220 }}>
-                            <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.subject}</span>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}><WarnStatusBadge status={w.status} /></td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button
-                                onClick={() => { setSelectedWarn(w); setShowWarnDetail(true) }}
-                                style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
-                              >View</button>
-                              {w.status === 'Draft' && (
-                                <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Issue</button>
-                              )}
-                              <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}>Edit</button>
-                            </div>
-                          </td>
+                {loading ? (
+                  <p style={{ color: '#6b7280', padding: 24, textAlign: 'center' }}>Loading warnings…</p>
+                ) : warnings.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px' }}>
+                    <AlertTriangle size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
+                    <p style={{ color: '#6b7280', fontWeight: 500 }}>No warning letters issued yet.</p>
+                    {isAdmin && <button onClick={() => setShowWarnModal(true)} style={{ ...BTN_DANGER, marginTop: 16 }}>Issue First Warning</button>}
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          {['Employee', 'Department', 'Date', 'Subject', 'Status', 'Actions'].map(h => (
+                            <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {warnings.map((w, i) => {
+                          const empName = w.employee ? `${w.employee.first_name} ${w.employee.last_name}` : '—'
+                          return (
+                            <tr key={w.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{ fontWeight: 600, color: '#111827' }}>{empName}</div>
+                                <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>{w.employee?.emp_id ?? ''}</div>
+                              </td>
+                              <td style={{ padding: '12px 14px', color: '#6b7280' }}>{w.employee?.department?.name ?? '—'}</td>
+                              <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDate(w.issued_date as string)}</td>
+                              <td style={{ padding: '12px 14px', color: '#374151', maxWidth: 220 }}>
+                                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.subject}</span>
+                              </td>
+                              <td style={{ padding: '12px 14px' }}><StatusBadge status={w.status} /></td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button
+                                    onClick={() => { setSelectedWarn(w); setShowWarnDetail(true) }}
+                                    style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
+                                  >View</button>
+                                  {w.status === 'draft' && isAdmin && (
+                                    <button
+                                      onClick={() => handleIssueFromDraft(w.id)}
+                                      style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                                    >Issue</button>
+                                  )}
+                                  {w.status === 'issued' && w.employee?.id === sessionUserId && (
+                                    <button
+                                      onClick={() => handleAcknowledge(w.id)}
+                                      style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+                                    >Acknowledge</button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
             {/* ── TAB 2: Appreciation Notes ── */}
             {activeTab === 'appreciation' && (
               <div>
-                <div style={{ overflowX: 'auto', marginBottom: 32 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f9fafb' }}>
-                        {['Employee', 'Department', 'Category', 'Date', 'Subject', 'Public', 'Given By', 'Actions'].map(h => (
-                          <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {APPRECIATIONS.map((a, i) => (
-                        <tr key={a.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{a.employee}</td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280' }}>{a.department}</td>
-                          <td style={{ padding: '12px 14px' }}><ApprecCategoryBadge category={a.category} /></td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{a.date}</td>
-                          <td style={{ padding: '12px 14px', color: '#374151', maxWidth: 220 }}>
-                            <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.subject}</span>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{ background: a.isPublic ? '#f0fdf4' : '#f9fafb', color: a.isPublic ? '#16a34a' : '#6b7280', fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>
-                              {a.isPublic ? 'Yes' : 'No'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280', fontSize: '0.8rem' }}>{a.givenBy}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}>View</button>
-                              <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}>Edit</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Wall of Fame */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-                    <Award size={20} color="#d97706" />
-                    <h3 style={{ fontWeight: 700, color: '#111827', fontSize: '1rem', margin: 0 }}>Wall of Fame</h3>
-                    <span style={{ fontSize: '0.75rem', color: '#9ca3af', fontWeight: 500 }}>Public recognitions visible to all employees</span>
+                {loading ? (
+                  <p style={{ color: '#6b7280', padding: 24, textAlign: 'center' }}>Loading…</p>
+                ) : appreciations.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
+                    <Award size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
+                    <p style={{ fontWeight: 500 }}>No appreciations yet.</p>
+                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Use "Give Appreciation" to recognise a colleague.</p>
+                    <button onClick={() => setShowApprecModal(true)} style={{ ...BTN_PRIMARY, background: '#16a34a', marginTop: 16 }}>Give First Appreciation</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
-                    {publicAppreciations.map(a => (
-                      <div
-                        key={a.id}
-                        style={{
-                          background: 'linear-gradient(135deg, #fff9f0 0%, #fff 100%)',
-                          border: '1px solid #fde68a',
-                          borderRadius: 14,
-                          padding: 20,
-                          position: 'relative',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <div style={{ position: 'absolute', top: -10, right: -10, width: 70, height: 70, background: '#fef3c7', borderRadius: '50%', opacity: 0.5 }} />
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg, #E8622A 0%, #f59e0b 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: '1.1rem', flexShrink: 0 }}>
-                            {a.employee.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                          </div>
-                          <div>
-                            <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{a.employee}</p>
-                            <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>{a.department}</p>
-                          </div>
-                          <div style={{ marginLeft: 'auto' }}>
-                            <ApprecCategoryBadge category={a.category} />
-                          </div>
+                ) : (
+                  <>
+                    <div style={{ overflowX: 'auto', marginBottom: 32 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                        <thead>
+                          <tr style={{ background: '#f9fafb' }}>
+                            {['Employee', 'Department', 'Category', 'Date', 'Subject', 'Public', 'Given By'].map(h => (
+                              <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {appreciations.map((a, i) => {
+                            const empName    = a.employee ? `${a.employee.first_name} ${a.employee.last_name}` : '—'
+                            const giverName  = a.given_by ? `${a.given_by.first_name} ${a.given_by.last_name}` : '—'
+                            return (
+                              <tr key={a.id} style={{ borderTop: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{empName}</td>
+                                <td style={{ padding: '12px 14px', color: '#6b7280' }}>{a.employee?.department?.name ?? '—'}</td>
+                                <td style={{ padding: '12px 14px' }}><ApprecCategoryBadge category={a.category} /></td>
+                                <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDate(a.created_at)}</td>
+                                <td style={{ padding: '12px 14px', color: '#374151', maxWidth: 220 }}>
+                                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.subject}</span>
+                                </td>
+                                <td style={{ padding: '12px 14px' }}>
+                                  <span style={{ background: a.is_public ? '#f0fdf4' : '#f9fafb', color: a.is_public ? '#16a34a' : '#6b7280', fontSize: '0.72rem', fontWeight: 600, padding: '2px 10px', borderRadius: 999 }}>
+                                    {a.is_public ? 'Yes' : 'No'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 14px', color: '#6b7280', fontSize: '0.8rem' }}>{giverName}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Wall of Fame */}
+                    {appreciations.filter(a => a.is_public).length > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+                          <Award size={20} color="#d97706" />
+                          <h3 style={{ fontWeight: 700, color: '#111827', fontSize: '1rem', margin: 0 }}>Wall of Fame</h3>
+                          <span style={{ fontSize: '0.75rem', color: '#9ca3af', fontWeight: 500 }}>Public recognitions visible to all employees</span>
                         </div>
-                        <p style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500, marginBottom: 10, lineHeight: 1.5 }}>"{a.subject}"</p>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <p style={{ fontSize: '0.78rem', color: '#9ca3af', margin: 0 }}>{a.givenBy}</p>
-                          <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>{a.date}</p>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+                          {appreciations.filter(a => a.is_public).slice(0, 3).map(a => {
+                            const empName   = a.employee ? `${a.employee.first_name} ${a.employee.last_name}` : '—'
+                            const giverName = a.given_by ? `${a.given_by.first_name} ${a.given_by.last_name}` : '—'
+                            const initials  = empName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+                            return (
+                              <div key={a.id} style={{ background: 'linear-gradient(135deg, #fff9f0 0%, #fff 100%)', border: '1px solid #fde68a', borderRadius: 14, padding: 20, position: 'relative', overflow: 'hidden' }}>
+                                <div style={{ position: 'absolute', top: -10, right: -10, width: 70, height: 70, background: '#fef3c7', borderRadius: '50%', opacity: 0.5 }} />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                                  <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg, #E8622A 0%, #f59e0b 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: '1.1rem', flexShrink: 0 }}>
+                                    {initials}
+                                  </div>
+                                  <div>
+                                    <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>{empName}</p>
+                                    <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>{a.employee?.department?.name ?? ''}</p>
+                                  </div>
+                                  <div style={{ marginLeft: 'auto' }}><ApprecCategoryBadge category={a.category} /></div>
+                                </div>
+                                <p style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500, marginBottom: 10, lineHeight: 1.5 }}>"{a.subject}"</p>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <p style={{ fontSize: '0.78rem', color: '#9ca3af', margin: 0 }}>{giverName}</p>
+                                  <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>{fmtDate(a.created_at)}</p>
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
             {/* ── TAB 3: Termination Cases ── */}
             {activeTab === 'termination' && (
               <div>
-                {TERM_CASES.filter(t => t.trigger === 'Auto').length > 0 && (
+                {termCases.length > 0 && (
                   <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <Zap size={18} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
                     <p style={{ fontSize: '0.875rem', color: '#92400e', fontWeight: 500, margin: 0 }}>
-                      <strong>Auto-Generated Case Detected:</strong> One termination draft was automatically generated by the auto-trigger rule for exceeding 3 warnings in the calendar year 2026. Please review and take action.
+                      <strong>Auto-Generated Cases Detected:</strong> {termCases.length} employee{termCases.length > 1 ? 's have' : ' has'} exceeded 3 warnings in {currentYear}. Termination drafts have been automatically generated. Please review and take action.
                     </p>
                   </div>
                 )}
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f9fafb' }}>
-                        {['Employee', 'Department', 'Reason', 'Trigger', 'Warning Count', 'Status', 'Created Date', 'Actions'].map(h => (
-                          <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {TERM_CASES.map((tc, i) => (
-                        <tr key={tc.id} style={{ borderTop: '1px solid #f3f4f6' }}>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{tc.employee}</td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280' }}>{tc.department}</td>
-                          <td style={{ padding: '12px 14px', color: '#374151', maxWidth: 220, fontSize: '0.82rem' }}>{tc.reason}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{ background: tc.trigger === 'Auto' ? '#faf5ff' : '#f0fdf4', color: tc.trigger === 'Auto' ? '#7c3aed' : '#16a34a', fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999 }}>
-                              {tc.trigger}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                            <span style={{ background: '#fef2f2', color: '#dc2626', fontWeight: 700, fontSize: '0.875rem', padding: '2px 8px', borderRadius: 6 }}>{tc.warningCount}</span>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}><TermStatusBadge status={tc.status} /></td>
-                          <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{tc.createdDate}</td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button
-                                onClick={() => { setSelectedTerm(tc); setShowTermModal(true) }}
-                                style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
-                              >View Draft</button>
-                              <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#E8622A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Send to HR</button>
-                              <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>Cancel</button>
-                            </div>
-                          </td>
+                {termCases.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
+                    <UserX size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
+                    <p style={{ fontWeight: 500 }}>No termination cases.</p>
+                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Auto-termination drafts appear here when an employee accumulates 3 or more warnings in a calendar year.</p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          {['Employee', 'Department', 'Reason', 'Trigger', 'Warning Count', 'Created Date', 'Actions'].map(h => (
+                            <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {termCases.map((tc, i) => {
+                          const empName = tc.emp ? `${tc.emp.first_name} ${tc.emp.last_name}` : '—'
+                          return (
+                            <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827' }}>{empName}</td>
+                              <td style={{ padding: '12px 14px', color: '#6b7280' }}>{tc.emp?.department?.name ?? '—'}</td>
+                              <td style={{ padding: '12px 14px', color: '#374151', maxWidth: 220, fontSize: '0.82rem' }}>
+                                {tc.count} warnings issued in calendar year {currentYear}
+                              </td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <span style={{ background: '#faf5ff', color: '#7c3aed', fontSize: '0.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 999 }}>Auto</span>
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                                <span style={{ background: '#fef2f2', color: '#dc2626', fontWeight: 700, fontSize: '0.875rem', padding: '2px 8px', borderRadius: 6 }}>{tc.count}</span>
+                              </td>
+                              <td style={{ padding: '12px 14px', color: '#6b7280', whiteSpace: 'nowrap' }}>{fmtDate(tc.latest)}</td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: 'none', background: '#E8622A', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Send to HR</button>
+                                  <button style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>Cancel</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
             {/* ── TAB 4: Auto-Trigger Rules ── */}
             {activeTab === 'rules' && (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ marginBottom: 20 }}>
                   <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Configure automated HR action rules. Changes take effect immediately.</p>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   {AUTO_RULES.map(rule => (
-                    <div
-                      key={rule.id}
-                      style={{
-                        background: '#fff',
-                        border: `1px solid ${ruleToggles[rule.id] ? '#bfdbfe' : '#e5e7eb'}`,
-                        borderRadius: 12,
-                        padding: '18px 22px',
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr auto auto',
-                        gap: 20,
-                        alignItems: 'center',
-                      }}
-                    >
+                    <div key={rule.id} style={{ background: '#fff', border: `1px solid ${ruleToggles[rule.id] ? '#bfdbfe' : '#e5e7eb'}`, borderRadius: 12, padding: '18px 22px', display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 20, alignItems: 'center' }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                           <Shield size={16} color={ruleToggles[rule.id] ? '#2563eb' : '#9ca3af'} />
@@ -545,38 +599,13 @@ export default function WarningsPage() {
                         <p style={{ fontSize: '0.8rem', color: '#374151', margin: 0, fontWeight: 500 }}>{rule.lastTriggered}</p>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                        {/* Toggle */}
                         <button
                           onClick={() => setRuleToggles(prev => ({ ...prev, [rule.id]: !prev[rule.id] }))}
-                          style={{
-                            width: 48,
-                            height: 26,
-                            borderRadius: 999,
-                            background: ruleToggles[rule.id] ? '#16a34a' : '#d1d5db',
-                            border: 'none',
-                            cursor: 'pointer',
-                            position: 'relative',
-                            transition: 'background 0.2s',
-                          }}
+                          style={{ width: 48, height: 26, borderRadius: 999, background: ruleToggles[rule.id] ? '#16a34a' : '#d1d5db', border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s' }}
                         >
-                          <span
-                            style={{
-                              position: 'absolute',
-                              top: 3,
-                              left: ruleToggles[rule.id] ? 25 : 3,
-                              width: 20,
-                              height: 20,
-                              borderRadius: '50%',
-                              background: '#fff',
-                              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                              transition: 'left 0.2s',
-                            }}
-                          />
+                          <span style={{ position: 'absolute', top: 3, left: ruleToggles[rule.id] ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
                         </button>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: ruleToggles[rule.id] ? '#16a34a' : '#9ca3af' }}>
-                          {ruleToggles[rule.id] ? 'ON' : 'OFF'}
-                        </span>
-                        <button style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}>Edit</button>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: ruleToggles[rule.id] ? '#16a34a' : '#9ca3af' }}>{ruleToggles[rule.id] ? 'ON' : 'OFF'}</span>
                       </div>
                     </div>
                   ))}
@@ -592,57 +621,43 @@ export default function WarningsPage() {
       {showWarnModal && (
         <ModalOverlay onClose={() => setShowWarnModal(false)}>
           <div style={{ width: 560 }}>
-            <ModalHeader title="Issue Warning Letter" onClose={() => setShowWarnModal(false)} />
-            <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <ModalHeader title="Issue Warning Letter" sub="A warning will be formally recorded and the employee notified" onClose={() => setShowWarnModal(false)} />
+            <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '70vh' }}>
               {/* Warning count notice */}
-              {warnEmployee === 'Karan Desai' && (
+              {employeeWarnCount >= 2 && selectedEmployee && (
                 <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px' }}>
                   <p style={{ fontSize: '0.8rem', color: '#991b1b', fontWeight: 600, margin: 0 }}>
-                    This employee has 2 previous warnings in 2026. Issuing this warning will trigger auto-termination draft!
+                    ⚠ {selectedEmployee.first_name} {selectedEmployee.last_name} already has {employeeWarnCount} warning{employeeWarnCount > 1 ? 's' : ''} in {currentYear}. Issuing this warning will trigger auto-termination!
                   </p>
                 </div>
               )}
-              <FormField label="Employee">
-                <select value={warnEmployee} onChange={e => setWarnEmployee(e.target.value)} style={inputStyle}>
+              <FormField label="Employee *">
+                <select value={warnEmployeeId} onChange={e => setWarnEmployeeId(e.target.value)} style={INP}>
                   <option value="">Select Employee</option>
-                  {['Karan Desai', 'Meena Joshi', 'Suresh Reddy', 'Pooja Iyer', 'Arjun Patel', 'Vikram Nair', 'Deepika Sharma', 'Ravi Shankar', 'Priya Menon', 'Ajay Gupta'].map(n => (
-                    <option key={n}>{n}</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.first_name} {emp.last_name} ({emp.emp_id}){emp.department ? ` — ${emp.department.name}` : ''}
+                    </option>
                   ))}
                 </select>
               </FormField>
-              <FormField label="Warning Level">
-                <select value={warnLevel} onChange={e => setWarnLevel(e.target.value)} style={inputStyle}>
-                  <option>Verbal</option>
-                  <option>1st Written</option>
-                  <option>2nd Written</option>
-                  <option>Final</option>
-                </select>
+              <FormField label="Incident Date">
+                <input type="date" value={incidentDate} onChange={e => setIncidentDate(e.target.value)} style={INP} />
               </FormField>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                <FormField label="Warning Date">
-                  <input type="date" value={warnDate} onChange={e => setWarnDate(e.target.value)} style={inputStyle} />
-                </FormField>
-                <FormField label="Incident Date">
-                  <input type="date" value={incidentDate} onChange={e => setIncidentDate(e.target.value)} style={inputStyle} />
-                </FormField>
-              </div>
-              <FormField label="Subject">
-                <input value={warnSubject} onChange={e => setWarnSubject(e.target.value)} placeholder="Brief subject of the warning" style={inputStyle} />
+              <FormField label="Subject *">
+                <input value={warnSubject} onChange={e => setWarnSubject(e.target.value)} placeholder="Brief subject of the warning" style={INP} />
               </FormField>
               <FormField label="Detailed Description *">
-                <textarea value={warnDesc} onChange={e => setWarnDesc(e.target.value)} rows={4} placeholder="Describe the incident, policy violation, and expected corrective action in detail..." style={{ ...inputStyle, resize: 'vertical' }} required />
-              </FormField>
-              <FormField label="Attach Document">
-                <div style={{ border: '2px dashed #d1d5db', borderRadius: 8, padding: '14px', textAlign: 'center', cursor: 'pointer', color: '#6b7280', fontSize: '0.875rem' }}>
-                  Click to upload or drag and drop (PDF, DOCX, JPG)
-                </div>
+                <textarea value={warnDesc} onChange={e => setWarnDesc(e.target.value)} rows={4} placeholder="Describe the incident, policy violation, and expected corrective action…" style={{ ...INP, resize: 'vertical' }} />
               </FormField>
             </div>
             <ModalFooter>
-              <button style={btnOutline} onClick={() => setShowWarnModal(false)}>Cancel</button>
-              <button style={{ ...btnOutline, borderColor: '#bfdbfe', color: '#2563eb' }}>Preview Letter</button>
-              <button style={{ ...btnOutline, borderColor: '#fde68a', color: '#d97706' }}>Save Draft</button>
-              <button onClick={handleIssueWarning} disabled={savingWarn || !warnEmployee || !warnSubject || !warnDesc} style={{ ...btnPrimary, background: '#dc2626', opacity: (!warnEmployee || !warnSubject || !warnDesc) ? 0.6 : 1 }}>{savingWarn ? 'Issuing…' : 'Issue Warning'}</button>
+              <button style={BTN_OUTLINE} onClick={() => setShowWarnModal(false)}>Cancel</button>
+              <button
+                onClick={handleIssueWarning}
+                disabled={savingWarn || !warnEmployeeId || !warnSubject || !warnDesc}
+                style={{ ...BTN_DANGER, opacity: (!warnEmployeeId || !warnSubject || !warnDesc) ? 0.6 : 1 }}
+              >{savingWarn ? 'Issuing…' : 'Issue Warning'}</button>
             </ModalFooter>
           </div>
         </ModalOverlay>
@@ -651,8 +666,8 @@ export default function WarningsPage() {
       {/* ── Modal: Warning Detail ── */}
       {showWarnDetail && selectedWarn && (
         <ModalOverlay onClose={() => setShowWarnDetail(false)}>
-          <div style={{ width: 600 }}>
-            <ModalHeader title="Warning Letter Preview" onClose={() => setShowWarnDetail(false)} />
+          <div style={{ width: 620 }}>
+            <ModalHeader title="Warning Letter" sub={`Issued on ${fmtDate(selectedWarn.issued_date as string)}`} onClose={() => setShowWarnDetail(false)} />
             <div style={{ padding: '24px 32px', overflowY: 'auto', maxHeight: '70vh' }}>
               {/* Letterhead */}
               <div style={{ textAlign: 'center', marginBottom: 24, paddingBottom: 16, borderBottom: '2px solid #e5e7eb' }}>
@@ -663,29 +678,44 @@ export default function WarningsPage() {
                 <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>123 Business Park, Andheri East, Mumbai – 400069</p>
               </div>
 
-              <div style={{ marginBottom: 20 }}>
-                <p style={{ fontWeight: 700, color: '#dc2626', fontSize: '1.1rem', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 1 }}>Warning Letter</p>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', textAlign: 'right' }}>Date: {selectedWarn.date}</p>
+              <p style={{ fontWeight: 700, color: '#dc2626', fontSize: '1.05rem', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                Warning Letter
+              </p>
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', textAlign: 'right', marginBottom: 20 }}>Date: {fmtDate(selectedWarn.issued_date as string)}</p>
+
+              <div style={{ marginBottom: 16, fontSize: '0.875rem', lineHeight: 1.8, color: '#374151' }}>
+                <p><strong>To:</strong> {selectedWarn.employee ? `${selectedWarn.employee.first_name} ${selectedWarn.employee.last_name}` : '—'}</p>
+                <p><strong>Employee ID:</strong> {selectedWarn.employee?.emp_id ?? '—'}</p>
+                <p><strong>Department:</strong> {selectedWarn.employee?.department?.name ?? '—'}</p>
+                <p><strong>Status:</strong> <StatusBadge status={selectedWarn.status} /></p>
               </div>
 
-              <div style={{ marginBottom: 16, fontSize: '0.875rem', lineHeight: 1.7, color: '#374151' }}>
-                <p><strong>To:</strong> {selectedWarn.employee}</p>
-                <p><strong>Department:</strong> {selectedWarn.department}</p>
-                <p><strong>Warning Level:</strong> <WarningLevelBadge level={selectedWarn.level} /></p>
+              <div style={{ background: '#f9fafb', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <p style={{ fontWeight: 600, color: '#111827', margin: '0 0 6px', fontSize: '0.875rem' }}>Subject: {selectedWarn.subject}</p>
               </div>
 
               <div style={{ fontSize: '0.875rem', lineHeight: 1.8, color: '#374151' }}>
-                <p>Dear {selectedWarn.employee.split(' ')[0]},</p>
-                <p>This letter serves as a formal <strong>{selectedWarn.level} Warning</strong> regarding the matter of: <strong>{selectedWarn.subject}</strong>.</p>
-                <p>Your conduct/performance has been found to be in violation of company policies as outlined in the Employee Handbook. This behaviour is unacceptable and cannot be tolerated.</p>
+                <p>Dear {selectedWarn.employee?.first_name ?? 'Employee'},</p>
+                <p>{selectedWarn.description ?? (selectedWarn.reason as string | null)}</p>
+
                 <p>You are hereby advised to immediately rectify your conduct/performance. Failure to do so may result in further disciplinary action, including termination of employment.</p>
-                <p>Please acknowledge receipt of this letter by signing below. Your signature does not imply agreement, only receipt of this document.</p>
+                <p>Please acknowledge receipt of this letter. Your acknowledgement does not imply agreement, only receipt.</p>
               </div>
+
+              {selectedWarn.acknowledged_at && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginTop: 16 }}>
+                  <p style={{ fontSize: '0.8rem', color: '#15803d', fontWeight: 600, margin: 0 }}>
+                    ✓ Acknowledged by employee on {fmtDate(selectedWarn.acknowledged_at)}
+                  </p>
+                </div>
+              )}
 
               <div style={{ marginTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40 }}>
                 <div>
                   <div style={{ borderTop: '1px solid #374151', paddingTop: 6 }}>
-                    <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>HR Manager Signature</p>
+                    <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>
+                      Issued by: {selectedWarn.issued_by ? `${selectedWarn.issued_by.first_name} ${selectedWarn.issued_by.last_name}` : 'HR Manager'}
+                    </p>
                   </div>
                 </div>
                 <div>
@@ -696,29 +726,36 @@ export default function WarningsPage() {
               </div>
             </div>
             <ModalFooter>
-              <button onClick={() => setShowWarnDetail(false)} style={btnOutline}>Close</button>
-              <button style={btnPrimary}>Download PDF</button>
+              <button onClick={() => setShowWarnDetail(false)} style={BTN_OUTLINE}>Close</button>
+              {selectedWarn.status === 'draft' && isAdmin && (
+                <button onClick={() => { handleIssueFromDraft(selectedWarn.id); setShowWarnDetail(false) }} style={BTN_DANGER}>Issue Warning</button>
+              )}
+              {selectedWarn.status === 'issued' && selectedWarn.employee?.id === sessionUserId && (
+                <button onClick={() => { handleAcknowledge(selectedWarn.id); setShowWarnDetail(false) }} style={{ ...BTN_PRIMARY, background: '#16a34a' }}>Acknowledge</button>
+              )}
             </ModalFooter>
           </div>
         </ModalOverlay>
       )}
 
-      {/* ── Modal: Appreciation ── */}
+      {/* ── Modal: Give Appreciation ── */}
       {showApprecModal && (
         <ModalOverlay onClose={() => setShowApprecModal(false)}>
           <div style={{ width: 500 }}>
-            <ModalHeader title="Give Appreciation" onClose={() => setShowApprecModal(false)} />
+            <ModalHeader title="Give Appreciation" sub="Recognise a colleague's outstanding contribution" onClose={() => setShowApprecModal(false)} />
             <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <FormField label="Employee">
-                <select value={apprecEmployee} onChange={e => setApprecEmployee(e.target.value)} style={inputStyle}>
+              <FormField label="Employee *">
+                <select value={apprecEmployee} onChange={e => setApprecEmployee(e.target.value)} style={INP}>
                   <option value="">Select Employee</option>
-                  {['Arjun Patel', 'Sunita Rao', 'Vikram Nair', 'Nisha Verma', 'Rohan Malhotra', 'Deepika Sharma', 'Mohammed Irfan', 'Sonia Kapoor'].map(n => (
-                    <option key={n}>{n}</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.first_name} {emp.last_name} ({emp.emp_id})
+                    </option>
                   ))}
                 </select>
               </FormField>
-              <FormField label="Category">
-                <select value={apprecCategory} onChange={e => setApprecCategory(e.target.value)} style={inputStyle}>
+              <FormField label="Category *">
+                <select value={apprecCategory} onChange={e => setApprecCategory(e.target.value)} style={INP}>
                   <option>Excellence</option>
                   <option>Teamwork</option>
                   <option>Innovation</option>
@@ -726,188 +763,50 @@ export default function WarningsPage() {
                   <option>Leadership</option>
                 </select>
               </FormField>
-              <FormField label="Subject">
-                <input value={apprecSubject} onChange={e => setApprecSubject(e.target.value)} placeholder="Brief subject of the appreciation" style={inputStyle} />
+              <FormField label="Subject *">
+                <input value={apprecSubject} onChange={e => setApprecSubject(e.target.value)} placeholder="Brief subject of the appreciation" style={INP} />
               </FormField>
               <FormField label="Description">
-                <textarea value={apprecDesc} onChange={e => setApprecDesc(e.target.value)} rows={4} placeholder="Describe the achievement or behaviour being recognised..." style={{ ...inputStyle, resize: 'vertical' }} />
+                <textarea rows={3} value={apprecDesc} onChange={e => setApprecDesc(e.target.value)} placeholder="Describe what the employee did exceptionally well…" style={{ ...INP, resize: 'vertical' }} />
               </FormField>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#f9fafb', borderRadius: 8 }}>
-                <button
-                  onClick={() => setApprecPublic(p => !p)}
-                  style={{
-                    width: 44,
-                    height: 24,
-                    borderRadius: 999,
-                    background: apprecPublic ? '#16a34a' : '#d1d5db',
-                    border: 'none',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    transition: 'background 0.2s',
-                    flexShrink: 0,
-                  }}
-                >
-                  <span style={{ position: 'absolute', top: 2, left: apprecPublic ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
-                </button>
-                <div>
-                  <p style={{ margin: 0, fontWeight: 600, fontSize: '0.875rem', color: '#374151' }}>Make Public</p>
-                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#6b7280' }}>Appears in Wall of Fame visible to all employees</p>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#f0fdf4', borderRadius: 8 }}>
+                <input type="checkbox" id="apprecPublic" checked={apprecPublic} onChange={e => setApprecPublic(e.target.checked)} style={{ width: 16, height: 16, accentColor: '#16a34a', cursor: 'pointer' }} />
+                <label htmlFor="apprecPublic" style={{ fontSize: '0.875rem', fontWeight: 600, color: '#15803d', cursor: 'pointer' }}>
+                  Make Public (visible on Wall of Fame to all employees)
+                </label>
               </div>
             </div>
             <ModalFooter>
-              <button onClick={() => setShowApprecModal(false)} style={btnOutline}>Cancel</button>
-              <button onClick={() => setShowApprecModal(false)} style={{ ...btnPrimary, background: '#16a34a' }}>Submit Appreciation</button>
-            </ModalFooter>
-          </div>
-        </ModalOverlay>
-      )}
-
-      {/* ── Modal: Termination Letter ── */}
-      {showTermModal && selectedTerm && (
-        <ModalOverlay onClose={() => setShowTermModal(false)}>
-          <div style={{ width: 640 }}>
-            <ModalHeader title="Termination Letter Draft" onClose={() => setShowTermModal(false)} />
-            <div style={{ padding: '24px 32px', overflowY: 'auto', maxHeight: '70vh' }}>
-              {/* Auto-generated banner */}
-              {selectedTerm.trigger === 'Auto' && (
-                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 20, display: 'flex', gap: 8 }}>
-                  <Zap size={16} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
-                  <p style={{ fontSize: '0.8rem', color: '#92400e', fontWeight: 500, margin: 0 }}>
-                    This termination was auto-generated due to 3 warnings within calendar year 2026.
-                  </p>
-                </div>
-              )}
-
-              {/* Letterhead */}
-              <div style={{ textAlign: 'center', marginBottom: 24, paddingBottom: 16, borderBottom: '2px solid #e5e7eb' }}>
-                <div style={{ width: 48, height: 48, background: 'linear-gradient(135deg, #1E3A5F 0%, #2D5391 100%)', borderRadius: 10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
-                  <span style={{ color: '#fff', fontWeight: 900, fontSize: '1.1rem' }}>IH</span>
-                </div>
-                <p style={{ fontWeight: 800, color: '#1E3A5F', margin: '4px 0 2px', fontSize: '1.1rem' }}>Imperial HR Management Systems Pvt. Ltd.</p>
-                <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>123 Business Park, Andheri East, Mumbai – 400069</p>
-              </div>
-
-              <p style={{ fontWeight: 800, color: '#dc2626', fontSize: '1.15rem', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 20 }}>Notice of Termination</p>
-
-              <div style={{ marginBottom: 16, fontSize: '0.875rem', lineHeight: 1.7, color: '#374151' }}>
-                <p><strong>To:</strong> {selectedTerm.employee}</p>
-                <p><strong>Department:</strong> {selectedTerm.department}</p>
-                <p><strong>Date:</strong> {selectedTerm.createdDate}</p>
-              </div>
-
-              <div style={{ fontSize: '0.875rem', lineHeight: 1.8, color: '#374151', marginBottom: 20 }}>
-                <p>Dear {selectedTerm.employee.split(' ')[0]},</p>
-                <p>We regret to inform you that your employment with Imperial HR Management Systems Pvt. Ltd. is hereby terminated effective <strong>April 15, 2026</strong> (15 days from the date of this notice).</p>
-                <p><strong>Reason for Termination:</strong> {selectedTerm.reason}</p>
-                <p>This decision has been made following due process, including three formal warning letters issued in the calendar year 2026, and subsequent counselling sessions. The company's progressive discipline policy has been fully adhered to.</p>
-                <p>Your last working date will be <strong>April 15, 2026</strong>. Please ensure all company property, access cards, laptops, and documents are returned on or before your last working day.</p>
-                <p>The Finance & HR team will initiate the Full and Final (FnF) settlement process within 30 days of your last working day. You will receive your FnF statement including any outstanding dues, leave encashment, and gratuity (if applicable).</p>
-              </div>
-
-              <div style={{ marginTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40 }}>
-                <div>
-                  <div style={{ borderTop: '1px solid #374151', paddingTop: 6 }}>
-                    <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>HR Manager</p>
-                    <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', margin: '2px 0 0' }}>Imperial HR Management Systems</p>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ borderTop: '1px solid #374151', paddingTop: 6 }}>
-                    <p style={{ fontSize: '0.78rem', color: '#6b7280', margin: 0 }}>Employee Acknowledgement</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <ModalFooter>
-              <button onClick={() => setShowTermModal(false)} style={{ ...btnOutline, borderColor: '#fecaca', color: '#dc2626' }}>Cancel Termination</button>
-              <button style={{ ...btnOutline, borderColor: '#fde68a', color: '#d97706' }}>Request Changes</button>
-              <button onClick={() => setShowTermModal(false)} style={{ ...btnPrimary, background: '#dc2626' }}>Approve & Execute</button>
+              <button onClick={() => setShowApprecModal(false)} style={BTN_OUTLINE}>Cancel</button>
+              <button
+                disabled={savingApprec}
+                onClick={() => {
+                  if (!apprecEmployee || !apprecSubject) { toast.error('Employee and subject are required'); return }
+                  const emp = employees.find(e => e.id === apprecEmployee) ?? null
+                  const giver = employees.find(e => e.id === sessionUserId) ?? null
+                  const newApprec: ApiAppreciation = {
+                    id: `local-${Date.now()}`,
+                    category: apprecCategory,
+                    subject: apprecSubject,
+                    description: apprecDesc || null,
+                    is_public: apprecPublic,
+                    created_at: new Date().toISOString(),
+                    employee: emp ? { id: emp.id, first_name: emp.first_name, last_name: emp.last_name, emp_id: emp.emp_id, department: emp.department } : null,
+                    given_by: giver ? { id: giver.id, first_name: giver.first_name, last_name: giver.last_name, emp_id: giver.emp_id } : null,
+                  }
+                  setAppreciations(prev => [newApprec, ...prev])
+                  toast.success('Appreciation recorded!')
+                  setShowApprecModal(false)
+                  setApprecEmployee(''); setApprecCategory('Excellence'); setApprecSubject(''); setApprecDesc(''); setApprecPublic(true)
+                }}
+                style={{ ...BTN_PRIMARY, background: '#16a34a', opacity: savingApprec ? 0.7 : 1 }}
+              >
+                <Plus size={14} style={{ marginRight: 4 }} /> {savingApprec ? 'Saving…' : 'Give Appreciation'}
+              </button>
             </ModalFooter>
           </div>
         </ModalOverlay>
       )}
     </div>
   )
-}
-
-/* ─────────────────────────────────────────────────────────────
-   SHARED MODAL COMPONENTS
-───────────────────────────────────────────────────────────── */
-function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div
-      onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-    >
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
-  return (
-    <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-      <h2 style={{ fontWeight: 700, color: '#111827', fontSize: '1.05rem' }}>{title}</h2>
-      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 4, borderRadius: 6 }}>
-        <X size={18} />
-      </button>
-    </div>
-  )
-}
-
-function ModalFooter({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ padding: '16px 28px', borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
-      {children}
-    </div>
-  )
-}
-
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>{label}</label>
-      {children}
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────
-   SHARED STYLES
-───────────────────────────────────────────────────────────── */
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '9px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 8,
-  fontSize: '0.875rem',
-  color: '#111827',
-  background: '#fff',
-  outline: 'none',
-  boxSizing: 'border-box',
-}
-
-const btnPrimary: React.CSSProperties = {
-  background: '#E8622A',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 8,
-  padding: '9px 20px',
-  fontWeight: 600,
-  fontSize: '0.875rem',
-  cursor: 'pointer',
-}
-
-const btnOutline: React.CSSProperties = {
-  background: '#fff',
-  color: '#374151',
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: '9px 20px',
-  fontWeight: 600,
-  fontSize: '0.875rem',
-  cursor: 'pointer',
 }

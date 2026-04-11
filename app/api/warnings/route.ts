@@ -3,6 +3,28 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
+  }
+  return String(err)
+}
+
+// Use * for base table columns — avoids PGRST204 if schema drifts
+const WARNING_SELECT = `
+  *,
+  employee:employees!employee_id(
+    id, first_name, last_name, emp_id,
+    department:departments!employees_department_id_fkey(id, name),
+    designation:designations(id, title)
+  ),
+  issued_by:employees!issued_by(
+    id, first_name, last_name, emp_id
+  )
+`
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -12,26 +34,13 @@ export async function GET(req: NextRequest) {
     const employee_id = searchParams.get('employee_id')
     const status      = searchParams.get('status')
     const year        = searchParams.get('year')
-    const limit       = parseInt(searchParams.get('limit') ?? '50')
+    const limit       = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset      = parseInt(searchParams.get('offset') ?? '0')
 
     let query = supabaseAdmin
       .from('warning_letters')
-      .select(`
-        id, subject, incident_date, description, previous_warnings,
-        action_expected, deadline, status, acknowledged_at, employee_response,
-        attachments,
-        employee:employees!warning_letters_employee_id_fkey(
-          id, first_name, last_name, emp_id,
-          department:departments(id, name),
-          designation:designations(id, title)
-        ),
-        issued_by:employees!warning_letters_issued_by_fkey(
-          id, first_name, last_name, emp_id
-        ),
-        created_at, updated_at
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false })
+      .select(WARNING_SELECT, { count: 'exact' })
+      .order('issued_date', { ascending: false })
       .limit(limit)
       .range(offset, offset + limit - 1)
 
@@ -39,16 +48,25 @@ export async function GET(req: NextRequest) {
     if (status)      query = query.eq('status', status)
     if (year) {
       query = query
-        .gte('incident_date', `${year}-01-01`)
-        .lte('incident_date', `${year}-12-31`)
+        .gte('issued_date', `${year}-01-01`)
+        .lte('issued_date', `${year}-12-31`)
     }
 
     const { data, error, count } = await query
-    if (error) throw error
 
-    return NextResponse.json({ data, count, limit, offset })
-  } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+    if (error) {
+      const msg = errMsg(error)
+      if (msg.includes('does not exist') || msg.includes('PGRST') || msg.includes('Could not find')) {
+        return NextResponse.json({ data: [], count: 0 })
+      }
+      console.error('[warnings GET]', error)
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
+
+    return NextResponse.json({ data: data ?? [], count: count ?? 0, limit, offset })
+  } catch (err) {
+    console.error('[warnings GET catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -57,38 +75,21 @@ export async function POST(req: NextRequest) {
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const isAdmin = (session.user as any)?.isAdmin
+    const isAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
     if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
 
     const body = await req.json()
-    const {
-      employee_id,
-      issued_by,
-      level,         // warning level — stored as previous_warnings count or description
-      date,          // incident_date
-      subject,
-      description,
-      action_expected,
-      deadline,
-      attachments,
-    } = body
+    const { employee_id, issued_by, date, subject, description } = body
 
-    if (!employee_id || !issued_by || !date || !subject || !description) {
+    if (!employee_id || !issued_by || !subject || !description) {
       return NextResponse.json(
-        { error: 'Missing required fields: employee_id, issued_by, level, date, subject, description' },
+        { error: 'Missing required fields: employee_id, issued_by, subject, description' },
         { status: 400 }
       )
     }
 
-    // Count existing non-draft warnings for this employee in current calendar year
+    const today = new Date().toISOString().split('T')[0]
     const currentYear = new Date().getFullYear()
-    const { count: existingCount } = await supabaseAdmin
-      .from('warning_letters')
-      .select('*', { count: 'exact', head: true })
-      .eq('employee_id', employee_id)
-      .neq('status', 'issued')  // count only issued/acknowledged/resolved
-      .gte('incident_date', `${currentYear}-01-01`)
-      .lte('incident_date', `${currentYear}-12-31`)
 
     const { data: warning, error } = await supabaseAdmin
       .from('warning_letters')
@@ -96,58 +97,46 @@ export async function POST(req: NextRequest) {
         employee_id,
         issued_by,
         subject,
-        incident_date: date,
+        issued_date: date || today,
         description,
-        previous_warnings: level ? parseInt(level) - 1 : (existingCount ?? 0),
-        action_expected: action_expected ?? null,
-        deadline: deadline ?? null,
-        attachments: attachments ?? null,
-        status: 'issued',  // schema uses 'issued' as default, spec says 'draft' — using 'issued'
+        status: 'issued',
       })
-      .select()
+      .select(WARNING_SELECT)
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[warnings POST]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
 
-    // Re-count warnings for this employee in current year (including the newly created one)
+    // Count warnings for this employee in current year
     const { count: warningCount } = await supabaseAdmin
       .from('warning_letters')
       .select('*', { count: 'exact', head: true })
       .eq('employee_id', employee_id)
-      .gte('incident_date', `${currentYear}-01-01`)
-      .lte('incident_date', `${currentYear}-12-31`)
+      .gte('issued_date', `${currentYear}-01-01`)
+      .lte('issued_date', `${currentYear}-12-31`)
 
-    const totalWarnings  = warningCount ?? 0
+    const totalWarnings   = warningCount ?? 0
     const autoTermination = totalWarnings >= 3
 
-    // If 3 or more warnings, auto-create exit process for termination
     if (autoTermination) {
-      const { error: exitProcessError } = await supabaseAdmin
+      const { error: exitErr } = await supabaseAdmin
         .from('exit_processes')
         .upsert(
-          {
-            employee_id,
-            exit_type: 'termination',
-            reason: `3 warnings issued in calendar year ${currentYear}`,
-          },
+          { employee_id, exit_type: 'termination', reason: `3 warnings issued in calendar year ${currentYear}` },
           { onConflict: 'employee_id', ignoreDuplicates: true }
         )
-
-      if (exitProcessError) {
-        console.error('Failed to auto-create exit process', exitProcessError)
-      }
+      if (exitErr) console.error('Failed to auto-create exit process', exitErr)
     }
 
     return NextResponse.json(
-      {
-        warning,
-        warning_count: totalWarnings,
-        auto_termination_triggered: autoTermination,
-      },
+      { data: warning, warning_count: totalWarnings, auto_termination_triggered: autoTermination },
       { status: 201 }
     )
-  } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+  } catch (err) {
+    console.error('[warnings POST catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
 
@@ -157,21 +146,23 @@ export async function PATCH(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { id, action } = body as { id?: string; action?: 'issue' | 'acknowledge' }
+    const { id, action, employee_remarks } = body as {
+      id?: string
+      action?: 'issue' | 'acknowledge'
+      employee_remarks?: string
+    }
 
     if (!id || !action) {
       return NextResponse.json({ error: 'Missing required fields: id, action' }, { status: 400 })
     }
 
-    const updatePayload: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    }
+    const updatePayload: Record<string, unknown> = {}
 
     if (action === 'issue') {
       updatePayload.status = 'issued'
     } else if (action === 'acknowledge') {
       updatePayload.status = 'acknowledged'
-      updatePayload.acknowledged_at = new Date().toISOString()
+      if (employee_remarks) updatePayload.employee_remarks = employee_remarks
     } else {
       return NextResponse.json({ error: `Unknown action '${action}'` }, { status: 400 })
     }
@@ -180,49 +171,43 @@ export async function PATCH(req: NextRequest) {
       .from('warning_letters')
       .update(updatePayload)
       .eq('id', id)
-      .select()
+      .select(WARNING_SELECT)
       .single()
 
     if (error) {
       if (error.code === 'PGRST116') return NextResponse.json({ error: 'Warning letter not found' }, { status: 404 })
-      throw error
+      console.error('[warnings PATCH]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
 
-    // Check auto-termination trigger after issuing
     if (action === 'issue') {
       const currentYear = new Date().getFullYear()
+      const empId = (data as Record<string, unknown>).employee_id as string
       const { count: warningCount } = await supabaseAdmin
         .from('warning_letters')
         .select('*', { count: 'exact', head: true })
-        .eq('employee_id', data.employee_id)
+        .eq('employee_id', empId)
         .eq('status', 'issued')
-        .gte('incident_date', `${currentYear}-01-01`)
-        .lte('incident_date', `${currentYear}-12-31`)
+        .gte('issued_date', `${currentYear}-01-01`)
+        .lte('issued_date', `${currentYear}-12-31`)
 
       const autoTermination = (warningCount ?? 0) >= 3
-
       if (autoTermination) {
-        const { error: exitProcessError } = await supabaseAdmin
+        const { error: exitErr } = await supabaseAdmin
           .from('exit_processes')
           .upsert(
-            {
-              employee_id: data.employee_id,
-              exit_type: 'termination',
-              reason: `3 warnings issued in calendar year ${currentYear}`,
-            },
+            { employee_id: empId, exit_type: 'termination', reason: `3 warnings issued in calendar year ${currentYear}` },
             { onConflict: 'employee_id', ignoreDuplicates: true }
           )
-
-        if (exitProcessError) {
-          console.error('Failed to auto-create exit process', exitProcessError)
-        }
+        if (exitErr) console.error('Failed to auto-create exit process', exitErr)
       }
 
       return NextResponse.json({ data, auto_termination_triggered: autoTermination })
     }
 
     return NextResponse.json({ data })
-  } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
+  } catch (err) {
+    console.error('[warnings PATCH catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
