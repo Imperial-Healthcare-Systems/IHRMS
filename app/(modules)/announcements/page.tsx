@@ -69,7 +69,7 @@ function audienceLabel(audience: string): string {
 function adaptAnnouncement(a: ApiAnnouncement): Announcement {
   // Live DB uses: content, announcement_type, target_audience, published_by
   // Our added columns: body, audience, priority, is_pinned
-  const raw = a as Record<string, unknown>
+  const raw = a as unknown as Record<string, unknown>
   const bodyText   = (raw.content ?? raw.body ?? '') as string
   const typeStr    = (raw.announcement_type ?? raw.priority ?? 'general') as string
   const audienceStr = (raw.target_audience ?? raw.audience ?? 'all') as string
