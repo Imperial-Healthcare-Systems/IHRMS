@@ -53,7 +53,9 @@ interface NavGroupConfig {
 }
 
 // Mirrors middleware.ts ROUTE_ROLES — keep in sync
-const ALL_ROLES = ['super_admin', 'hr_admin', 'payroll_admin', 'finance_admin', 'operations_head', 'manager', 'employee']
+// Include 'admin' and 'hr' as aliases for super_admin/hr_admin (live DB may use these values)
+const HR_ADMIN  = ['super_admin', 'hr_admin', 'admin', 'hr']
+const ALL_ROLES = [...HR_ADMIN, 'payroll_admin', 'finance_admin', 'operations_head', 'manager', 'employee']
 
 const navGroupConfigs: NavGroupConfig[] = [
   {
@@ -65,8 +67,8 @@ const navGroupConfigs: NavGroupConfig[] = [
   {
     title: 'Workforce',
     items: [
-      { label: 'Employees',   href: '/employees',   icon: Users,     roles: ['super_admin', 'hr_admin', 'operations_head', 'manager'] },
-      { label: 'Recruitment', href: '/recruitment',  icon: UserPlus,  roles: ['super_admin', 'hr_admin'] },
+      { label: 'Employees',   href: '/employees',   icon: Users,     roles: [...HR_ADMIN, 'operations_head', 'manager'] },
+      { label: 'Recruitment', href: '/recruitment',  icon: UserPlus,  roles: HR_ADMIN },
       { label: 'Attendance',  href: '/attendance',   icon: Clock,     roles: ALL_ROLES },
       { label: 'Leaves',      href: '/leaves',       icon: Calendar,  roles: ALL_ROLES },
     ],
@@ -74,32 +76,32 @@ const navGroupConfigs: NavGroupConfig[] = [
   {
     title: 'Finance',
     items: [
-      { label: 'Payroll',         href: '/payroll',         icon: IndianRupee, roles: ['super_admin', 'hr_admin', 'payroll_admin'] },
-      { label: 'Reimbursements',  href: '/reimbursements',  icon: Receipt,     roles: ['super_admin', 'hr_admin', 'finance_admin'] },
+      { label: 'Payroll',        href: '/payroll',        icon: IndianRupee, roles: [...HR_ADMIN, 'payroll_admin'] },
+      { label: 'Reimbursements', href: '/reimbursements', icon: Receipt,     roles: [...HR_ADMIN, 'finance_admin'] },
     ],
   },
   {
     title: 'Performance',
     items: [
-      { label: 'Reviews',          href: '/performance', icon: Star,          roles: ['super_admin', 'hr_admin', 'operations_head', 'manager'] },
-      { label: 'Warnings & Actions', href: '/warnings',  icon: AlertTriangle, roles: ['super_admin', 'hr_admin', 'manager'] },
+      { label: 'Reviews',            href: '/performance', icon: Star,          roles: [...HR_ADMIN, 'operations_head', 'manager'] },
+      { label: 'Warnings & Actions', href: '/warnings',    icon: AlertTriangle, roles: [...HR_ADMIN, 'manager'] },
     ],
   },
   {
     title: 'Lifecycle',
     items: [
-      { label: 'Onboarding',     href: '/onboarding', icon: UserCheck, roles: ['super_admin', 'hr_admin'] },
-      { label: 'Exit Management', href: '/exit',       icon: LogOut,    roles: ['super_admin', 'hr_admin'] },
+      { label: 'Onboarding',      href: '/onboarding', icon: UserCheck, roles: HR_ADMIN },
+      { label: 'Exit Management', href: '/exit',        icon: LogOut,    roles: HR_ADMIN },
     ],
   },
   {
     title: 'Admin',
     items: [
-      { label: 'Reports',       href: '/reports',       icon: BarChart3, roles: ['super_admin', 'hr_admin', 'operations_head'] },
-      { label: 'Compliance',    href: '/compliance',    icon: Shield,    roles: ['super_admin', 'hr_admin'] },
-      { label: 'Assets',        href: '/assets',        icon: Package,   roles: ['super_admin', 'hr_admin'] },
+      { label: 'Reports',       href: '/reports',       icon: BarChart3, roles: [...HR_ADMIN, 'operations_head'] },
+      { label: 'Compliance',    href: '/compliance',    icon: Shield,    roles: HR_ADMIN },
+      { label: 'Assets',        href: '/assets',        icon: Package,   roles: HR_ADMIN },
       { label: 'Announcements', href: '/announcements', icon: Bell,      roles: ALL_ROLES },
-      { label: 'Settings',      href: '/settings',      icon: Settings,  roles: ['super_admin', 'hr_admin'] },
+      { label: 'Settings',      href: '/settings',      icon: Settings,  roles: HR_ADMIN },
     ],
   },
 ]
@@ -118,6 +120,8 @@ function getInitials(name?: string | null) {
 const ROLE_LABELS: Record<string, string> = {
   super_admin:     'Super Admin',
   hr_admin:        'HR Administrator',
+  admin:           'HR Administrator',
+  hr:              'HR Administrator',
   operations_head: 'Operations Head',
   manager:         'Manager',
   payroll_admin:   'Payroll Admin',

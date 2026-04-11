@@ -5,21 +5,21 @@ import type { NextRequestWithAuth } from 'next-auth/middleware'
 // Role → allowed route prefixes
 // Routes not listed here are accessible to all authenticated users (e.g. /dashboard, /profile)
 const ROUTE_ROLES: Record<string, string[]> = {
-  '/payroll':       ['super_admin', 'hr_admin', 'payroll_admin'],
-  '/settings':      ['super_admin', 'hr_admin'],
-  '/recruitment':   ['super_admin', 'hr_admin'],
-  '/reports':       ['super_admin', 'hr_admin', 'operations_head'],
-  '/compliance':    ['super_admin', 'hr_admin'],
-  '/warnings':      ['super_admin', 'hr_admin', 'manager'],
-  '/onboarding':    ['super_admin', 'hr_admin'],
-  '/exit':          ['super_admin', 'hr_admin'],
-  '/reimbursements':['super_admin', 'hr_admin', 'finance_admin'],
-  '/employees':     ['super_admin', 'hr_admin', 'operations_head', 'manager'],
-  '/performance':   ['super_admin', 'hr_admin', 'operations_head', 'manager'],
-  '/attendance':    ['super_admin', 'hr_admin', 'operations_head', 'manager', 'employee'],
-  '/leaves':        ['super_admin', 'hr_admin', 'operations_head', 'manager', 'employee'],
-  '/announcements': ['super_admin', 'hr_admin', 'operations_head', 'manager', 'employee'],
-  '/assets':        ['super_admin', 'hr_admin'],
+  '/payroll':        ['super_admin', 'hr_admin', 'admin', 'hr', 'payroll_admin'],
+  '/settings':       ['super_admin', 'hr_admin', 'admin', 'hr'],
+  '/recruitment':    ['super_admin', 'hr_admin', 'admin', 'hr'],
+  '/reports':        ['super_admin', 'hr_admin', 'admin', 'hr', 'operations_head'],
+  '/compliance':     ['super_admin', 'hr_admin', 'admin', 'hr'],
+  '/warnings':       ['super_admin', 'hr_admin', 'admin', 'hr', 'manager'],
+  '/onboarding':     ['super_admin', 'hr_admin', 'admin', 'hr'],
+  '/exit':           ['super_admin', 'hr_admin', 'admin', 'hr'],
+  '/reimbursements': ['super_admin', 'hr_admin', 'admin', 'hr', 'finance_admin'],
+  '/employees':      ['super_admin', 'hr_admin', 'admin', 'hr', 'operations_head', 'manager'],
+  '/performance':    ['super_admin', 'hr_admin', 'admin', 'hr', 'operations_head', 'manager'],
+  '/attendance':     ['super_admin', 'hr_admin', 'admin', 'hr', 'operations_head', 'manager', 'employee'],
+  '/leaves':         ['super_admin', 'hr_admin', 'admin', 'hr', 'operations_head', 'manager', 'employee'],
+  '/announcements':  ['super_admin', 'hr_admin', 'admin', 'hr', 'operations_head', 'manager', 'employee'],
+  '/assets':         ['super_admin', 'hr_admin', 'admin', 'hr'],
 }
 
 export default withAuth(
