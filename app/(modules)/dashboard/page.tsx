@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import toast from 'react-hot-toast'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   Users, UserCheck, Calendar, Briefcase, Clock, IndianRupee,
@@ -10,51 +11,14 @@ import {
   Activity, Zap, Target, Shield, Download, UserPlus, PlayCircle,
   ClipboardList, BarChart2, ChevronDown, X,
 } from 'lucide-react'
-import { dashboardApi, type DashboardStats } from '@/lib/api-client'
+import {
+  dashboardApi, attendanceApi, reportsApi, employeesApi, leavesApi,
+  type DashboardStats, type AttendanceLog, type Employee, type LeaveBalance,
+} from '@/lib/api-client'
 
 /* ─────────────────────────────────────────────────────────────
    TYPES & DATA
 ───────────────────────────────────────────── */
-const todayAttendance = [
-  { name: 'Rajesh Kumar',   dept: 'Engineering',      checkIn: '09:02', checkOut: '—', status: 'Present', hours: '8.5h' },
-  { name: 'Priya Sharma',   dept: 'Human Resources',  checkIn: '09:15', checkOut: '—', status: 'Present', hours: '8.2h' },
-  { name: 'Amit Patel',     dept: 'Finance',          checkIn: '—',     checkOut: '—', status: 'WFH',     hours: '—' },
-  { name: 'Sneha Gupta',    dept: 'Sales',            checkIn: '10:34', checkOut: '—', status: 'Late',    hours: '6.1h' },
-  { name: 'Rahul Mehta',    dept: 'Operations',       checkIn: '—',     checkOut: '—', status: 'Absent',  hours: '—' },
-  { name: 'Deepika Nair',   dept: 'Marketing',        checkIn: '08:55', checkOut: '—', status: 'Present', hours: '8.7h' },
-  { name: 'Vikram Singh',   dept: 'Engineering',      checkIn: '—',     checkOut: '—', status: 'WFH',     hours: '—' },
-  { name: 'Kavitha Reddy',  dept: 'Customer Support', checkIn: '09:08', checkOut: '—', status: 'Present', hours: '8.4h' },
-]
-
-const pendingActions = [
-  { icon: Calendar,   color: '#F59E0B', bg: '#FFFBEB', label: '5 leave requests',            sub: 'Pending your approval',   btn: 'Review', urgency: 'medium' },
-  { icon: Clock,      color: '#3B82F6', bg: '#EFF6FF', label: '3 attendance regularizations', sub: 'Employees requested edit', btn: 'Review', urgency: 'low' },
-  { icon: CreditCard, color: '#8B5CF6', bg: '#F5F3FF', label: '2 expense claims',             sub: 'Total: ₹18,500 pending',  btn: 'Review', urgency: 'medium' },
-  { icon: FileText,   color: '#EF4444', bg: '#FEF2F2', label: '1 payroll pending approval',   sub: 'April 2026 — ₹42,50,000', btn: 'Approve', urgency: 'high' },
-]
-
-const departments = [
-  { name: 'Engineering', count: 72, total: 72, color: '#2563EB' },
-  { name: 'Sales',       count: 48, total: 72, color: '#F47920' },
-  { name: 'Operations',  count: 38, total: 72, color: '#10B981' },
-  { name: 'Finance',     count: 30, total: 72, color: '#8B5CF6' },
-  { name: 'HR',          count: 22, total: 72, color: '#F59E0B' },
-]
-
-const leaveStatus = [
-  { type: 'Casual Leave (CL)',   used: 3,  total: 12, color: '#3B82F6', pct: 25 },
-  { type: 'Sick Leave (SL)',     used: 5,  total: 8,  color: '#10B981', pct: 62.5 },
-  { type: 'Earned Leave (EL)',   used: 8,  total: 20, color: '#8B5CF6', pct: 40 },
-  { type: 'Loss of Pay (LOP)',   used: 2,  total: 0,  color: '#EF4444', pct: 100 },
-]
-
-const recentJoiners = [
-  { name: 'Arjun Krishnan', dept: 'Engineering', designation: 'SDE-II',              joinDate: '28 Mar 2026', empId: 'EMP/2026/041', daysAgo: 4 },
-  { name: 'Meena Iyer',     dept: 'HR',          designation: 'HR Executive',         joinDate: '25 Mar 2026', empId: 'EMP/2026/040', daysAgo: 7 },
-  { name: 'Suresh Babu',    dept: 'Sales',        designation: 'Sales Associate',      joinDate: '20 Mar 2026', empId: 'EMP/2026/039', daysAgo: 12 },
-  { name: 'Pooja Agarwal',  dept: 'Finance',      designation: 'Finance Analyst',      joinDate: '15 Mar 2026', empId: 'EMP/2026/038', daysAgo: 17 },
-  { name: 'Kiran Rao',      dept: 'Marketing',    designation: 'Marketing Executive',  joinDate: '10 Mar 2026', empId: 'EMP/2026/037', daysAgo: 22 },
-]
 
 const upcomingEvents = [
   { label: 'Priya Desai — Last working day',   date: '15 Apr',  color: '#F59E0B', bg: '#FFFBEB', badge: 'Notice Period', icon: '👋' },
@@ -211,13 +175,9 @@ function exportDashboardCSV(stats: DashboardStats | null, totalStaff: number, pr
     ['Total Net', payrollNet],
     [],
     ['PENDING ACTIONS'],
-    ['Leaves Pending',          String(stats?.pending.leaves ?? 5)],
-    ['Expenses Pending',        String(stats?.pending.expenses ?? 2)],
-    ['Regularizations Pending', String(stats?.pending.regularizations ?? 3)],
-    [],
-    ["TODAY'S ATTENDANCE SAMPLE"],
-    ['Name', 'Department', 'Check-In', 'Hours', 'Status'],
-    ...todayAttendance.map(e => [e.name, e.dept, e.checkIn, e.hours, e.status]),
+    ['Leaves Pending',          String(stats?.pending.leaves ?? 0)],
+    ['Expenses Pending',        String(stats?.pending.expenses ?? 0)],
+    ['Regularizations Pending', String(stats?.pending.regularizations ?? 0)],
   ]
   exportToCSV(rows, `IHRMS_Dashboard_${new Date().toISOString().slice(0,10)}.csv`)
 }
@@ -248,9 +208,11 @@ function exportDashboardHTML(totalStaff: number, presentToday: number, onLeave: 
   <tr><td>WFH Today</td><td><b>${wfhToday}</b></td></tr>
   <tr><td>Monthly Payroll</td><td><b>${payrollNet}</b></td></tr>
   </table>
-  <h2>Today's Attendance</h2>
-  <table><tr><th>Employee</th><th>Department</th><th>Check-In</th><th>Hours</th><th>Status</th></tr>
-  ${todayAttendance.map(e=>`<tr><td>${e.name}</td><td>${e.dept}</td><td>${e.checkIn}</td><td>${e.hours}</td><td><span class="badge ${e.status.toLowerCase()}">${e.status}</span></td></tr>`).join('')}
+  <h2>Summary</h2>
+  <table><tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Present</td><td>${presentToday}</td></tr>
+  <tr><td>On Leave</td><td>${onLeave}</td></tr>
+  <tr><td>WFH</td><td>${wfhToday}</td></tr>
   </table>
   </body></html>`
   const blob = new Blob([html], { type: 'text/html;charset=utf-8;' })
@@ -264,15 +226,50 @@ function exportDashboardHTML(totalStaff: number, presentToday: number, onLeave: 
    PAGE
 ───────────────────────────────────────────── */
 export default function DashboardPage() {
-  const router = useRouter()
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [showExport, setShowExport]           = useState(false)
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+  const [stats,        setStats]        = useState<DashboardStats | null>(null)
+  const [todayLogs,    setTodayLogs]    = useState<AttendanceLog[]>([])
+  const [deptDist,     setDeptDist]     = useState<{ dept: string; count: number; pct: number; color: string }[]>([])
+  const [recentEmps,   setRecentEmps]   = useState<Employee[]>([])
+  const [leaveBalance, setLeaveBalance] = useState<LeaveBalance[]>([])
+  const [loadingWidgets, setLoadingWidgets] = useState(true)
+  const [showExport,       setShowExport]       = useState(false)
   const [showQuickActions, setShowQuickActions] = useState(false)
-  const exportRef      = useRef<HTMLDivElement>(null)
-  const quickActRef    = useRef<HTMLDivElement>(null)
+  const exportRef   = useRef<HTMLDivElement>(null)
+  const quickActRef = useRef<HTMLDivElement>(null)
+
+  // Show access-denied toast when middleware redirected with ?denied=
+  useEffect(() => {
+    const denied = searchParams.get('denied')
+    if (denied) {
+      toast.error(`Access denied: you don't have permission to view /${denied}`, { duration: 5000 })
+      // Clean the query param from the URL without reloading
+      const url = new URL(window.location.href)
+      url.searchParams.delete('denied')
+      window.history.replaceState({}, '', url.toString())
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
-    dashboardApi.stats().then(setStats).catch(console.error)
+    const todayISO = new Date().toISOString().split('T')[0]
+    Promise.all([
+      dashboardApi.stats(),
+      attendanceApi.list({ date: todayISO, limit: 8 }),
+      reportsApi.analytics(),
+      employeesApi.list({ status: 'active', limit: 20 }),
+      leavesApi.balance(),
+    ]).then(([statsRes, attendRes, analyticsRes, empsRes, balRes]) => {
+      setStats(statsRes)
+      setTodayLogs(attendRes.data.slice(0, 8))
+      setDeptDist((analyticsRes.department_distribution ?? []).slice(0, 5))
+      const sorted = [...empsRes.data].sort(
+        (a, b) => new Date(b.hire_date ?? 0).getTime() - new Date(a.hire_date ?? 0).getTime()
+      )
+      setRecentEmps(sorted.slice(0, 5))
+      setLeaveBalance(balRes.data ?? [])
+    }).catch(console.error).finally(() => setLoadingWidgets(false))
   }, [])
 
   // Close dropdowns on outside click
@@ -285,18 +282,47 @@ export default function DashboardPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const totalStaff  = stats?.headcount.total              ?? 248
-  const presentToday = stats?.today.present               ?? 201
-  const onLeave     = stats?.today.on_leave               ?? 23
-  const wfhToday    = stats?.today.wfh                    ?? 18
-  const openPositions = stats?.recruitment.open_positions ?? 12
-  const attendanceRate = stats?.today.attendance_rate     ?? 81
-  const pendingLeaves  = stats?.pending.leaves            ?? 5
-  const pendingExpenses = stats?.pending.expenses         ?? 2
-  const pendingRegs    = stats?.pending.regularizations   ?? 3
-  const payrollPeriod  = stats?.payroll.current_period    ?? 'Apr 2026'
-  const payrollNet     = stats?.payroll.total_net ? `₹${(stats.payroll.total_net / 100000).toFixed(1)}L` : '₹42.5L'
-  const newJoiners     = stats?.headcount.new_joiners_this_month ?? 12
+  const loading        = loadingWidgets
+  const totalStaff     = stats?.headcount.total               ?? 0
+  const presentToday   = stats?.today.present                 ?? 0
+  const onLeave        = stats?.today.on_leave                ?? 0
+  const wfhToday       = stats?.today.wfh                     ?? 0
+  const openPositions  = stats?.recruitment.open_positions    ?? 0
+  const attendanceRate = stats?.today.attendance_rate         ?? 0
+  const pendingLeaves  = stats?.pending.leaves                ?? 0
+  const pendingExpenses= stats?.pending.expenses              ?? 0
+  const pendingRegs    = stats?.pending.regularizations       ?? 0
+  const payrollPeriod  = stats?.payroll.current_period        ?? '—'
+  const payrollNet     = stats?.payroll.total_net ? `₹${(stats.payroll.total_net / 100000).toFixed(1)}L` : '—'
+  const newJoiners     = stats?.headcount.new_joiners_this_month ?? 0
+
+  // Build live pending actions from real stats
+  const livePendingActions = [
+    { icon: Calendar,   color: '#F59E0B', bg: '#FFFBEB', label: `${pendingLeaves} leave request${pendingLeaves !== 1 ? 's' : ''}`,            sub: 'Pending your approval',   btn: 'Review', urgency: pendingLeaves > 5 ? 'high' : 'medium', path: '/leaves' },
+    { icon: Clock,      color: '#3B82F6', bg: '#EFF6FF', label: `${pendingRegs} attendance regularization${pendingRegs !== 1 ? 's' : ''}`,    sub: 'Employees requested edit', btn: 'Review', urgency: 'low',                               path: '/attendance' },
+    { icon: CreditCard, color: '#8B5CF6', bg: '#F5F3FF', label: `${pendingExpenses} expense claim${pendingExpenses !== 1 ? 's' : ''}`,         sub: 'Awaiting reimbursement approval', btn: 'Review', urgency: 'medium',               path: '/reimbursements' },
+    { icon: FileText,   color: '#EF4444', bg: '#FEF2F2', label: `Payroll — ${payrollPeriod}`,                                                   sub: stats?.payroll.status ? `Status: ${stats.payroll.status}` : 'Check payroll status', btn: 'View', urgency: stats?.payroll.status === 'draft' ? 'high' : 'low', path: '/payroll' },
+  ]
+
+  // Build leave balance rows from API (my balance)
+  const leaveTypeLabels: Record<string, { label: string; color: string }> = {
+    casual:       { label: 'Casual Leave (CL)',  color: '#3B82F6' },
+    sick:         { label: 'Sick Leave (SL)',     color: '#10B981' },
+    earned:       { label: 'Earned Leave (EL)',   color: '#8B5CF6' },
+    unpaid:       { label: 'Loss of Pay (LOP)',   color: '#EF4444' },
+    maternity:    { label: 'Maternity Leave',     color: '#EC4899' },
+    paternity:    { label: 'Paternity Leave',     color: '#0369A1' },
+    compensatory: { label: 'Comp Off',            color: '#F59E0B' },
+    bereavement:  { label: 'Bereavement',         color: '#64748B' },
+  }
+  const leaveStatusRows = leaveBalance.slice(0, 4).map(b => {
+    const cfg = leaveTypeLabels[b.leave_type] ?? { label: b.leave_type, color: '#94A3B8' }
+    const raw   = b as unknown as Record<string, unknown>
+    const total = (typeof raw.total_days === 'number' ? raw.total_days : null) ?? (b.opening_balance + b.credited)
+    const used  = b.used ?? 0
+    const pct   = total > 0 ? Math.round((used / total) * 100) : 0
+    return { type: cfg.label, used, total, color: cfg.color, pct }
+  })
 
   return (
     <>
@@ -330,7 +356,7 @@ export default function DashboardPage() {
                   {[
                     { icon: FileText, label: 'Export as CSV',          sub: 'Spreadsheet-ready data',    action: () => { exportDashboardCSV(stats, totalStaff, presentToday, onLeave, wfhToday, payrollNet, payrollPeriod ?? 'Apr 2026'); setShowExport(false) } },
                     { icon: Download, label: 'Export as HTML Report',  sub: 'Printable summary page',    action: () => { exportDashboardHTML(totalStaff, presentToday, onLeave, wfhToday, payrollNet, payrollPeriod ?? 'Apr 2026'); setShowExport(false) } },
-                    { icon: BarChart2, label: 'Export Attendance CSV', sub: "Today's attendance log",    action: () => { exportToCSV([['Name','Department','Check-In','Hours','Status'], ...todayAttendance.map(e=>[e.name,e.dept,e.checkIn,e.hours,e.status])], `IHRMS_Attendance_${new Date().toISOString().slice(0,10)}.csv`); setShowExport(false) } },
+                    { icon: BarChart2, label: 'Export Attendance CSV', sub: "Today's attendance log",    action: () => { exportToCSV([['Name','Department','Check-In','Hours','Status'], ...todayLogs.map(l=>[l.employee ? `${l.employee.first_name} ${l.employee.last_name}` : '—', l.employee?.department?.name ?? '—', l.punch_in ?? '—', l.hours_worked != null ? `${l.hours_worked}h` : '—', l.status])], `IHRMS_Attendance_${new Date().toISOString().slice(0,10)}.csv`); setShowExport(false) } },
                   ].map(item => (
                     <button key={item.label} onClick={item.action}
                       style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 0.12s' }}
@@ -378,7 +404,7 @@ export default function DashboardPage() {
                   </div>
                   {[
                     { icon: UserPlus,     label: 'Add New Employee',     sub: 'Onboard a new hire',             color: '#2563eb', path: '/employees' },
-                    { icon: ClipboardList,label: 'Review Leave Requests', sub: `${stats?.pending.leaves ?? 5} awaiting approval`, color: '#d97706', path: '/leaves' },
+                    { icon: ClipboardList,label: 'Review Leave Requests', sub: `${pendingLeaves} awaiting approval`, color: '#d97706', path: '/leaves' },
                     { icon: PlayCircle,   label: 'Run Payroll',           sub: 'Process current month salary',   color: '#7c3aed', path: '/payroll' },
                     { icon: UserCheck,    label: 'Mark Attendance',       sub: "Record today's attendance",       color: '#16a34a', path: '/attendance' },
                     { icon: Briefcase,    label: 'Post Job Opening',       sub: 'Add a new recruitment listing',  color: '#ea580c', path: '/recruitment' },
@@ -477,23 +503,20 @@ export default function DashboardPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div>
                 <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Attendance Rate</p>
-                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>This month</p>
+                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Today</p>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 20, padding: '3px 10px' }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22C55E' }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#15803D' }}>Good</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: attendanceRate >= 80 ? '#F0FDF4' : '#FEF2F2', border: `1px solid ${attendanceRate >= 80 ? '#BBF7D0' : '#FECACA'}`, borderRadius: 20, padding: '3px 10px' }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: attendanceRate >= 80 ? '#22C55E' : '#EF4444' }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: attendanceRate >= 80 ? '#15803D' : '#B91C1C' }}>{attendanceRate >= 80 ? 'Good' : 'Low'}</span>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginBottom: 14 }}>
-              <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, fontWeight: 800, color: '#16A34A', lineHeight: 1 }}>
-                94.2%
-              </span>
-              <span style={{ fontSize: 12, color: '#16A34A', fontWeight: 600, paddingBottom: 4 }}>
-                ↑ 1.4% vs last month
+              <span style={{ fontFamily: "'Outfit', sans-serif", fontSize: 36, fontWeight: 800, color: loading ? '#94A3B8' : '#16A34A', lineHeight: 1 }}>
+                {loading ? '…' : `${attendanceRate}%`}
               </span>
             </div>
             <div style={{ height: 8, borderRadius: 99, background: '#F1F5F9', overflow: 'hidden', marginBottom: 8 }}>
-              <div style={{ height: '100%', width: '94.2%', borderRadius: 99, background: 'linear-gradient(90deg, #16A34A, #22C55E)', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${attendanceRate}%`, borderRadius: 99, background: 'linear-gradient(90deg, #16A34A, #22C55E)', position: 'relative', overflow: 'hidden', transition: 'width 0.6s ease' }}>
                 <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)', animation: 'shimmer-progress 2s linear infinite' }} />
               </div>
             </div>
@@ -511,18 +534,22 @@ export default function DashboardPage() {
                 <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Top 5 departments</p>
               </div>
               <span style={{ background: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE', borderRadius: 20, fontSize: 11, fontWeight: 700, padding: '3px 9px' }}>
-                248 total
+                {loading ? '…' : `${totalStaff} total`}
               </span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {departments.map((d) => (
-                <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ flex: 1, fontSize: 12.5, color: '#374151', fontWeight: 500, minWidth: 0 }}>
-                    {d.name}
+              {loading ? (
+                <p style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '8px 0' }}>Loading…</p>
+              ) : deptDist.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '8px 0' }}>No data</p>
+              ) : deptDist.map((d) => (
+                <div key={d.dept} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ flex: 1, fontSize: 12.5, color: '#374151', fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {d.dept}
                   </span>
                   <div style={{ width: 90, height: 5, borderRadius: 99, background: '#F1F5F9', overflow: 'hidden' }}>
                     <div style={{
-                      height: '100%', width: `${(d.count / d.total) * 100}%`,
+                      height: '100%', width: `${d.pct}%`,
                       borderRadius: 99, background: d.color, transition: 'width 0.6s ease',
                     }} />
                   </div>
@@ -538,13 +565,17 @@ export default function DashboardPage() {
           <div className="card" style={{ padding: '20px 22px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div>
-                <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Leave Status</p>
-                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Organisation average</p>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>My Leave Balance</p>
+                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Current year</p>
               </div>
               <Target size={15} style={{ color: '#94A3B8' }} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {leaveStatus.map((l) => (
+              {loading ? (
+                <p style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '8px 0' }}>Loading…</p>
+              ) : leaveStatusRows.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '8px 0' }}>No balance data</p>
+              ) : leaveStatusRows.map((l) => (
                 <div key={l.type}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -557,14 +588,14 @@ export default function DashboardPage() {
                   </div>
                   {l.total > 0 && (
                     <div style={{ height: 3, borderRadius: 99, background: '#F1F5F9', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${l.pct}%`, background: l.color, borderRadius: 99 }} />
+                      <div style={{ height: '100%', width: `${l.pct}%`, background: l.color, borderRadius: 99, transition: 'width 0.6s ease' }} />
                     </div>
                   )}
                 </div>
               ))}
             </div>
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #F1F5F9', fontSize: 11, color: '#94A3B8' }}>
-              Average across all employees · April 2026
+              Your leave balance · {new Date().getFullYear()}
             </div>
           </div>
         </div>
@@ -580,7 +611,7 @@ export default function DashboardPage() {
             }}>
               <div>
                 <p style={{ fontSize: 13.5, fontWeight: 700, color: '#0F172A' }}>Today&apos;s Attendance</p>
-                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>1 April 2026 · 248 employees</p>
+                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} · {totalStaff} employees</p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: '#64748B', marginRight: 4 }}>
@@ -591,46 +622,60 @@ export default function DashboardPage() {
                     </span>
                   ))}
                 </div>
-                <button style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#F47920', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                <button onClick={() => router.push('/attendance')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#F47920', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
                   View All <ChevronRight size={12} />
                 </button>
               </div>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#F8FAFC' }}>
-                    {['Employee', 'Department', 'Check-In', 'Hours', 'Status'].map(h => (
-                      <th key={h} style={{
-                        padding: '9px 16px', textAlign: 'left',
-                        fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase',
-                        letterSpacing: '0.06em', color: '#94A3B8',
-                        borderBottom: '1px solid #EEF0F4', whiteSpace: 'nowrap',
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {todayAttendance.map((emp, i) => (
-                    <tr key={emp.name}
-                      style={{ borderBottom: i < todayAttendance.length - 1 ? '1px solid #F3F4F6' : 'none', transition: 'background 0.1s' }}
-                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#F9FAFB'}
-                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
-                    >
-                      <td style={{ padding: '10px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <Avatar name={emp.name} size={28} />
-                          <span style={{ fontWeight: 600, color: '#1F2937', fontSize: 13 }}>{emp.name}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#64748B', fontSize: 12.5 }}>{emp.dept}</td>
-                      <td style={{ padding: '10px 16px', fontWeight: 600, color: '#374151', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>{emp.checkIn}</td>
-                      <td style={{ padding: '10px 16px', color: '#94A3B8', fontSize: 12 }}>{emp.hours}</td>
-                      <td style={{ padding: '10px 16px' }}><StatusBadge status={emp.status} /></td>
+              {loading ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>Loading attendance…</div>
+              ) : todayLogs.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>No attendance records for today</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#F8FAFC' }}>
+                      {['Employee', 'Department', 'Check-In', 'Hours', 'Status'].map(h => (
+                        <th key={h} style={{
+                          padding: '9px 16px', textAlign: 'left',
+                          fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase',
+                          letterSpacing: '0.06em', color: '#94A3B8',
+                          borderBottom: '1px solid #EEF0F4', whiteSpace: 'nowrap',
+                        }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {todayLogs.map((log, i) => {
+                      const name = log.employee ? `${log.employee.first_name} ${log.employee.last_name}` : '—'
+                      const dept = log.employee?.department?.name ?? '—'
+                      const checkIn = log.punch_in ?? '—'
+                      const hours = log.hours_worked != null ? `${log.hours_worked}h` : '—'
+                      const statusMap: Record<string, string> = { present: 'Present', late: 'Late', absent: 'Absent', work_from_home: 'WFH', on_leave: 'On Leave', half_day: 'Present' }
+                      const status = statusMap[log.status] ?? log.status
+                      return (
+                        <tr key={log.id}
+                          style={{ borderBottom: i < todayLogs.length - 1 ? '1px solid #F3F4F6' : 'none', transition: 'background 0.1s' }}
+                          onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#F9FAFB'}
+                          onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+                        >
+                          <td style={{ padding: '10px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                              <Avatar name={name} size={28} />
+                              <span style={{ fontWeight: 600, color: '#1F2937', fontSize: 13 }}>{name}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 16px', color: '#64748B', fontSize: 12.5 }}>{dept}</td>
+                          <td style={{ padding: '10px 16px', fontWeight: 600, color: '#374151', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>{checkIn}</td>
+                          <td style={{ padding: '10px 16px', color: '#94A3B8', fontSize: 12 }}>{hours}</td>
+                          <td style={{ padding: '10px 16px' }}><StatusBadge status={status} /></td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
 
@@ -650,17 +695,17 @@ export default function DashboardPage() {
                 borderRadius: 20, fontSize: 11, fontWeight: 700, padding: '3px 9px',
               }}>
                 <Activity size={10} />
-                18 total
+                {loading ? '…' : `${pendingLeaves + pendingExpenses + pendingRegs} total`}
               </span>
             </div>
 
             <div style={{ padding: '6px 0' }}>
-              {pendingActions.map((item, i) => {
+              {livePendingActions.map((item, i) => {
                 const Icon = item.icon
                 return (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', gap: 14, padding: '12px 18px',
-                    borderBottom: i < pendingActions.length - 1 ? '1px solid #F8FAFC' : 'none',
+                    borderBottom: i < livePendingActions.length - 1 ? '1px solid #F8FAFC' : 'none',
                     transition: 'background 0.1s',
                   }}
                     onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#FAFBFC'}
@@ -685,7 +730,7 @@ export default function DashboardPage() {
                         animation: 'notif-ring 1.5s ease-in-out infinite',
                       }} />
                     )}
-                    <button style={{
+                    <button onClick={() => router.push(item.path)} style={{
                       background: '#F8FAFC', border: '1px solid #E2E8F0',
                       borderRadius: 7, padding: '5px 12px',
                       fontSize: 11.5, fontWeight: 600, color: '#374151', cursor: 'pointer',
@@ -708,7 +753,7 @@ export default function DashboardPage() {
             }}>
               <AlertCircle size={13} style={{ color: '#F59E0B', flexShrink: 0 }} />
               <span style={{ fontSize: 11.5, color: '#64748B' }}>
-                4 action types · 18 items need resolution today
+                {loading ? 'Loading…' : `${pendingLeaves + pendingExpenses + pendingRegs} items need resolution`}
               </span>
             </div>
           </div>
@@ -725,7 +770,7 @@ export default function DashboardPage() {
             }}>
               <div>
                 <p style={{ fontSize: 13.5, fontWeight: 700, color: '#0F172A' }}>Recent Joiners</p>
-                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>New employees this month</p>
+                <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Latest active employees</p>
               </div>
               <span style={{
                 display: 'flex', alignItems: 'center', gap: 5,
@@ -733,61 +778,76 @@ export default function DashboardPage() {
                 borderRadius: 20, fontSize: 11, fontWeight: 700, padding: '3px 9px',
               }}>
                 <Star size={10} />
-                5 this month
+                {loading ? '…' : `${newJoiners} this month`}
               </span>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#F8FAFC' }}>
-                    {['Employee', 'Dept / Designation', 'Joined', 'Status'].map(h => (
-                      <th key={h} style={{
-                        padding: '9px 16px', textAlign: 'left',
-                        fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase',
-                        letterSpacing: '0.06em', color: '#94A3B8',
-                        borderBottom: '1px solid #EEF0F4', whiteSpace: 'nowrap',
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentJoiners.map((emp, i) => (
-                    <tr key={emp.empId}
-                      style={{ borderBottom: i < recentJoiners.length - 1 ? '1px solid #F3F4F6' : 'none', transition: 'background 0.1s' }}
-                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#F9FAFB'}
-                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
-                    >
-                      <td style={{ padding: '10px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <Avatar name={emp.name} size={28} />
-                          <div>
-                            <p style={{ fontWeight: 600, color: '#1F2937', fontSize: 13, lineHeight: 1.3 }}>{emp.name}</p>
-                            <p style={{ fontSize: 10.5, color: '#94A3B8', lineHeight: 1.2 }}>{emp.empId}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <p style={{ fontSize: 12.5, fontWeight: 500, color: '#374151', lineHeight: 1.3 }}>{emp.dept}</p>
-                        <p style={{ fontSize: 11.5, color: '#94A3B8', lineHeight: 1.2 }}>{emp.designation}</p>
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <p style={{ fontSize: 12, color: '#374151', lineHeight: 1.3 }}>{emp.joinDate}</p>
-                        <p style={{ fontSize: 10.5, color: '#94A3B8' }}>{emp.daysAgo}d ago</p>
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          background: '#FFFBEB', color: '#B45309', border: '1px solid #FDE68A',
-                          borderRadius: 20, fontSize: 10.5, fontWeight: 700, padding: '2px 8px',
-                        }}>
-                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F59E0B' }} />
-                          Probation
-                        </span>
-                      </td>
+              {loading ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>Loading…</div>
+              ) : recentEmps.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>No employees found</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#F8FAFC' }}>
+                      {['Employee', 'Dept / Designation', 'Joined', 'Status'].map(h => (
+                        <th key={h} style={{
+                          padding: '9px 16px', textAlign: 'left',
+                          fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase',
+                          letterSpacing: '0.06em', color: '#94A3B8',
+                          borderBottom: '1px solid #EEF0F4', whiteSpace: 'nowrap',
+                        }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {recentEmps.map((emp, i) => {
+                      const name = `${emp.first_name} ${emp.last_name}`
+                      const joinDate = emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+                      const daysAgo = emp.hire_date ? Math.floor((Date.now() - new Date(emp.hire_date).getTime()) / 86400000) : null
+                      const statusLabel = emp.status === 'probation' ? 'Probation' : emp.status === 'active' ? 'Active' : emp.status
+                      const statusStyles = emp.status === 'probation'
+                        ? { bg: '#FFFBEB', color: '#B45309', border: '#FDE68A', dot: '#F59E0B' }
+                        : { bg: '#F0FDF4', color: '#15803D', border: '#BBF7D0', dot: '#22C55E' }
+                      return (
+                        <tr key={emp.id}
+                          style={{ borderBottom: i < recentEmps.length - 1 ? '1px solid #F3F4F6' : 'none', transition: 'background 0.1s' }}
+                          onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#F9FAFB'}
+                          onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+                        >
+                          <td style={{ padding: '10px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                              <Avatar name={name} size={28} />
+                              <div>
+                                <p style={{ fontWeight: 600, color: '#1F2937', fontSize: 13, lineHeight: 1.3 }}>{name}</p>
+                                <p style={{ fontSize: 10.5, color: '#94A3B8', lineHeight: 1.2 }}>{emp.emp_id}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 16px' }}>
+                            <p style={{ fontSize: 12.5, fontWeight: 500, color: '#374151', lineHeight: 1.3 }}>{emp.department?.name ?? '—'}</p>
+                            <p style={{ fontSize: 11.5, color: '#94A3B8', lineHeight: 1.2 }}>{emp.designation?.title ?? '—'}</p>
+                          </td>
+                          <td style={{ padding: '10px 16px' }}>
+                            <p style={{ fontSize: 12, color: '#374151', lineHeight: 1.3 }}>{joinDate}</p>
+                            {daysAgo !== null && <p style={{ fontSize: 10.5, color: '#94A3B8' }}>{daysAgo}d ago</p>}
+                          </td>
+                          <td style={{ padding: '10px 16px' }}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              background: statusStyles.bg, color: statusStyles.color, border: `1px solid ${statusStyles.border}`,
+                              borderRadius: 20, fontSize: 10.5, fontWeight: 700, padding: '2px 8px',
+                            }}>
+                              <span style={{ width: 5, height: 5, borderRadius: '50%', background: statusStyles.dot }} />
+                              {statusLabel}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
 

@@ -7,8 +7,8 @@ import {
   Edit, Camera, Building2, Clock, Award, FileText,
   CheckCircle2, AlertCircle, Download, Key, Bell, Lock,
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
-import { employeesApi, type Employee as ApiEmployee } from '@/lib/api-client'
+import React, { useState, useEffect } from 'react'
+import { employeesApi, leavesApi, payrollApi, warningsApi, type Employee as ApiEmployee } from '@/lib/api-client'
 
 /* ─────────────────────────────────────────────────────────────
    MOCK PROFILE DATA
@@ -32,20 +32,14 @@ const PROFILE = {
   ifsc:        'HDFC0001234',
 }
 
-const ACTIVITY = [
-  { label: 'Approved Priya Sharma\'s leave request',  time: 'Today, 10:32 AM',   icon: CheckCircle2, color: '#16A34A' },
-  { label: 'Ran February 2026 payroll',               time: 'Yesterday, 3:15 PM',icon: FileText,     color: '#1D4ED8' },
-  { label: 'Onboarded Suresh Babu (EMP/2026/014)',    time: '2 days ago',         icon: User,         color: '#E8622A' },
-  { label: 'Updated salary structure for Vikram Singh',time: '3 days ago',        icon: Edit,         color: '#7C3AED' },
-  { label: 'Issued warning to Kiran Roy',             time: '5 days ago',         icon: AlertCircle,  color: '#DC2626' },
-]
+interface ActivityItem {
+  label: string; time: string
+  icon: React.ElementType; color: string
+}
 
-const STATS = [
-  { label: 'Leaves Approved',    value: '142', color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
-  { label: 'Payrolls Processed', value: '24',  color: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE' },
-  { label: 'Employees Onboarded',value: '38',  color: '#E8622A', bg: '#FFF7ED', border: '#FED7AA' },
-  { label: 'Actions This Month', value: '91',  color: '#7C3AED', bg: '#FAF5FF', border: '#E9D5FF' },
-]
+interface StatItem {
+  label: string; value: string; color: string; bg: string; border: string
+}
 
 /* ─────────────────────────────────────────────────────────────
    PAGE
@@ -53,6 +47,13 @@ const STATS = [
 export default function ProfilePage() {
   const { data: session } = useSession()
   const [empProfile, setEmpProfile] = useState<ApiEmployee | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityItem[]>([])
+  const [profileStats, setProfileStats] = useState<StatItem[]>([
+    { label: 'Leaves Approved',    value: '…', color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
+    { label: 'Payrolls Processed', value: '…', color: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE' },
+    { label: 'Employees Active',   value: '…', color: '#E8622A', bg: '#FFF7ED', border: '#FED7AA' },
+    { label: 'Warnings Issued',    value: '…', color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
+  ])
 
   useEffect(() => {
     if (session?.user?.email) {
@@ -61,6 +62,50 @@ export default function ProfilePage() {
       }).catch(() => {})
     }
   }, [session?.user?.email])
+
+  useEffect(() => {
+    Promise.all([
+      leavesApi.list({ status: 'approved', limit: 3 }),
+      payrollApi.list({ limit: 3 }),
+      warningsApi.list({ limit: 2 }),
+      employeesApi.list({ status: 'active', limit: 1 }),
+    ]).then(([lvRes, prRes, warnRes, empRes]) => {
+      // Build stats
+      setProfileStats([
+        { label: 'Leaves Approved',    value: String(lvRes.count   ?? lvRes.data.length),  color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
+        { label: 'Payrolls Processed', value: String(prRes.count   ?? prRes.data.length),  color: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE' },
+        { label: 'Employees Active',   value: String(empRes.count  ?? empRes.data.length), color: '#E8622A', bg: '#FFF7ED', border: '#FED7AA' },
+        { label: 'Warnings Issued',    value: String(warnRes.count ?? warnRes.data.length),color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
+      ])
+
+      // Build activity timeline
+      function relTime(iso: string): string {
+        const diff = Date.now() - new Date(iso).getTime()
+        const mins = Math.floor(diff / 60_000)
+        if (mins < 60) return `${mins}m ago`
+        const hrs = Math.floor(mins / 60)
+        if (hrs < 24) return `${hrs}h ago`
+        const days = Math.floor(hrs / 24)
+        return days === 1 ? 'Yesterday' : `${days} days ago`
+      }
+
+      const items: ActivityItem[] = []
+      for (const l of lvRes.data) {
+        const emp = l.employee ? `${l.employee.first_name} ${l.employee.last_name}` : 'Employee'
+        items.push({ label: `Approved ${emp}'s ${l.leave_type} leave request`, time: relTime(l.approved_at ?? l.updated_at ?? l.created_at), icon: CheckCircle2, color: '#16A34A' })
+      }
+      for (const p of prRes.data) {
+        const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        items.push({ label: `${p.status === 'processed' ? 'Ran' : 'Created'} ${MONTHS[(p.month ?? 1) - 1]} ${p.year} payroll`, time: relTime(p.created_at ?? new Date().toISOString()), icon: FileText, color: '#1D4ED8' })
+      }
+      for (const w of warnRes.data) {
+        const emp = w.employee ? `${w.employee.first_name} ${w.employee.last_name}` : 'Employee'
+        items.push({ label: `Issued warning to ${emp}`, time: relTime(w.issued_date), icon: AlertCircle, color: '#DC2626' })
+      }
+      // Sort by recency (items already carry their time strings; sort by original timestamps via index order which is newest-first from API)
+      setActivityLog(items.slice(0, 6))
+    }).catch(console.error)
+  }, [])
 
   const name        = empProfile ? `${empProfile.first_name} ${empProfile.last_name}` : (session?.user?.name  ?? PROFILE.name)
   const email       = session?.user?.email ?? PROFILE.email
@@ -152,7 +197,7 @@ export default function ProfilePage() {
 
         {/* ── STAT STRIP ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {STATS.map(s => (
+          {profileStats.map(s => (
             <div key={s.label} className="rounded-xl p-4 border text-center transition-all hover:shadow-sm hover:-translate-y-0.5"
               style={{ background: s.bg, borderColor: s.border }}>
               <p className="text-2xl font-extrabold" style={{ color: s.color }}>{s.value}</p>
@@ -278,7 +323,9 @@ export default function ProfilePage() {
                   <div className="absolute left-4 top-4 bottom-4 w-px" style={{ background: '#F1F5F9' }} />
 
                   <div className="space-y-1">
-                    {ACTIVITY.map((item, i) => (
+                    {activityLog.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-6 text-center">No recent activity to display.</p>
+                    ) : activityLog.map((item, i) => (
                       <div key={i} className="flex items-start gap-4 p-3 rounded-xl hover:bg-gray-50 transition-colors group">
                         <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 z-10"
                           style={{ background: `${item.color}15`, color: item.color }}>

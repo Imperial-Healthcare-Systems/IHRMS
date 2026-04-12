@@ -17,64 +17,7 @@ type Tab      = 'requisitions' | 'pipeline' | 'interviews' | 'offers'
 type Priority = 'Urgent' | 'High' | 'Medium' | 'Low'
 type Stage    = 'All' | 'Applied' | 'Screening' | 'Interview' | 'Technical' | 'HR Round' | 'Offer' | 'Selected' | 'Rejected'
 
-/* ─────────────────────────────────────────────────────────────
-   MOCK DATA
-───────────────────────────────────────────────────────────── */
-const JR = [
-  { id:'JR001', title:'Senior Software Engineer', dept:'Engineering',     loc:'Bengaluru', open:2, filled:0, exp:'5–8 yr', sal:'15–25 LPA', pri:'Urgent' as Priority, status:'Open',    apps:18, days:23 },
-  { id:'JR002', title:'HR Business Partner',       dept:'Human Resources', loc:'Mumbai',    open:1, filled:0, exp:'3–6 yr', sal:'8–14 LPA',  pri:'High'   as Priority, status:'Open',    apps:11, days:21 },
-  { id:'JR003', title:'Sales Manager',             dept:'Sales',           loc:'Delhi',     open:3, filled:1, exp:'4–7 yr', sal:'12–20 LPA', pri:'High'   as Priority, status:'Open',    apps:24, days:25 },
-  { id:'JR004', title:'Data Analyst',              dept:'Engineering',     loc:'Hyderabad', open:2, filled:1, exp:'2–4 yr', sal:'6–10 LPA',  pri:'Medium' as Priority, status:'Open',    apps:9,  days:18 },
-  { id:'JR005', title:'Finance Executive',         dept:'Finance',         loc:'Mumbai',    open:1, filled:0, exp:'2–4 yr', sal:'5–8 LPA',   pri:'Medium' as Priority, status:'On Hold', apps:6,  days:15 },
-  { id:'JR006', title:'Customer Support Lead',     dept:'Operations',      loc:'Pune',      open:2, filled:0, exp:'3–5 yr', sal:'6–10 LPA',  pri:'Low'    as Priority, status:'Open',    apps:14, days:13 },
-  { id:'JR007', title:'Marketing Manager',         dept:'Marketing',       loc:'Bengaluru', open:1, filled:1, exp:'5–8 yr', sal:'12–18 LPA', pri:'Medium' as Priority, status:'Filled',  apps:21, days:33 },
-  { id:'JR008', title:'DevOps Engineer',           dept:'Engineering',     loc:'Bengaluru', open:1, filled:0, exp:'4–6 yr', sal:'18–28 LPA', pri:'Urgent' as Priority, status:'Open',    apps:7,  days:11 },
-]
-
-const CANDIDATES = [
-  { id:1,  name:'Rohit Verma',    co:'TCS',           pos:'Senior Software Engineer', exp:'6 yr', ctc:'22 LPA', src:'LinkedIn', stage:'Interview' as Stage, upd:'Apr 1'  },
-  { id:2,  name:'Ananya Singh',   co:'Infosys',       pos:'HR Business Partner',      exp:'4 yr', ctc:'11 LPA', src:'Naukri',   stage:'Screening' as Stage, upd:'Mar 31' },
-  { id:3,  name:'Vikas Sharma',   co:'Wipro',         pos:'Sales Manager',            exp:'5 yr', ctc:'16 LPA', src:'Referral', stage:'HR Round'  as Stage, upd:'Apr 1'  },
-  { id:4,  name:'Meera Nair',     co:'HCL',           pos:'Data Analyst',             exp:'3 yr', ctc:'8 LPA',  src:'LinkedIn', stage:'Technical' as Stage, upd:'Mar 30' },
-  { id:5,  name:'Arjun Patel',    co:'Accenture',     pos:'Senior Software Engineer', exp:'7 yr', ctc:'26 LPA', src:'Direct',   stage:'Offer'     as Stage, upd:'Apr 1'  },
-  { id:6,  name:'Divya Krishnan', co:'Cognizant',     pos:'Finance Executive',        exp:'3 yr', ctc:'7 LPA',  src:'Indeed',   stage:'Applied'   as Stage, upd:'Mar 29' },
-  { id:7,  name:'Sanjay Gupta',   co:'Deloitte',      pos:'DevOps Engineer',          exp:'5 yr', ctc:'24 LPA', src:'LinkedIn', stage:'Interview' as Stage, upd:'Apr 1'  },
-  { id:8,  name:'Priya Mehta',    co:'IBM',           pos:'Marketing Manager',        exp:'6 yr', ctc:'15 LPA', src:'Agency',   stage:'Selected'  as Stage, upd:'Mar 28' },
-  { id:9,  name:'Karan Joshi',    co:'Capgemini',     pos:'Customer Support Lead',    exp:'4 yr', ctc:'8 LPA',  src:'Campus',   stage:'Applied'   as Stage, upd:'Mar 30' },
-  { id:10, name:'Neha Agarwal',   co:'Tech Mahindra', pos:'Data Analyst',             exp:'2 yr', ctc:'7 LPA',  src:'Naukri',   stage:'Rejected'  as Stage, upd:'Mar 25' },
-  { id:11, name:'Suresh Babu',    co:'Oracle',        pos:'Senior Software Engineer', exp:'8 yr', ctc:'28 LPA', src:'Referral', stage:'Offer'     as Stage, upd:'Mar 31' },
-  { id:12, name:'Pooja Rao',      co:'Mindtree',      pos:'HR Business Partner',      exp:'5 yr', ctc:'12 LPA', src:'LinkedIn', stage:'Screening' as Stage, upd:'Apr 1'  },
-  { id:13, name:'Rahul Tiwari',   co:'Hexaware',      pos:'Sales Manager',            exp:'6 yr', ctc:'18 LPA', src:'Naukri',   stage:'Technical' as Stage, upd:'Mar 29' },
-  { id:14, name:'Kavya Menon',    co:'Mphasis',       pos:'DevOps Engineer',          exp:'4 yr', ctc:'20 LPA', src:'LinkedIn', stage:'Interview' as Stage, upd:'Apr 1'  },
-  { id:15, name:'Aditya Kumar',   co:'Zensar',        pos:'Finance Executive',        exp:'2 yr', ctc:'6 LPA',  src:'Indeed',   stage:'Applied'   as Stage, upd:'Mar 28' },
-]
-
-const INTERVIEWS = [
-  { id:1, name:'Rohit Verma',  pos:'Senior Software Engineer', round:'Technical · Round 2', date:'Apr 3', time:'10:00 AM', mode:'Video',     ivrs:['Pradeep Nair','Sunita Mehta'], status:'Scheduled' },
-  { id:2, name:'Sanjay Gupta', pos:'DevOps Engineer',          round:'Screening · Round 1', date:'Apr 3', time:'2:00 PM',  mode:'Phone',     ivrs:['Ritu Sharma'],                 status:'Scheduled' },
-  { id:3, name:'Meera Nair',   pos:'Data Analyst',             round:'Technical · Round 2', date:'Apr 4', time:'11:00 AM', mode:'Video',     ivrs:['Rahul Dev'],                   status:'Completed' },
-  { id:4, name:'Kavya Menon',  pos:'DevOps Engineer',          round:'Screening · Round 1', date:'Apr 4', time:'3:00 PM',  mode:'In-person', ivrs:['Anita Verma'],                 status:'Scheduled' },
-  { id:5, name:'Arjun Patel',  pos:'Senior Software Engineer', round:'HR Round · Round 3',  date:'Apr 5', time:'10:30 AM', mode:'Video',     ivrs:['Deepa Srinivas'],              status:'Scheduled' },
-  { id:6, name:'Rahul Tiwari', pos:'Sales Manager',            round:'HR Round · Round 3',  date:'Apr 5', time:'4:00 PM',  mode:'In-person', ivrs:['Kiran Reddy'],                 status:'Completed' },
-]
-
-const OFFERS = [
-  { id:1, name:'Arjun Patel', pos:'Senior Software Engineer', ctc:'₹24 LPA', offered:'Apr 1, 2026',  joins:'Apr 21, 2026', status:'Pending',  dept:'Engineering' },
-  { id:2, name:'Suresh Babu', pos:'Senior Software Engineer', ctc:'₹26 LPA', offered:'Mar 28, 2026', joins:'Apr 14, 2026', status:'Accepted', dept:'Engineering' },
-  { id:3, name:'Priya Mehta', pos:'Marketing Manager',        ctc:'₹15 LPA', offered:'Mar 25, 2026', joins:'Apr 7, 2026',  status:'Accepted', dept:'Marketing'   },
-]
-
-const FUNNEL = [
-  { label: 'Applied',   count: 47 },
-  { label: 'Screening', count: 12 },
-  { label: 'Interview', count: 8  },
-  { label: 'Technical', count: 10 },
-  { label: 'HR Round',  count: 6  },
-  { label: 'Offer',     count: 5  },
-  { label: 'Selected',  count: 3  },
-]
-
-const DEPARTMENTS = ['All Departments', 'Engineering', 'Human Resources', 'Sales', 'Finance', 'Operations', 'Marketing']
+const DEPARTMENTS = ['All Departments']
 const STAGES: Stage[] = ['All', 'Applied', 'Screening', 'Interview', 'Technical', 'HR Round', 'Offer', 'Selected', 'Rejected']
 
 /* ─────────────────────────────────────────────────────────────
@@ -213,65 +156,114 @@ export default function RecruitmentPage() {
   const [pipeSearch, setPipeSearch] = useState('')
   const [pipeStage,  setPipeStage]  = useState<Stage>('All')
 
-  const [apiJR, setApiJR]               = useState(JR)
-  const [apiCandidates, setApiCandidates] = useState(CANDIDATES)
-  const [apiInterviews, setApiInterviews] = useState(INTERVIEWS)
+  // Real data — no mock fallback
+  type JRRow = { id: string; title: string; dept: string; loc: string; open: number; filled: number; exp: string; sal: string; pri: Priority; status: string; apps: number; days: number }
+  type CandRow = { id: string; name: string; co: string; pos: string; exp: string; ctc: string; src: string; stage: Stage; upd: string }
+  type IVRow = { id: string; name: string; pos: string; round: string; date: string; time: string; mode: string; ivrs: string[]; status: string }
 
-  useEffect(() => {
-    // Fetch job requisitions
-    recruitmentApi.requisitions.list({ limit: 100 }).then(res => {
-      if (res.data.length > 0) {
-        setApiJR((res.data as ApiJobRequisition[]).map(r => ({
-          id: r.id.slice(0, 8).toUpperCase(),
-          title: r.title,
-          dept: r.department?.name ?? 'Unknown',
-          loc: r.work_location ?? 'Remote',
-          open: r.vacancies ?? 1,
-          filled: 0,
-          exp: r.experience_min != null ? `${r.experience_min}–${r.experience_max ?? r.experience_min + 3} yr` : 'Any',
-          sal: r.ctc_budget_min ? `${Math.round(r.ctc_budget_min / 100000)}–${Math.round((r.ctc_budget_max ?? r.ctc_budget_min * 1.5) / 100000)} LPA` : 'Competitive',
-          pri: (r.priority ? r.priority.charAt(0).toUpperCase() + r.priority.slice(1) : 'Medium') as Priority,
-          status: r.status === 'open' ? 'Open' : r.status === 'on_hold' ? 'On Hold' : r.status === 'filled' ? 'Filled' : 'Closed',
+  const [apiJR, setApiJR]                   = useState<JRRow[]>([])
+  const [apiCandidates, setApiCandidates]   = useState<CandRow[]>([])
+  const [apiInterviews, setApiInterviews]   = useState<IVRow[]>([])
+  const [loadingJR, setLoadingJR]           = useState(true)
+  const [loadingCands, setLoadingCands]     = useState(true)
+  const [loadingIVs, setLoadingIVs]         = useState(true)
+  const [deptFilterList, setDeptFilterList] = useState<string[]>(['All Departments'])
+
+  // Helper: cap priority to known values
+  function toPriority(p?: string): Priority {
+    const cap = p ? p.charAt(0).toUpperCase() + p.slice(1) : 'Medium'
+    return (['Urgent','High','Medium','Low'].includes(cap) ? cap : 'Medium') as Priority
+  }
+
+  const fetchAll = useCallback(async () => {
+    // Requisitions
+    try {
+      const res = await fetch('/api/recruitment/requisitions?limit=100')
+      const json = await res.json()
+      const rows: JRRow[] = (json.data ?? []).map((r: Record<string, unknown>) => {
+        const dept = r.department as Record<string, unknown> | null
+        const minExp = Number(r.min_experience_years ?? 0)
+        const maxExp = r.max_experience_years ? Number(r.max_experience_years) : minExp + 3
+        const minCtc = r.min_ctc ? Math.round(Number(r.min_ctc) / 100000) : null
+        const maxCtc = r.max_ctc ? Math.round(Number(r.max_ctc) / 100000) : null
+        const status = String(r.status ?? 'open')
+        return {
+          id: String(r.id ?? '').slice(0, 8).toUpperCase(),
+          title: String(r.title ?? ''),
+          dept: String(dept?.name ?? '—'),
+          loc: String(r.location ?? 'Remote'),
+          open: Number(r.no_of_positions ?? 1),
+          filled: Number(r.filled_positions ?? 0),
+          exp: `${minExp}–${maxExp} yr`,
+          sal: minCtc ? `${minCtc}–${maxCtc ?? minCtc + 5} LPA` : 'Competitive',
+          pri: toPriority(String(r.priority ?? 'medium')),
+          status: status === 'open' ? 'Open' : status === 'on_hold' ? 'On Hold' : status === 'filled' ? 'Filled' : 'Closed',
           apps: 0,
-          days: Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000),
-        })))
-      }
-    }).catch(() => {})
+          days: Math.floor((Date.now() - new Date(String(r.created_at)).getTime()) / 86400000),
+        }
+      })
+      setApiJR(rows)
+      // Build department dropdown from real data
+      const depts = ['All Departments', ...Array.from(new Set(rows.map(r => r.dept).filter(d => d !== '—')))]
+      setDeptFilterList(depts)
+    } catch (e) { console.error('[recruitment JR]', e) }
+    finally { setLoadingJR(false) }
 
-    // Fetch candidates
-    recruitmentApi.candidates.list({ limit: 100 }).then(res => {
-      if (res.data.length > 0) {
-        setApiCandidates((res.data as ApiCandidate[]).map((c, idx) => ({
-          id: idx + 1,
-          name: c.name,
-          co: c.current_employer ?? 'Unknown',
-          pos: c.requisition?.title ?? 'Unknown',
-          exp: c.experience_years != null ? `${c.experience_years} yr` : 'N/A',
-          ctc: c.current_ctc ? `${Math.round(c.current_ctc / 100000)} LPA` : 'N/A',
-          src: c.source ?? 'Direct',
-          stage: (c.stage ? c.stage.charAt(0).toUpperCase() + c.stage.slice(1) : 'Applied') as Stage,
-          upd: new Date(c.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
-        })))
-      }
-    }).catch(() => {})
+    // Candidates
+    try {
+      const res = await fetch('/api/recruitment/candidates?limit=200')
+      const json = await res.json()
+      const rows: CandRow[] = (json.data ?? []).map((c: Record<string, unknown>) => {
+        const req = c.requisition as Record<string, unknown> | null
+        const rawStatus = String(c.status ?? 'applied')
+        const stageMap: Record<string, Stage> = {
+          applied: 'Applied', screening: 'Screening', interview: 'Interview',
+          technical: 'Technical', hr_round: 'HR Round', offer: 'Offer',
+          selected: 'Selected', rejected: 'Rejected',
+        }
+        return {
+          id: String(c.id ?? ''),
+          name: `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
+          co: String(c.current_company ?? '—'),
+          pos: String(req?.title ?? '—'),
+          exp: c.total_experience != null ? `${c.total_experience} yr` : '—',
+          ctc: c.current_ctc ? `${Math.round(Number(c.current_ctc) / 100000)} LPA` : '—',
+          src: String(c.source ?? 'Direct'),
+          stage: stageMap[rawStatus] ?? 'Applied',
+          upd: c.updated_at ? new Date(String(c.updated_at)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—',
+        }
+      })
+      setApiCandidates(rows)
+    } catch (e) { console.error('[recruitment candidates]', e) }
+    finally { setLoadingCands(false) }
 
-    // Fetch interviews
-    recruitmentApi.interviews.list().then(res => {
-      if (res.data.length > 0) {
-        setApiInterviews((res.data as ApiInterview[]).map((iv, idx) => ({
-          id: idx + 1,
-          name: iv.candidate?.name ?? 'Unknown',
-          pos: 'Position',
-          round: `${iv.interview_type} · Round ${iv.round_number}`,
-          date: new Date(iv.scheduled_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
-          time: new Date(iv.scheduled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-          mode: iv.interview_type === 'video' ? 'Video' : iv.interview_type === 'phone' ? 'Phone' : 'In-person',
-          ivrs: [],
-          status: iv.status === 'completed' ? 'Completed' : 'Scheduled',
-        })))
-      }
-    }).catch(() => {})
+    // Interviews
+    try {
+      const res = await fetch('/api/recruitment/interviews?limit=100')
+      const json = await res.json()
+      const rows: IVRow[] = (json.data ?? []).map((iv: Record<string, unknown>) => {
+        const cand = iv.candidate as Record<string, unknown> | null
+        const req  = iv.requisition as Record<string, unknown> | null
+        const dt = iv.scheduled_at ? new Date(String(iv.scheduled_at)) : null
+        const modeRaw = String(iv.mode ?? 'video')
+        return {
+          id: String(iv.id ?? ''),
+          name: cand ? `${cand.first_name} ${cand.last_name}` : '—',
+          pos: String(req?.title ?? '—'),
+          round: `${iv.round_name ?? iv.round_number ?? 'Round'} · Round ${iv.round_number ?? 1}`,
+          date: dt ? dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—',
+          time: dt ? dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
+          mode: modeRaw === 'video' ? 'Video' : modeRaw === 'phone' ? 'Phone' : 'In-person',
+          ivrs: Array.isArray(iv.interviewers) ? iv.interviewers as string[] : [],
+          status: iv.result === 'pass' || iv.result === 'fail' || iv.result === 'no_show' ? 'Completed' : 'Scheduled',
+        }
+      })
+      setApiInterviews(rows)
+    } catch (e) { console.error('[recruitment interviews]', e) }
+    finally { setLoadingIVs(false) }
   }, [])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
 
   const filteredJR = useMemo(() => apiJR.filter((j) => {
     const q = reqSearch.toLowerCase()
@@ -292,13 +284,20 @@ export default function RecruitmentPage() {
   }), [apiCandidates, pipeSearch, pipeStage])
 
   const groupedInterviews = useMemo(() => {
-    const groups: Record<string, typeof INTERVIEWS> = {}
+    const groups: Record<string, IVRow[]> = {}
     apiInterviews.forEach((iv) => {
       if (!groups[iv.date]) groups[iv.date] = []
       groups[iv.date].push(iv)
     })
     return groups
   }, [apiInterviews])
+
+  // Funnel computed from real candidate stages
+  const funnelStages = ['Applied','Screening','Interview','Technical','HR Round','Offer','Selected']
+  const funnel = useMemo(() => funnelStages.map(label => ({
+    label,
+    count: apiCandidates.filter(c => c.stage === label).length,
+  })), [apiCandidates])
 
   const hasReqFilters = reqSearch || reqDept !== 'All Departments' || reqPri !== 'All Priority' || reqStatus !== 'All Status'
 
@@ -307,10 +306,8 @@ export default function RecruitmentPage() {
   }
 
   /* ── View modals ── */
-  type JRItem = typeof JR[0]
-  type CandItem = typeof CANDIDATES[0]
-  const [viewJR, setViewJR]     = useState<JRItem | null>(null)
-  const [viewCand, setViewCand] = useState<CandItem | null>(null)
+  const [viewJR, setViewJR]     = useState<JRRow | null>(null)
+  const [viewCand, setViewCand] = useState<CandRow | null>(null)
 
   /* ── Row action dropdown ── */
   const [menuOpen, setMenuOpen] = useState<{ type: string; id: string | number } | null>(null)
@@ -370,7 +367,7 @@ export default function RecruitmentPage() {
     if (typeof window === 'undefined') return {}
     try { return JSON.parse(localStorage.getItem('ihrms_iv_comments') ?? '{}') } catch { return {} }
   })
-  const [commentPanel, setCommentPanel] = useState<typeof INTERVIEWS[0] | null>(null)
+  const [commentPanel, setCommentPanel] = useState<IVRow | null>(null)
   const [newComment, setNewComment] = useState('')
 
   useEffect(() => { localStorage.setItem('ihrms_iv_comments', JSON.stringify(comments)) }, [comments])
@@ -514,14 +511,15 @@ export default function RecruitmentPage() {
               </p>
             </div>
             <span style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>
-              47 total applicants
+              {apiCandidates.length} total applicants
             </span>
           </div>
 
-          {/* Segmented funnel — uses only 1 accent color + neutrals */}
+          {/* Segmented funnel — computed from real candidate data */}
           <div style={{ display: 'flex', border: '1px solid var(--color-gray-200)', borderRadius: 8, overflow: 'hidden' }}>
-            {FUNNEL.map((stage, idx) => {
-              const pct  = Math.round((stage.count / 47) * 100)
+            {funnel.map((stage, idx) => {
+              const total = apiCandidates.length || 1
+              const pct   = Math.round((stage.count / total) * 100)
               const active = pipeStage === stage.label
               return (
                 <button
@@ -534,7 +532,7 @@ export default function RecruitmentPage() {
                     borderTop: 'none',
                     borderLeft: 'none',
                     borderBottom: 'none',
-                    borderRight: idx < FUNNEL.length - 1 ? '1px solid var(--color-gray-200)' : 'none',
+                    borderRight: idx < funnel.length - 1 ? '1px solid var(--color-gray-200)' : 'none',
                     cursor: 'pointer',
                     textAlign: 'center',
                     transition: 'background 150ms',
@@ -569,10 +567,10 @@ export default function RecruitmentPage() {
           {/* Tab Bar */}
           <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--color-gray-200)', padding: '0 20px' }}>
             {([
-              { key: 'requisitions', label: 'Job Requisitions',   count: JR.length },
-              { key: 'pipeline',     label: 'Candidate Pipeline', count: CANDIDATES.length },
-              { key: 'interviews',   label: 'Interviews',         count: INTERVIEWS.length },
-              { key: 'offers',       label: 'Offers',             count: OFFERS.length },
+              { key: 'requisitions', label: 'Job Requisitions',   count: apiJR.length },
+              { key: 'pipeline',     label: 'Candidate Pipeline', count: apiCandidates.length },
+              { key: 'interviews',   label: 'Interviews',         count: apiInterviews.length },
+              { key: 'offers',       label: 'Offers',             count: apiCandidates.filter(c => c.stage === 'Offer' || c.stage === 'Selected').length },
             ] as const).map((t) => (
               <button
                 key={t.key}
@@ -633,7 +631,7 @@ export default function RecruitmentPage() {
                     )}
                   </div>
                   <select value={reqDept} onChange={(e) => setReqDept(e.target.value)} className="form-select" style={{ width: 'auto', minWidth: 170, fontSize: '0.875rem' }}>
-                    {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
+                    {deptFilterList.map((d) => <option key={d}>{d}</option>)}
                   </select>
                   <select value={reqPri} onChange={(e) => setReqPri(e.target.value)} className="form-select" style={{ width: 'auto', minWidth: 140, fontSize: '0.875rem' }}>
                     {(['All Priority', 'Urgent', 'High', 'Medium', 'Low'] as const).map((p) => <option key={p}>{p}</option>)}
@@ -648,12 +646,18 @@ export default function RecruitmentPage() {
                   )}
                   <span style={{ marginLeft: 'auto', fontSize: '0.8125rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                     <Filter size={13} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-                    {filteredJR.length} of {JR.length} requisitions
+                    {filteredJR.length} of {apiJR.length} requisitions
                   </span>
                 </div>
               </div>
 
               {/* Table — same data-table pattern as Employee page */}
+              {loadingJR ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                  <Clock size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                  <p style={{ fontSize: '0.875rem' }}>Loading requisitions…</p>
+                </div>
+              ) : (
               <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
                 <table className="data-table">
                   <thead>
@@ -784,6 +788,7 @@ export default function RecruitmentPage() {
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
           )}
 
@@ -828,7 +833,7 @@ export default function RecruitmentPage() {
                           outline: 'none',
                         }}
                       >
-                        {s}{s !== 'All' ? ` (${CANDIDATES.filter((c) => c.stage === s).length})` : ` (${CANDIDATES.length})`}
+                        {s}{s !== 'All' ? ` (${apiCandidates.filter((c) => c.stage === s).length})` : ` (${apiCandidates.length})`}
                       </button>
                     ))}
                   </div>
@@ -841,6 +846,12 @@ export default function RecruitmentPage() {
               </div>
 
               {/* Candidate table */}
+              {loadingCands ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                  <Clock size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                  <p style={{ fontSize: '0.875rem' }}>Loading candidates…</p>
+                </div>
+              ) : (
               <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
                 <table className="data-table">
                   <thead>
@@ -944,13 +955,24 @@ export default function RecruitmentPage() {
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
           )}
 
           {/* ─── TAB: INTERVIEWS ─── */}
           {tab === 'interviews' && (
             <div style={{ padding: '20px' }}>
-              {Object.entries(groupedInterviews).map(([date, ivs]) => (
+              {loadingIVs ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                  <Clock size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                  <p style={{ fontSize: '0.875rem' }}>Loading interviews…</p>
+                </div>
+              ) : Object.keys(groupedInterviews).length === 0 ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                  <Clock size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>No interviews scheduled</p>
+                </div>
+              ) : Object.entries(groupedInterviews).map(([date, ivs]) => (
                 <div key={date} style={{ marginBottom: 28 }}>
                   {/* Date group header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -1099,95 +1121,72 @@ export default function RecruitmentPage() {
             </div>
           )}
 
-          {/* ─── TAB: OFFERS ─── */}
-          {tab === 'offers' && (
-            <div>
-              <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th style={{ minWidth: 200 }}>Candidate</th>
-                      <th style={{ minWidth: 220 }}>Position &amp; Department</th>
-                      <th style={{ minWidth: 130 }}>CTC Offered</th>
-                      <th style={{ minWidth: 150 }}>Offered Date</th>
-                      <th style={{ minWidth: 150 }}>Joining Date</th>
-                      <th style={{ minWidth: 110 }}>Status</th>
-                      <th style={{ minWidth: 100, textAlign: 'right' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {OFFERS.map((o) => (
-                      <tr key={o.id}>
-                        {/* Candidate */}
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                            <Avatar name={o.name} size={36} />
-                            <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--color-gray-900)' }}>{o.name}</p>
-                          </div>
-                        </td>
-
-                        {/* Position & Dept */}
-                        <td>
-                          <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--color-gray-800)' }}>{o.pos}</p>
-                          <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', marginTop: 2 }}>{o.dept}</p>
-                        </td>
-
-                        {/* CTC */}
-                        <td>
-                          <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>{o.ctc}</span>
-                        </td>
-
-                        {/* Dates */}
-                        <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-600)' }}>{o.offered}</td>
-                        <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-600)' }}>{o.joins}</td>
-
-                        {/* Status */}
-                        <td><StatusBadge s={o.status} /></td>
-
-                        {/* Actions */}
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="View offer letter"><FileText size={15} /></button>
-                            <button className="btn btn-ghost btn-sm btn-icon" title="Send reminder"><Mail size={15} /></button>
-                            <button
-                              className="btn btn-ghost btn-sm btn-icon"
-                              title={remarks[`offer_${o.id}`] ? 'View / edit remark' : 'Add remark'}
-                              onClick={() => openRemark(`offer_${o.id}`, o.name)}
-                              style={{ position: 'relative' }}
-                            >
-                              <Pencil size={14} />
-                              {remarks[`offer_${o.id}`] && (
-                                <span style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }} />
-                              )}
-                            </button>
-                            <div style={{ position: 'relative' }}>
-                              <button
-                                className="btn btn-ghost btn-sm btn-icon" title="More"
-                                onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen?.id === o.id && menuOpen.type === 'offer' ? null : { type: 'offer', id: o.id }) }}
-                              >
-                                <MoreVertical size={15} />
-                              </button>
-                              {menuOpen?.type === 'offer' && menuOpen.id === o.id && (
-                                <div style={MENU_STYLE} onClick={e => e.stopPropagation()}>
-                                  {o.status === 'Pending' && (
-                                    <button style={MI_STYLE} onClick={() => { toast.success('Offer marked as accepted'); setMenuOpen(null) }}>Mark as Accepted</button>
-                                  )}
-                                  <button style={MI_STYLE} onClick={() => { toast('Send reminder feature coming soon'); setMenuOpen(null) }}>Send Reminder</button>
-                                  {o.status !== 'Rejected' && (
-                                    <button style={MI_RED} onClick={() => { toast.success('Offer revoked'); setMenuOpen(null) }}>Revoke Offer</button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {/* ─── TAB: OFFERS — candidates at Offer or Selected stage ─── */}
+          {tab === 'offers' && (() => {
+            const offerCands = apiCandidates.filter(c => c.stage === 'Offer' || c.stage === 'Selected')
+            return (
+              <div>
+                {loadingCands ? (
+                  <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                    <Clock size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                    <p style={{ fontSize: '0.875rem' }}>Loading offers…</p>
+                  </div>
+                ) : offerCands.length === 0 ? (
+                  <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                    <FileText size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>No offers yet</p>
+                    <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Candidates at Offer or Selected stage will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="table-wrapper" style={{ borderRadius: 0, border: 'none' }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th style={{ minWidth: 200 }}>Candidate</th>
+                          <th style={{ minWidth: 220 }}>Position</th>
+                          <th style={{ minWidth: 130 }}>Expected CTC</th>
+                          <th style={{ minWidth: 150 }}>Current Company</th>
+                          <th style={{ minWidth: 110 }}>Stage</th>
+                          <th style={{ minWidth: 110 }}>Last Updated</th>
+                          <th style={{ minWidth: 90, textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {offerCands.map((o) => (
+                          <tr key={o.id}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                                <Avatar name={o.name} size={36} />
+                                <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--color-gray-900)' }}>{o.name}</p>
+                              </div>
+                            </td>
+                            <td>
+                              <p style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--color-gray-800)' }}>{o.pos}</p>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>{o.ctc}</span>
+                            </td>
+                            <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-600)' }}>{o.co}</td>
+                            <td><StageBadge s={o.stage} /></td>
+                            <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>{o.upd}</td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                                <button className="btn btn-ghost btn-sm btn-icon" title="View details" onClick={() => setViewCand(o)}><Eye size={15} /></button>
+                                <button className="btn btn-ghost btn-sm btn-icon" title="Add remark" onClick={() => openRemark(`offer_${o.id}`, o.name)} style={{ position: 'relative' }}>
+                                  <Pencil size={14} />
+                                  {remarks[`offer_${o.id}`] && <span style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', border: '1.5px solid #fff' }} />}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )
+          })()}
 
         </div>
       </div>

@@ -825,8 +825,8 @@ function PayrollRunDetailModal({ run, onClose, onApprove }: { run: ApiPayrollRun
 
 function TabPayrollRuns({ onRunPayroll, runs, loading, onRefresh }: { onRunPayroll: () => void; runs: ApiPayrollRun[]; loading: boolean; onRefresh: () => void }) {
   const [viewRun, setViewRun] = useState<ApiPayrollRun | null>(null)
-  const rows = runs.length > 0 ? runs : PAYROLL_RUNS
-  const isLive = runs.length > 0
+  const rows = runs
+  const isLive = true
 
   return (
     <div>
@@ -897,33 +897,6 @@ function TabPayrollRuns({ onRunPayroll, runs, loading, onRefresh }: { onRunPayro
                 </tr>
               )
             })}
-            {!loading && !isLive && (rows as PayrollRun[]).map((run) => (
-              <tr key={run.id}>
-                <td>
-                  <p style={{ fontWeight: 600, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{run.period}</p>
-                  {run.status === 'Draft' && <p style={{ fontSize: '0.75rem', color: '#b45309', marginTop: 2, fontWeight: 500 }}>In preparation</p>}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Users size={13} style={{ color: 'var(--color-gray-400)' }} />
-                    <span style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{run.employees}</span>
-                  </div>
-                </td>
-                <td style={{ fontWeight: 600, color: 'var(--color-gray-800)', fontSize: '0.875rem' }}>{run.gross}</td>
-                <td style={{ fontWeight: 500, color: '#dc2626', fontSize: '0.875rem' }}>{run.deductions}</td>
-                <td style={{ fontWeight: 700, color: '#15803d', fontSize: '0.875rem' }}>{run.net}</td>
-                <td><StatusBadge status={run.status} /></td>
-                <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>{run.runDate}</td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-                    <button className="btn btn-ghost btn-sm btn-icon" title="View details"><Eye size={15} /></button>
-                    {run.status === 'Paid' && (
-                      <button className="btn btn-ghost btn-sm btn-icon" title="Download report"><Download size={15} /></button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
           </tbody>
         </table>
       </div>
@@ -1527,16 +1500,14 @@ function TabSalaryStructures() {
 
   useEffect(() => { loadStructures() }, [])
 
-  const rows = liveData.length > 0 ? liveData : SALARY_STRUCTURES
-  const isLive = liveData.length > 0
+  const rows = liveData
+  const isLive = true
 
   const filtered = (rows as any[]).filter((s: any) => {
     if (!search) return true
     const term = search.toLowerCase()
-    const name = isLive
-      ? `${s.employee?.first_name ?? ''} ${s.employee?.last_name ?? ''}`.toLowerCase()
-      : String(s.name ?? '').toLowerCase()
-    const empId = isLive ? (s.employee?.emp_id ?? '') : (s.empId ?? '')
+    const name = `${s.employee?.first_name ?? ''} ${s.employee?.last_name ?? ''}`.toLowerCase()
+    const empId = s.employee?.emp_id ?? ''
     return name.includes(term) || empId.toLowerCase().includes(term)
   })
 
@@ -1641,35 +1612,6 @@ function TabSalaryStructures() {
                 </tr>
               )
             })}
-            {!loading && !isLive && (SALARY_STRUCTURES as SalaryStructure[]).map((s) => (
-              <tr key={s.id}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                    <Avatar name={s.name} size={36} />
-                    <div>
-                      <p style={{ fontWeight: 600, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{s.name}</p>
-                      <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{s.empId} · {s.department}</p>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ fontWeight: 700, color: 'var(--color-gray-900)', fontSize: '0.875rem' }}>{s.annualCTC}</td>
-                <td style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{s.basic}</td>
-                <td style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{s.hra}</td>
-                <td style={{ fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>{s.specialAllowance}</td>
-                <td>
-                  <Badge label={s.epfApplicable ? 'Yes' : 'No'} bg={s.epfApplicable ? '#f0fdf4' : '#f9fafb'} color={s.epfApplicable ? '#15803d' : '#6b7280'} border={s.epfApplicable ? '#bbf7d0' : '#e5e7eb'} />
-                </td>
-                <td>
-                  <Badge label={s.esicApplicable ? 'Yes' : 'No'} bg={s.esicApplicable ? '#fffbeb' : '#f9fafb'} color={s.esicApplicable ? '#b45309' : '#6b7280'} border={s.esicApplicable ? '#fde68a' : '#e5e7eb'} />
-                </td>
-                <td style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)' }}>{s.effectiveFrom}</td>
-                <td>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button onClick={() => setShowAdd(true)} className="btn btn-ghost btn-sm btn-icon" title="Add structure for this employee"><Edit size={15} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
           </tbody>
         </table>
       </div>
@@ -1785,9 +1727,9 @@ export default function PayrollPage() {
   const fmt = (n?: number | null) => n != null && n > 0 ? `₹${(n / 100000).toFixed(1)}L` : '—'
 
   const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: 'runs',       label: 'Payroll Runs',      count: loadingRuns ? '…' as any : (apiRuns.length || PAYROLL_RUNS.length) },
+    { key: 'runs',       label: 'Payroll Runs',      count: loadingRuns ? '…' as any : apiRuns.length },
     { key: 'payslips',   label: 'Payslips',           count: empCount },
-    { key: 'structures', label: 'Salary Structures',  count: SALARY_STRUCTURES.length },
+    { key: 'structures', label: 'Salary Structures',  count: 0 },
     { key: 'statutory',  label: 'Statutory Reports',  count: 6 },
   ]
 

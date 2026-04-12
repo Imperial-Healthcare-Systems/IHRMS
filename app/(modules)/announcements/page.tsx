@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
-import { announcementsApi, type Announcement as ApiAnnouncement } from '@/lib/api-client'
+import { announcementsApi, employeesApi, type Announcement as ApiAnnouncement } from '@/lib/api-client'
 import toast from 'react-hot-toast'
 import {
   Bell, Plus, Pin, Edit, Trash2, Users, MapPin,
@@ -29,7 +29,6 @@ interface Announcement {
   raw: ApiAnnouncement
 }
 
-const DEPARTMENTS = ['Engineering', 'HR', 'Sales', 'Finance', 'Operations', 'Marketing', 'Customer Support']
 const FILTER_OPTIONS = ['All', 'Holiday', 'Policy', 'Event', 'Urgent', 'General'] as const
 type FilterOption = typeof FILTER_OPTIONS[number]
 
@@ -284,6 +283,7 @@ export default function AnnouncementsPage() {
   const [markUrgent, setMarkUrgent]       = useState(false)
   const [pinToTop, setPinToTop]           = useState(false)
   const [posting, setPosting]             = useState(false)
+  const [deptList, setDeptList]           = useState<string[]>([])
 
   const fetchAnnouncements = useCallback(async () => {
     try {
@@ -297,6 +297,9 @@ export default function AnnouncementsPage() {
   }, [])
 
   useEffect(() => { fetchAnnouncements() }, [fetchAnnouncements])
+  useEffect(() => {
+    employeesApi.departments().then(r => setDeptList((r.data ?? []).map((d: { name: string }) => d.name))).catch(console.error)
+  }, [])
 
   const filtered = activeFilter === 'All'
     ? announcements
@@ -548,7 +551,7 @@ export default function AnnouncementsPage() {
 
                   {targetMode === 'department' && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: '10px 12px', background: '#f9fafb', borderRadius: 8, border: '1px solid #f1f5f9' }}>
-                      {DEPARTMENTS.map(dept => (
+                      {deptList.map(dept => (
                         <label key={dept} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#374151', cursor: 'pointer' }}>
                           <input type="checkbox" checked={selectedDepts.has(dept)} onChange={() => toggleDept(dept)}
                             style={{ accentColor: '#E8622A', cursor: 'pointer' }} />

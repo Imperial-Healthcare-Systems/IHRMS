@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
-import sql, { ensureSchema } from '@/lib/pg'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -129,31 +128,23 @@ export async function PATCH(req: NextRequest) {
         .eq('date', reg.date)
     }
 
-    // Send in-app notification to the employee
+    // Send in-app notification to the employee (Supabase REST — no cold TCP)
     if (reg.employee_id) {
       try {
-        await ensureSchema()
         const dateLabel = reg.date
           ? new Date(reg.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
           : 'your requested date'
-
         const isApproved = status === 'approved'
-        await sql`
-          INSERT INTO notifications (recipient_id, title, body, type)
-          VALUES (
-            ${reg.employee_id}::uuid,
-            ${isApproved
-              ? 'Attendance Regularization Approved ✓'
-              : 'Attendance Regularization Rejected'},
-            ${isApproved
-              ? `Your regularization request for ${dateLabel} has been approved and your attendance record has been updated.`
-              : `Your regularization request for ${dateLabel} was not approved.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`},
-            ${isApproved ? 'success' : 'warning'}
-          )
-        `
+        await supabaseAdmin.from('notifications').insert({
+          recipient_id: reg.employee_id,
+          title: isApproved ? 'Attendance Regularization Approved ✓' : 'Attendance Regularization Rejected',
+          body: isApproved
+            ? `Your regularization request for ${dateLabel} has been approved and your attendance record has been updated.`
+            : `Your regularization request for ${dateLabel} was not approved.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`,
+          type: isApproved ? 'success' : 'warning',
+        })
       } catch (notifErr) {
-        // Non-fatal — don't fail the whole request if notification insert fails
-        console.warn('[regularization PATCH] notification insert failed:', notifErr)
+        console.warn('[regularization PATCH] notification insert non-fatal:', notifErr)
       }
     }
 

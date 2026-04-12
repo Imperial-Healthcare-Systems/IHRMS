@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
-import sql, { ensureSchema } from '@/lib/pg'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -148,9 +147,7 @@ export async function PATCH(
       )
     }
 
-    // General field edits (no action) — use a direct PostgreSQL connection so
-    // PostgREST schema cache is bypassed entirely. purchase_value and any other
-    // "stale" columns are written reliably regardless of Supabase project restarts.
+    // General field edits (no action) — Supabase REST with schema-cache retry loop
     if (!action) {
       const setCols = Object.fromEntries(
         Object.entries(updates).filter(([, v]) => v !== undefined)
@@ -158,22 +155,24 @@ export async function PATCH(
       if (Object.keys(setCols).length === 0) {
         return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
       }
-      try {
-        await ensureSchema()  // re-creates any columns Supabase dropped since last request
-        const rows = await sql`
-          UPDATE assets
-          SET ${sql(setCols)}
-          WHERE id = ${id}
-          RETURNING *
-        `
-        if (rows.length === 0) {
-          return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
+      let editData: unknown = null
+      let currentEdit = { ...setCols }
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const { data: d, error: e } = await supabaseAdmin
+          .from('assets').update(currentEdit).eq('id', id).select().single()
+        if (!e) { editData = d; break }
+        const msg = errMsg(e)
+        const badCol = extractBadColumn(msg)
+        if (badCol && badCol in currentEdit) {
+          console.warn(`[assets PATCH field] dropping stale column '${badCol}' and retrying`)
+          delete currentEdit[badCol]
+          continue
         }
-        return NextResponse.json({ data: rows[0] })
-      } catch (e) {
-        console.error('[assets PATCH] direct SQL error:', errMsg(e))
-        return NextResponse.json({ error: errMsg(e) }, { status: 500 })
+        console.error('[assets PATCH field]', e)
+        return NextResponse.json({ error: msg }, { status: 500 })
       }
+      if (!editData) return NextResponse.json({ error: 'Asset not found or update failed' }, { status: 404 })
+      return NextResponse.json({ data: editData })
     }
 
     // Action-based updates (assign / unassign / maintenance / restore / dispose) —

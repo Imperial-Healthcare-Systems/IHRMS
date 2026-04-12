@@ -94,6 +94,24 @@ export async function POST(req: NextRequest) {
 
     const targetEmployee = employee_id ?? (session.user as any)?.id
 
+    // Overlap check — reject if an active leave already covers any part of the requested range
+    const { data: overlapping } = await supabaseAdmin
+      .from('leave_requests')
+      .select('id, from_date, to_date, status')
+      .eq('employee_id', targetEmployee)
+      .in('status', ['pending', 'approved'])
+      .lte('from_date', effectiveTo)
+      .gte('to_date', effectiveFrom)
+      .limit(1)
+
+    if (overlapping && overlapping.length > 0) {
+      const existing = overlapping[0] as Record<string, unknown>
+      return NextResponse.json(
+        { error: `You already have a ${existing.status} leave request overlapping this date range (${existing.from_date} – ${existing.to_date}).` },
+        { status: 409 }
+      )
+    }
+
     // Calculate total_days if not provided
     const msPerDay  = 86400000
     const totalDays = days ?? Math.round((new Date(effectiveTo).getTime() - new Date(effectiveFrom).getTime()) / msPerDay) + 1

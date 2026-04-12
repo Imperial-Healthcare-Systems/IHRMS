@@ -4,6 +4,51 @@ import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 import sql, { ensureSchema } from '@/lib/pg'
 
+async function fanOutNotification(
+  title: string,
+  text: string,
+  cat: string,
+  dbAudience: string,
+  target_audience: string | undefined,
+) {
+  try {
+    let empQuery = supabaseAdmin
+      .from('employees')
+      .select('id')
+      .eq('status', 'active')
+
+    // Narrow to department if audience is department-scoped
+    if (dbAudience === 'department' && target_audience) {
+      const { data: depts } = await supabaseAdmin
+        .from('departments')
+        .select('id')
+        .ilike('name', `%${target_audience}%`)
+        .limit(10)
+      if (depts && depts.length > 0) {
+        empQuery = empQuery.in('department_id', depts.map((d: Record<string, unknown>) => d.id))
+      }
+    }
+
+    const { data: employees } = await empQuery.limit(500)
+    if (!employees || employees.length === 0) return
+
+    const notifTitle = cat === 'urgent' ? `Urgent: ${title}` : `Announcement: ${title}`
+    const snippet = text.length > 120 ? text.substring(0, 120) + '…' : text
+    const notifType = cat === 'urgent' ? 'warning' : cat === 'holiday' ? 'success' : 'info'
+
+    const notifications = (employees as Record<string, unknown>[]).map(emp => ({
+      recipient_id: emp.id as string,
+      title: notifTitle,
+      body: snippet,
+      type: notifType,
+    }))
+
+    await supabaseAdmin.from('notifications').insert(notifications)
+  } catch (e) {
+    console.warn('[announcements] notification fan-out non-fatal:', e)
+  }
+}
+
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
   if (err && typeof err === 'object') {
@@ -165,6 +210,10 @@ export async function POST(req: NextRequest) {
         RETURNING *
       `
       if (!rows.length) return NextResponse.json({ error: 'Insert returned no data' }, { status: 500 })
+
+      // Fan out in-app notifications to target employees (non-blocking)
+      fanOutNotification(title, text, cat, dbAudience, target_audience as string | undefined)
+
       return NextResponse.json({ data: rows[0] }, { status: 201 })
     } catch (sqlErr) {
       console.error('[announcements POST] SQL error:', sqlErr)

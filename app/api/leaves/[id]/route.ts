@@ -88,6 +88,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         .single()
       if (error) { console.error('[leaves PATCH approve]', error); throw error }
       const row = data as Record<string, unknown>
+
+      // Decrement leave_balances — non-fatal if balance row missing
+      try {
+        const totalDays = Number(row.total_days ?? 0)
+        const year = new Date(String(row.from_date ?? now)).getFullYear()
+        if (totalDays > 0) {
+          // Try to decrement used_days and remaining_days
+          const { data: bal } = await supabaseAdmin
+            .from('leave_balances')
+            .select('id, used_days, remaining_days')
+            .eq('employee_id', String(row.employee_id))
+            .eq('leave_type', String(row.leave_type))
+            .eq('year', year)
+            .maybeSingle()
+
+          if (bal) {
+            const newUsed      = Number(bal.used_days ?? 0) + totalDays
+            const newRemaining = Math.max(0, Number(bal.remaining_days ?? 0) - totalDays)
+            await supabaseAdmin
+              .from('leave_balances')
+              .update({ used_days: newUsed, remaining_days: newRemaining })
+              .eq('id', bal.id)
+          }
+        }
+      } catch (balErr) {
+        console.warn('[leaves approve] balance update non-fatal:', balErr)
+      }
+
       await sendLeaveNotification(String(row.employee_id), 'approve', String(row.leave_type ?? ''), String(row.from_date ?? ''), remarks)
       return NextResponse.json({ data })
     }
