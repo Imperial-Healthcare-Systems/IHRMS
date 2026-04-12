@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import sql from '@/lib/pg'
+import { supabaseAdmin } from '@/lib/supabase'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -23,7 +23,6 @@ export async function PATCH(
 
     const body = await req.json() as { role?: string; is_admin?: boolean; status?: string }
 
-    // When deactivating (is_admin=false with no explicit role), reset role to 'employee'
     const newRole    = body.role     ?? (body.is_admin === false ? 'employee' : undefined)
     const newIsAdmin = body.is_admin ?? (body.role ? body.role !== 'employee' : undefined)
 
@@ -31,48 +30,40 @@ export async function PATCH(
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
 
-    // Use direct SQL to bypass PostgREST schema cache for role/is_admin
-    try {
-      let rows
-      if (newRole !== undefined && newIsAdmin !== undefined && body.status !== undefined) {
-        rows = await sql`
-          UPDATE employees SET role=${newRole}, is_admin=${newIsAdmin}, status=${body.status}
-          WHERE id=${id}::uuid
-          RETURNING id, first_name, last_name, COALESCE(emp_id,employee_code,'') AS emp_id, role, is_admin, status
-        `
-      } else if (newRole !== undefined && newIsAdmin !== undefined) {
-        rows = await sql`
-          UPDATE employees SET role=${newRole}, is_admin=${newIsAdmin}
-          WHERE id=${id}::uuid
-          RETURNING id, first_name, last_name, COALESCE(emp_id,employee_code,'') AS emp_id, role, is_admin, status
-        `
-      } else if (newRole !== undefined) {
-        rows = await sql`
-          UPDATE employees SET role=${newRole}, is_admin=${newRole !== 'employee'}
-          WHERE id=${id}::uuid
-          RETURNING id, first_name, last_name, COALESCE(emp_id,employee_code,'') AS emp_id, role, is_admin, status
-        `
-      } else if (newIsAdmin !== undefined) {
-        rows = await sql`
-          UPDATE employees SET is_admin=${newIsAdmin}
-          WHERE id=${id}::uuid
-          RETURNING id, first_name, last_name, COALESCE(emp_id,employee_code,'') AS emp_id, role, is_admin, status
-        `
-      } else {
-        rows = await sql`
-          UPDATE employees SET status=${body.status!}
-          WHERE id=${id}::uuid
-          RETURNING id, first_name, last_name, COALESCE(emp_id,employee_code,'') AS emp_id, role, is_admin, status
-        `
-      }
+    // Build update payload
+    const update: Record<string, unknown> = {}
+    if (newRole    !== undefined) update.role     = newRole
+    if (newIsAdmin !== undefined) update.is_admin = newIsAdmin
+    if (body.status !== undefined) update.status  = body.status
 
-      if (!rows.length) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
-      return NextResponse.json({ data: rows[0] })
-    } catch (sqlErr) {
-      console.error('[admin-users PATCH] SQL error:', sqlErr)
-      return NextResponse.json({ error: errMsg(sqlErr) }, { status: 500 })
+    // Use Supabase REST — fast HTTP, no cold TCP connection.
+    // supabaseAdmin bypasses RLS and has schema-cache access.
+    const { data, error } = await supabaseAdmin
+      .from('employees')
+      .update(update)
+      .eq('id', id)
+      .select('id, first_name, last_name, emp_id, employee_code, role, is_admin, status')
+      .single()
+
+    if (error) {
+      console.error('[admin-users PATCH]', error)
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
+
+    const e = data as Record<string, unknown>
+    return NextResponse.json({
+      data: {
+        id: e.id,
+        first_name: e.first_name,
+        last_name: e.last_name,
+        emp_id: e.emp_id ?? e.employee_code ?? '',
+        role: e.role,
+        is_admin: e.is_admin,
+        status: e.status,
+      }
+    })
   } catch (err) {
+    console.error('[admin-users PATCH catch]', err)
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
