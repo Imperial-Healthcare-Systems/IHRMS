@@ -140,7 +140,7 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
 
   return (
     <header
-      className="sticky top-0 z-30 flex items-center gap-3 px-6"
+      className="sticky top-0 z-30 flex items-center gap-2 sm:gap-3 px-3 sm:px-6"
       style={{
         height: 60,
         background: 'rgba(255,255,255,0.98)',
@@ -218,21 +218,23 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
         )}
       </div>
 
-      {/* ── Action Slot ── */}
+      {/* ── Action Slot (hidden on mobile to prevent topbar overflow) ── */}
       {(actions || children) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div className="hidden sm:flex items-center" style={{ gap: 8, flexShrink: 0 }}>
           {actions}
           {children}
         </div>
       )}
 
-      {/* ── Divider ── */}
-      <div style={{ width: 1, height: 22, background: '#E8EBF0', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />
+      {/* ── Divider (hidden on mobile) ── */}
+      <div className="hidden sm:block" style={{ width: 1, height: 22, background: '#E8EBF0', flexShrink: 0, marginLeft: 2, marginRight: 2 }} />
 
-      {/* ── Help ── */}
-      <IconBtn title="Help & Documentation">
-        <HelpCircle size={16} />
-      </IconBtn>
+      {/* ── Help (hidden on mobile) ── */}
+      <div className="hidden sm:block">
+        <IconBtn title="Help & Documentation">
+          <HelpCircle size={16} />
+        </IconBtn>
+      </div>
 
       {/* ── Notifications ── */}
       <div className="relative" ref={notifRef}>

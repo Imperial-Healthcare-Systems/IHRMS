@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
@@ -116,6 +117,17 @@ export function Sidebar() {
   const { data: session } = useSession()
   const { isOpen, close } = useSidebar()
 
+  /* Track mobile breakpoint so we can drive transform via React state
+     (more reliable than CSS data-attribute on production builds) */
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)')
+    setIsMobile(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
   const userName  = session?.user?.name ?? 'User'
   const userImage = session?.user?.image ?? null
   const userRole  = ((session?.user as Record<string, unknown>)?.role as string | null) ?? 'employee'
@@ -161,10 +173,9 @@ export function Sidebar() {
           borderRight: '1px solid rgba(255,255,255,0.06)',
           boxShadow: '4px 0 32px rgba(0,0,0,0.25)',
           transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1)',
+          /* React-state-driven transform — bypasses CSS specificity entirely */
+          transform: isMobile ? (isOpen ? 'translateX(0)' : 'translateX(-100%)') : 'translateX(0)',
         }}
-        /* Use data attribute to drive transform via CSS — avoids inline style vs class specificity war */
-        data-open={isOpen ? 'true' : 'false'}
-        className="ihrms-sidebar"
       >
         {/* ── Logo ── */}
         <div
