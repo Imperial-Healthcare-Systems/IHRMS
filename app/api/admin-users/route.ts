@@ -69,50 +69,34 @@ export async function POST(req: NextRequest) {
 
     // ── Search ──────────────────────────────────────────────────────────────
     if (body.action === 'search') {
-      const q = `%${(body.q ?? '').trim()}%`
-      if ((body.q ?? '').trim().length < 2) return NextResponse.json({ data: [] })
+      const raw = (body.q ?? '').trim()
+      if (raw.length < 2) return NextResponse.json({ data: [] })
+      const q = `%${raw}%`
 
-      try {
-        const rows = await sql`
-          SELECT
-            e.id,
-            e.first_name,
-            e.last_name,
-            e.first_name || ' ' || e.last_name AS name,
-            COALESCE(e.emp_id, e.employee_code, '') AS emp_id,
-            COALESCE(e.work_email, e.email, '') AS email,
-            COALESCE(e.role, 'employee') AS role,
-            COALESCE(e.is_admin, false) AS is_admin,
-            COALESCE(d.name, '—') AS department
-          FROM employees e
-          LEFT JOIN departments d ON d.id = e.department_id
-          WHERE e.status = 'active'
-            AND (
-              e.first_name ILIKE ${q}
-              OR e.last_name  ILIKE ${q}
-              OR (e.first_name || ' ' || e.last_name) ILIKE ${q}
-              OR COALESCE(e.emp_id, e.employee_code, '') ILIKE ${q}
-              OR COALESCE(e.work_email, e.email, '') ILIKE ${q}
-            )
-          ORDER BY e.first_name, e.last_name
-          LIMIT 10
-        `
-        return NextResponse.json({ data: rows })
-      } catch (sqlErr) {
-        // Fallback to Supabase search
-        const { data } = await supabaseAdmin
-          .from('employees')
-          .select('id, first_name, last_name, emp_id, employee_code, work_email, role, is_admin')
-          .or(`first_name.ilike.${q},last_name.ilike.${q}`)
-          .eq('status', 'active')
-          .limit(10)
-        type Row = Record<string, unknown>
-        return NextResponse.json({ data: (data ?? []).map((e: Row) => ({
-          id: e.id, name: `${e.first_name} ${e.last_name}`,
-          emp_id: e.emp_id ?? e.employee_code ?? '', email: e.work_email ?? '',
-          role: e.role ?? 'employee', is_admin: Boolean(e.is_admin), department: '—',
-        })) })
-      }
+      // Use Supabase REST (HTTP — no cold TCP connection overhead)
+      const { data, error } = await supabaseAdmin
+        .from('employees')
+        .select('id, first_name, last_name, emp_id, employee_code, work_email, email, role, is_admin, department_id, departments!employees_department_id_fkey(name)')
+        .eq('status', 'active')
+        .or(`first_name.ilike.${q},last_name.ilike.${q},emp_id.ilike.${q},employee_code.ilike.${q}`)
+        .limit(10)
+
+      if (error) { console.error('[admin-users search]', error); return NextResponse.json({ data: [] }) }
+
+      type EmpRow = Record<string, unknown>
+      const mapped = (data ?? []).map((e: EmpRow) => {
+        const dept = e.departments as Record<string, unknown> | null
+        return {
+          id: e.id,
+          name: `${e.first_name} ${e.last_name}`,
+          emp_id: e.emp_id ?? e.employee_code ?? '',
+          email: e.work_email ?? e.email ?? '',
+          role: e.role ?? 'employee',
+          is_admin: Boolean(e.is_admin),
+          department: dept?.name ?? '—',
+        }
+      })
+      return NextResponse.json({ data: mapped })
     }
 
     // ── Add / promote to admin ───────────────────────────────────────────────
