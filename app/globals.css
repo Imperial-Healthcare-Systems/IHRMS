@@ -109,7 +109,6 @@ html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
-  overflow-x: hidden;
 }
 
 body {
@@ -120,7 +119,6 @@ body {
   background-color: var(--surface-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -332,27 +330,39 @@ img, svg { display: block; max-width: 100%; }
 }
 
 /* ─────────────────────────────────────────────────────────────
-   IHRMS SIDEBAR DRAWER — mobile/desktop behaviour
+   DESKTOP LAYOUT GUARANTEES
+   Traditional media queries as fallbacks for browsers with partial
+   CSS-nesting support (Tailwind v4 uses nested @media syntax).
+   These reinforce the Tailwind-generated classes in layout.tsx /
+   Topbar.tsx and ensure the desktop view is never broken.
    ───────────────────────────────────────────────────────────── */
-/* Desktop (≥1024px): always visible */
+
+/* Content wrapper: always 248px left margin on lg+ (beside fixed sidebar) */
+@media (min-width: 1024px) {
+  .lg\:ml-\[248px\] { margin-left: 248px !important; }
+}
+
+/* Mobile-only elements: guaranteed hidden on desktop */
+@media (min-width: 1024px) {
+  .lg\:hidden { display: none !important; }
+}
+
+/* Sidebar: always visible on desktop (sidebar uses inline-style transform now,
+   but keep this as a hard guarantee) */
 @media (min-width: 1024px) {
   .ihrms-sidebar { transform: translateX(0) !important; }
-}
-/* Mobile (<1024px): hidden by default, open when data-open="true" */
-@media (max-width: 1023px) {
-  .ihrms-sidebar              { transform: translateX(-100%); }
-  .ihrms-sidebar[data-open="true"] { transform: translateX(0); }
 }
 
 /* ─────────────────────────────────────────────────────────────
    GLOBAL MOBILE RESPONSIVE HELPERS
    ───────────────────────────────────────────────────────────── */
 
-/* Responsive page-level padding — all pages wrap content in this class */
+/* Responsive page-level padding — all pages wrap content in this class.
+   Also restores top padding to 24 px on sm+ (was reduced to 16 px for mobile). */
 @media (min-width: 640px) {
-  .sm\:\!px-6 { padding-left: 24px !important; padding-right: 24px !important; }
-  .sm\:\!px-7 { padding-left: 28px !important; padding-right: 28px !important; }
-  .sm\:\!px-8 { padding-left: 32px !important; padding-right: 32px !important; }
+  .sm\:\!px-6 { padding-left: 24px !important; padding-right: 24px !important; padding-top: 24px !important; }
+  .sm\:\!px-7 { padding-left: 28px !important; padding-right: 28px !important; padding-top: 24px !important; }
+  .sm\:\!px-8 { padding-left: 32px !important; padding-right: 32px !important; padding-top: 24px !important; }
 }
 
 /* Topbar title: prevent overflow on narrow screens */
