@@ -40,12 +40,24 @@ export async function ensureSchema(): Promise<void> {
           THEN ALTER TABLE announcements ADD COLUMN created_by UUID; END IF;
       END $$
     `
-    // app_settings key-value store (CREATE TABLE IF NOT EXISTS is idempotent)
+    // app_settings key-value store
     await sql`
       CREATE TABLE IF NOT EXISTS app_settings (
         key        TEXT PRIMARY KEY,
         value      JSONB NOT NULL DEFAULT '{}',
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `
+    // in-app notifications
+    await sql`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        recipient_id UUID NOT NULL,
+        title        TEXT NOT NULL,
+        body         TEXT,
+        type         TEXT NOT NULL DEFAULT 'info',
+        is_read      BOOLEAN NOT NULL DEFAULT false,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `
     await sql`NOTIFY pgrst, 'reload schema'`

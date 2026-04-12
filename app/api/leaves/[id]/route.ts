@@ -2,6 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import sql, { ensureSchema } from '@/lib/pg'
+
+async function sendLeaveNotification(employeeId: string, action: 'approve' | 'reject', leaveType: string, fromDate: string, remarks?: string) {
+  try {
+    await ensureSchema()
+    const isApproved = action === 'approve'
+    const dateLabel = fromDate ? new Date(fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : fromDate
+    await sql`
+      INSERT INTO notifications (recipient_id, title, body, type)
+      VALUES (
+        ${employeeId}::uuid,
+        ${isApproved ? 'Leave Request Approved ✓' : 'Leave Request Rejected'},
+        ${isApproved
+          ? `Your ${leaveType} leave request starting ${dateLabel} has been approved.`
+          : `Your ${leaveType} leave request starting ${dateLabel} was not approved.${remarks ? ' Reason: ' + remarks : ''}`},
+        ${isApproved ? 'success' : 'warning'}
+      )
+    `
+  } catch (e) {
+    console.warn('[leaves notify] non-fatal:', e)
+  }
+}
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -60,34 +82,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (action === 'approve') {
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
-        .update({
-          status:           'approved',
-          approved_by:      approverId,
-          approved_at:      now,
-          approver_remarks: remarks ?? null,
-          updated_at:       now,
-        })
+        .update({ status: 'approved', approved_by: approverId, updated_at: now, approver_remarks: remarks ?? null })
         .eq('id', id)
         .select()
         .single()
       if (error) { console.error('[leaves PATCH approve]', error); throw error }
+      const row = data as Record<string, unknown>
+      await sendLeaveNotification(String(row.employee_id), 'approve', String(row.leave_type ?? ''), String(row.from_date ?? ''), remarks)
       return NextResponse.json({ data })
     }
 
     if (action === 'reject') {
       const { data, error } = await supabaseAdmin
         .from('leave_requests')
-        .update({
-          status:           'rejected',
-          approved_by:      approverId,
-          approved_at:      now,
-          approver_remarks: remarks ?? null,
-          updated_at:       now,
-        })
+        .update({ status: 'rejected', approved_by: approverId, updated_at: now, approver_remarks: remarks ?? null })
         .eq('id', id)
         .select()
         .single()
       if (error) { console.error('[leaves PATCH reject]', error); throw error }
+      const row = data as Record<string, unknown>
+      await sendLeaveNotification(String(row.employee_id), 'reject', String(row.leave_type ?? ''), String(row.from_date ?? ''), remarks)
       return NextResponse.json({ data })
     }
 

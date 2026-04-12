@@ -28,22 +28,33 @@ export async function GET(req: NextRequest) {
     const userRole = (session.user as any)?.role
     const userId   = (session.user as any)?.id
 
+    const { searchParams: sp2 } = new URL(req.url)
+    const date_from = sp2.get('date_from')
+    const date_to   = sp2.get('date_to')
+
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head', 'manager']
+
     let query = supabaseAdmin
       .from('leave_requests')
       .select(`
         *,
-        employee:employees!leave_requests_employee_id_fkey(id, first_name, last_name, emp_id, department_id)
+        employee:employees!leave_requests_employee_id_fkey(
+          id, first_name, last_name, emp_id, department_id,
+          department:departments!employees_department_id_fkey(name)
+        )
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .limit(limit)
 
     if (employee_id) query = query.eq('employee_id', employee_id)
-    else if (!['hr_admin', 'super_admin', 'operations_head', 'manager'].includes(userRole)) {
+    else if (!FULL_ACCESS_ROLES.includes(userRole)) {
       query = query.eq('employee_id', userId)
     }
     if (status)     query = query.eq('status', status)
     if (leave_type) query = query.eq('leave_type', leave_type)
     if (year)       query = query.gte('from_date', `${year}-01-01`).lte('from_date', `${year}-12-31`)
+    if (date_from)  query = query.gte('from_date', date_from)
+    if (date_to)    query = query.lte('from_date', date_to)
     if (manager_id) query = query.eq('approved_by', manager_id)
 
     const { data, error, count } = await query

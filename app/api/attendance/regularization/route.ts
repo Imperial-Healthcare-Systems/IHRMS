@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import sql, { ensureSchema } from '@/lib/pg'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -23,16 +24,22 @@ export async function GET(req: NextRequest) {
     const userRole    = (session.user as any)?.role
     const userId      = (session.user as any)?.id
 
+    // Only true HR roles can review all employees' requests
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+
     let query = supabaseAdmin
       .from('attendance_regularizations')
-      .select('*', { count: 'exact' })
+      .select('*, employee:employees!attendance_regularizations_employee_id_fkey(id, first_name, last_name, emp_id, employee_code)', { count: 'exact' })
       .order('created_at', { ascending: false })
 
-    if (employee_id) query = query.eq('employee_id', employee_id)
-    if (status)      query = query.eq('status', status)
-    if (!['hr_admin', 'super_admin', 'operations_head'].includes(userRole) && !employee_id) {
+    if (employee_id && FULL_ACCESS_ROLES.includes(userRole)) {
+      // HR filtering by specific employee
+      query = query.eq('employee_id', employee_id)
+    } else if (!FULL_ACCESS_ROLES.includes(userRole)) {
+      // Non-HR roles see only their own requests
       query = query.eq('employee_id', userId)
     }
+    if (status) query = query.eq('status', status)
 
     const { data, error, count } = await query
     if (error) { console.error('[regularization GET]', error); throw error }
@@ -94,25 +101,23 @@ export async function PATCH(req: NextRequest) {
     const { id, status, rejection_reason } = body
     if (!id || !status) return NextResponse.json({ error: 'id and status are required' }, { status: 400 })
 
-    const approverId = (session.user as any)?.id
+    // Build update payload — only include columns that exist in the schema
+    const updatePayload: Record<string, unknown> = { status }
+    if (rejection_reason != null) updatePayload.rejection_reason = rejection_reason
 
     const { data, error } = await supabaseAdmin
       .from('attendance_regularizations')
-      .update({
-        status,
-        approved_by:       approverId,
-        approved_at:       new Date().toISOString(),
-        rejection_reason:  rejection_reason ?? null,
-      })
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single()
 
     if (error) { console.error('[regularization PATCH]', error); throw error }
 
+    const reg = data as any
+
     // If approved, update the actual attendance record
     if (status === 'approved') {
-      const reg = data as any
       await supabaseAdmin
         .from('attendance_daily')
         .update({
@@ -122,6 +127,34 @@ export async function PATCH(req: NextRequest) {
         })
         .eq('employee_id', reg.employee_id)
         .eq('date', reg.date)
+    }
+
+    // Send in-app notification to the employee
+    if (reg.employee_id) {
+      try {
+        await ensureSchema()
+        const dateLabel = reg.date
+          ? new Date(reg.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+          : 'your requested date'
+
+        const isApproved = status === 'approved'
+        await sql`
+          INSERT INTO notifications (recipient_id, title, body, type)
+          VALUES (
+            ${reg.employee_id}::uuid,
+            ${isApproved
+              ? 'Attendance Regularization Approved ✓'
+              : 'Attendance Regularization Rejected'},
+            ${isApproved
+              ? `Your regularization request for ${dateLabel} has been approved and your attendance record has been updated.`
+              : `Your regularization request for ${dateLabel} was not approved.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`},
+            ${isApproved ? 'success' : 'warning'}
+          )
+        `
+      } catch (notifErr) {
+        // Non-fatal — don't fail the whole request if notification insert fails
+        console.warn('[regularization PATCH] notification insert failed:', notifErr)
+      }
     }
 
     return NextResponse.json({ data })

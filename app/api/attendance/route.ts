@@ -67,9 +67,11 @@ export async function GET(req: NextRequest) {
       .order('date', { ascending: false })
       .limit(limit)
 
+    // Only true HR roles can view all employees' attendance
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
     if (employee_id) {
       query = query.eq('employee_id', employee_id)
-    } else if (!['hr_admin', 'super_admin', 'operations_head'].includes(userRole)) {
+    } else if (!FULL_ACCESS_ROLES.includes(userRole)) {
       query = query.eq('employee_id', userId)
     }
 
