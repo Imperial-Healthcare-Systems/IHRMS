@@ -330,6 +330,50 @@ img, svg { display: block; max-width: 100%; }
 }
 
 /* ─────────────────────────────────────────────────────────────
+   IHRMS SIDEBAR DRAWER — mobile/desktop behaviour
+   ───────────────────────────────────────────────────────────── */
+/* Desktop (≥1024px): always visible */
+@media (min-width: 1024px) {
+  .ihrms-sidebar { transform: translateX(0) !important; }
+}
+/* Mobile (<1024px): hidden by default, open when data-open="true" */
+@media (max-width: 1023px) {
+  .ihrms-sidebar              { transform: translateX(-100%); }
+  .ihrms-sidebar[data-open="true"] { transform: translateX(0); }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   GLOBAL MOBILE RESPONSIVE HELPERS
+   ───────────────────────────────────────────────────────────── */
+
+/* Responsive page-level padding — all pages wrap content in this class */
+@media (min-width: 640px) {
+  .sm\:\!px-6 { padding-left: 24px !important; padding-right: 24px !important; }
+  .sm\:\!px-7 { padding-left: 28px !important; padding-right: 28px !important; }
+  .sm\:\!px-8 { padding-left: 32px !important; padding-right: 32px !important; }
+}
+
+/* Topbar title: prevent overflow on narrow screens */
+@media (max-width: 480px) {
+  h1 { font-size: 14px !important; }
+}
+
+/* Modals: full-width on very small screens */
+@media (max-width: 480px) {
+  [role="dialog"],
+  .modal-container {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 8px !important;
+  }
+}
+
+/* Tables: ensure they never cause horizontal page overflow */
+.card table, .card-table {
+  min-width: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
    NAVIGATION ITEMS
    ───────────────────────────────────────────────────────────── */
 .nav-item {

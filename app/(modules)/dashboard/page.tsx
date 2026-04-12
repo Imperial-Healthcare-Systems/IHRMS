@@ -434,11 +434,12 @@ export default function DashboardPage() {
         }
       />
 
-      <div style={{ padding: '24px 24px 56px', maxWidth: 1600 }}>
+      <div style={{ padding: '16px 16px 56px', maxWidth: 1600 }} className="sm:!px-6">
 
         {/* ── KPI Strip ── */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+        <div
+          className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7"
+          style={{
           gap: 0,
           background: '#FFFFFF',
           borderRadius: 12, border: '1px solid rgba(0,0,0,0.06)',
@@ -480,7 +481,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── 6-card Stat Grid ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 14, marginBottom: 20 }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6" style={{ gap: 14, marginBottom: 20 }}>
           <StatCard label="Total Employees" value={String(totalStaff)} icon={Users} subtext={`↑ ${newJoiners} this month`} trendDir="up"
             color={{ bg: '#EFF6FF', icon: '#2563EB', border: '#BFDBFE', glow: 'rgba(37,99,235,0.12)' }} />
           <StatCard label="Present Today" value={String(presentToday)} icon={UserCheck} subtext={`${attendanceRate}% attendance`} trendDir="up"
@@ -496,7 +497,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Quick Stats Row ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+        <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 14, marginBottom: 20 }}>
 
           {/* Attendance Rate */}
           <div className="card" style={{ padding: '20px 22px' }}>
@@ -601,7 +602,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Today's Attendance + Pending Actions ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 14, marginBottom: 20 }}>
+        <div className="grid grid-cols-1 lg:grid-cols-[1.45fr_1fr]" style={{ gap: 14, marginBottom: 20 }}>
 
           {/* Today's Attendance */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -760,7 +761,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Recent Joiners + Upcoming Events ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 14 }}>
+        <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1fr]" style={{ gap: 14 }}>
 
           {/* Recent Joiners */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>

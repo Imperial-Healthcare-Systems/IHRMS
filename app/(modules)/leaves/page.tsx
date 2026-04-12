@@ -276,7 +276,7 @@ function ApplyLeaveModal({ onClose, balanceCards, onSuccess }: { onClose: () => 
             )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 14, marginBottom: 18 }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-gray-700)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>From Date *</label>
               <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-gray-300)', fontSize: '0.875rem', fontFamily: 'var(--font-body)' }} />
@@ -571,10 +571,10 @@ export default function LeavesPage() {
         }
       />
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── Leave Balance Cards ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12, marginBottom: 28 }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6" style={{ gap: 12, marginBottom: 28 }}>
           {balanceCards.map((lb) => (
             <div key={lb.type} className="card card-interactive" style={{ padding: '16px 18px', borderColor: lb.border, position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: lb.color, borderRadius: '10px 10px 0 0', opacity: 0.6 }} />
@@ -896,7 +896,7 @@ export default function LeavesPage() {
               <FileText size={18} style={{ color: 'var(--color-imperial-blue)' }} />
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Leave Policies — FY 2025–26</h3>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 16 }}>
               {LEAVE_POLICIES.map((policy) => (
                 <div key={policy.type} className="card" style={{ padding: '22px', borderColor: policy.border, overflow: 'hidden', position: 'relative' }}>
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: policy.color }} />

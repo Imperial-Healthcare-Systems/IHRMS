@@ -583,12 +583,12 @@ export default function ReportsPage() {
         }
       />
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── Quick Reports ── */}
         <div style={{ marginBottom: 28 }}>
           <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>Quick Reports</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>
             {QUICK_REPORTS.map(report => (
               <div key={report.name} className="card card-interactive" style={{ padding: '18px 20px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
                 <div style={{ width: 44, height: 44, borderRadius: 10, background: report.cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: report.cfg.color, flexShrink: 0 }}>
@@ -617,7 +617,7 @@ export default function ReportsPage() {
             <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Analytics Overview</p>
             {analyticsLoading && <span style={{ fontSize: '0.75rem', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 5 }}><Spinner size={13} /> Loading live data…</span>}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 14 }}>
 
             {/* Headcount Trend */}
             <div className="card" style={{ padding: '20px 22px' }}>

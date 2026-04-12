@@ -130,7 +130,7 @@ export default function ProfilePage() {
         subtitle="View and manage your account information"
       />
 
-      <div className="p-6 space-y-5">
+      <div className="p-4 sm:p-6 space-y-5">
 
         {/* ── PROFILE HERO CARD ── */}
         <div className="bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>

@@ -1766,11 +1766,11 @@ export default function SettingsPage() {
         }
       />
 
-      <div style={{ padding: '28px 28px 56px', display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+      <div style={{ padding: '16px 16px 56px', gap: 24, alignItems: 'flex-start' }} className="sm:!px-7 flex flex-col lg:flex-row">
         {/* Left Nav */}
         <nav
+          className="w-full lg:w-[220px]"
           style={{
-            width: 220,
             flexShrink: 0,
             background: '#fff',
             border: '1px solid var(--color-gray-200)',

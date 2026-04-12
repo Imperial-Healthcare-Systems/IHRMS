@@ -801,10 +801,10 @@ export default function ReimbursementsPage() {
         }
       />
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── KPI Cards — same structure as Employee / Payroll pages ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 24 }}>
           {[
             { label: 'My Pending Claims',    value: '₹12,450', sub: '3 claims awaiting approval', color: '#b45309', bg: '#fffbeb', border: '#fde68a',  icon: <Clock size={18} /> },
             { label: 'Approved This Month',  value: '₹28,300', sub: '7 claims approved',           color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0',  icon: <CheckCircle size={18} /> },

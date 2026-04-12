@@ -16,7 +16,9 @@ import {
   AlertTriangle,
   Info,
   XCircle,
+  Menu,
 } from 'lucide-react'
+import { useSidebar } from './SidebarContext'
 
 /* ─────────────────────────────────────────────
    Types
@@ -71,6 +73,7 @@ function getInitials(name?: string | null) {
 ───────────────────────────────────────────── */
 export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
   const { data: session } = useSession()
+  const { toggle: toggleSidebar } = useSidebar()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [searchFocused, setSearchFocused] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -146,6 +149,21 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
         boxShadow: '0 1px 0 0 rgba(0,0,0,0.04), 0 2px 8px 0 rgba(0,0,0,0.03)',
       }}
     >
+      {/* ── Hamburger (mobile only) ── */}
+      <button
+        onClick={toggleSidebar}
+        className="lg:hidden"
+        style={{
+          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: '#64748B',
+        }}
+        aria-label="Open menu"
+      >
+        <Menu size={20} />
+      </button>
+
       {/* ── Left: Title ── */}
       <div style={{ flexShrink: 0, minWidth: 0 }}>
         <h1 style={{

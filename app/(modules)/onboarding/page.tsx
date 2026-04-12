@@ -373,10 +373,10 @@ export default function OnboardingPage() {
         }
       />
 
-      <div style={{ padding: '28px 32px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ padding: '16px 16px', maxWidth: 1400, margin: '0 auto' }} className="sm:!px-8">
 
         {/* Summary Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 28 }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 16, marginBottom: 28 }}>
           <SummaryCard label="New Joiners This Month"    value={newJoinersThisMonth} loading={loading} icon={UserPlus}    color={{ bg: '#eff6ff', icon: '#2563eb', border: '#bfdbfe' }} />
           <SummaryCard label="Onboarding In Progress"    value={inProgressCount}     loading={loading} icon={Loader}      color={{ bg: '#fffbeb', icon: '#d97706', border: '#fde68a' }} />
           <SummaryCard label="Onboarding Completed"      value={completedCount}       loading={loading} icon={CheckCircle} color={{ bg: '#f0fdf4', icon: '#16a34a', border: '#bbf7d0' }} />

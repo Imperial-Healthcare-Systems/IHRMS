@@ -432,8 +432,8 @@ export default function AnnouncementsPage() {
         </button>
       </Topbar>
 
-      <div style={{ padding: '28px 28px 56px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24, alignItems: 'start' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px]" style={{ gap: 24, alignItems: 'start' }}>
 
           {/* ── LEFT: Feed ── */}
           <div>

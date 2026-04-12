@@ -317,10 +317,10 @@ export default function WarningsPage() {
         }
       />
 
-      <div style={{ padding: '28px 32px', maxWidth: 1400, margin: '0 auto' }}>
+      <div style={{ padding: '16px 16px', maxWidth: 1400, margin: '0 auto' }} className="sm:!px-8">
 
         {/* Summary Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 28 }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 16, marginBottom: 28 }}>
           <SummaryCard label={`Warnings in ${currentYear}`}   value={loading ? '…' : thisYearWarnings.length} icon={AlertTriangle} color={{ bg: '#fef2f2', icon: '#dc2626', border: '#fecaca' }} />
           <SummaryCard label="Active (Issued)"                 value={loading ? '…' : issuedCount}             icon={Clock}        color={{ bg: '#fffbeb', icon: '#d97706', border: '#fde68a' }} />
           <SummaryCard label="Acknowledged"                    value={loading ? '…' : acknowledgedCount}        icon={CheckCircle}  color={{ bg: '#f0fdf4', icon: '#16a34a', border: '#bbf7d0' }} />

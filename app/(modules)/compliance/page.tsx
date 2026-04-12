@@ -477,10 +477,10 @@ export default function CompliancePage() {
         </button>
       </Topbar>
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── KPI Strip ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 24 }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ gap: 12, marginBottom: 24 }}>
           {([
             {
               label: 'Compliant', value: summaryLoading ? '—' : String(compliant || (dueMonth > 0 ? '—' : 'N/A')),
@@ -554,7 +554,7 @@ export default function CompliancePage() {
 
                 {/* Breakdown tiles */}
                 {totals && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+                  <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12 }}>
                     {[
                       { label: 'EPS (8.33%)',   value: fmt(epfData.reduce((s, r) => s + r.eps, 0)),   color: '#6d28d9', bg: '#f5f3ff', border: '#ddd6fe' },
                       { label: 'EDLI (0.5%)',   value: fmt(epfData.reduce((s, r) => s + r.edli, 0)), color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' },

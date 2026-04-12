@@ -580,8 +580,8 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
       {/* ── TAB: Employee Details ── */}
       {tab === 'details' && (
         <>
-          <div style={{ overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }} className="sm:!px-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
               <div>
                 <label style={LS}>First Name *</label>
                 <input style={IS} value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} />
@@ -598,7 +598,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
               <div>
                 <label style={LS}>Employment Type</label>
                 <select style={IS} value={form.employment_type} onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))}>
@@ -676,7 +676,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
               {/* Earnings */}
               <div>
                 <p style={{ fontSize: '0.72rem', fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Earnings (Monthly ₹)</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 11 }}>
+                <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: 11 }}>
                   {([['basic','Basic Salary *', true],['hra','HRA', false],['conveyance','Conveyance', false],['medical','Medical Allow.', false],['special','Special Allow.', false],['lta','LTA (monthly)', false]] as [string, string, boolean][]).map(([k, lbl, req]) => (
                     <div key={k}>
                       <label style={LBs}>{lbl}</label>
@@ -950,16 +950,12 @@ export default function EmployeesPage() {
         }
       />
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── Summary Cards ── */}
         <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(5, 1fr)',
-            gap: 12,
-            marginBottom: 24,
-          }}
+          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"
+          style={{ gap: 12, marginBottom: 24 }}
         >
           {[
             { label: 'Total Employees', value: String(totalCount || employees.length), color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
@@ -1390,8 +1386,8 @@ export default function EmployeesPage() {
             {/* ── STEP 1: Basic Info ── */}
             {addStep === 1 && (
               <form onSubmit={handleAddEmployee} style={{ overflowY: 'auto', flex: 1 }}>
-                <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14 }} className="sm:!px-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 14 }}>
                     <div>
                       <label style={LBL}>First Name *</label>
                       <input required value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} style={FLD} placeholder="e.g. Rahul" />
@@ -1401,7 +1397,7 @@ export default function EmployeesPage() {
                       <input required value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} style={FLD} placeholder="e.g. Sharma" />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 14 }}>
                     <div>
                       <label style={LBL}>Work Email *</label>
                       <input required type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} style={FLD} placeholder="rahul@company.in" />
@@ -1411,7 +1407,7 @@ export default function EmployeesPage() {
                       <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} style={FLD} placeholder="+91 98765 43210" />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 14 }}>
                     <div>
                       <label style={LBL}>Department *</label>
                       <div style={{ position: 'relative' }}>
@@ -1435,7 +1431,7 @@ export default function EmployeesPage() {
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 14 }}>
                     <div>
                       <label style={LBL}>Hire Date *</label>
                       <input required type="date" value={form.hire_date} onChange={e => setForm(f => ({ ...f, hire_date: e.target.value }))} style={FLD} />

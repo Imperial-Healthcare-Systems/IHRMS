@@ -567,7 +567,7 @@ function PayslipModal({ emp, period = 'March 2026', onClose }: { emp: Payslip; p
           </div>
 
           {/* Employee info grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20, padding: '16px', borderRadius: 8, background: 'var(--color-gray-50)', border: '1px solid var(--color-gray-200)' }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 16, marginBottom: 20, padding: '16px', borderRadius: 8, background: 'var(--color-gray-50)', border: '1px solid var(--color-gray-200)' }}>
             {[
               [['Employee Name', emp.name], ['Employee ID', emp.empId], ['Designation', emp.designation]],
               [['Department', emp.department], ['Bank Account', emp.bankAccount], ['PAN', emp.pan]],
@@ -584,7 +584,7 @@ function PayslipModal({ emp, period = 'March 2026', onClose }: { emp: Payslip; p
           </div>
 
           {/* Attendance summary */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+          <div className="grid grid-cols-3" style={{ gap: 12, marginBottom: 20 }}>
             {[
               { label: 'Working Days', value: emp.workingDays, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
               { label: 'Days Present',  value: emp.presentDays, color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
@@ -598,7 +598,7 @@ function PayslipModal({ emp, period = 'March 2026', onClose }: { emp: Payslip; p
           </div>
 
           {/* Earnings & Deductions */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 16, marginBottom: 20 }}>
             {/* Earnings */}
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, paddingBottom: 8, borderBottom: '2px solid #15803d' }}>
@@ -1757,10 +1757,10 @@ export default function PayrollPage() {
         }
       />
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── KPI Cards — same exact structure as Employee page ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 24 }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ gap: 12, marginBottom: 24 }}>
           {[
             { label: 'Total Gross Pay',  value: fmt(latestRun?.total_gross),        color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
             { label: 'Total Deductions', value: fmt(latestRun?.total_deductions),   color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },

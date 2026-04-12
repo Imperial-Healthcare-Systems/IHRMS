@@ -1180,10 +1180,10 @@ export default function ExitPage() {
         </button>
       </Topbar>
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── KPI Strip ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 24 }}>
           {([
             { label: 'On Notice Period', value: noticePeriodCount, icon: UserMinus,    color: '#E8622A' },
             { label: 'Exit This Month',  value: exitThisMonth,     icon: LogOut,        color: '#b91c1c' },

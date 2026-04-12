@@ -213,7 +213,7 @@ function AddAssetModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   return (
     <Modal onClose={onClose} title="Add New Asset" sub="Register a new company-owned asset">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={LBL}>Asset Name <span style={{ color: '#dc2626' }}>*</span></label>
             <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Dell Latitude 5520" style={FIELD} />
@@ -417,7 +417,7 @@ function EditModal({ asset, onClose, onSuccess }: { asset: Asset; onClose: () =>
   return (
     <Modal onClose={onClose} title="Edit Asset" sub={`${asset.code} — ${asset.name}`}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={LBL}>Asset Name</label>
             <input value={form.name} onChange={e => set('name', e.target.value)} style={FIELD} />
@@ -497,7 +497,7 @@ function ViewModal({ asset, onClose }: { asset: Asset; onClose: () => void }) {
         </div>
 
         {/* Info grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 10 }}>
           {fields.map(f => (
             <div key={f.label} style={{ padding: '10px 14px', borderRadius: 8, background: '#f8fafc', border: '1px solid #f1f5f9' }}>
               <p style={{ fontSize: '0.68rem', color: '#9ca3af', margin: '0 0 2px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{f.label}</p>
@@ -768,10 +768,10 @@ export default function AssetsPage() {
         </button>
       </Topbar>
 
-      <div style={{ padding: '28px 28px 56px' }}>
+      <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
         {/* ── KPI Strip ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginBottom: 24 }}>
           {([
             { label: 'Total Assets',      value: loading ? '—' : totalAssets,      icon: Package,   color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
             { label: 'Assigned',          value: loading ? '—' : assignedCount,    icon: UserCheck, color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
