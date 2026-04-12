@@ -179,36 +179,25 @@ export function Sidebar() {
       >
         {/* ── Logo ── */}
         <div
-          className="flex items-center gap-3 shrink-0"
-          style={{ padding: '18px 16px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+          className="flex items-center shrink-0"
+          style={{ padding: '12px 14px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', gap: 6 }}
         >
-          <div
-            style={{
-              width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-              background: 'linear-gradient(135deg, #F47920 0%, #FFB347 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(244,121,32,0.45)',
-            }}
-          >
-            <Image src="/logo.svg" alt="IHRMS" width={22} height={22} style={{ filter: 'brightness(0) invert(1)' }} />
-          </div>
-
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="flex items-baseline gap-1.5">
-              <span style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 17, letterSpacing: '-0.4px', fontFamily: "'Outfit', sans-serif" }}>
-                IHRMS
-              </span>
-              <span style={{
-                background: 'rgba(244,121,32,0.2)', color: '#F59E0B',
-                fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 20,
-                border: '1px solid rgba(245,158,11,0.25)', letterSpacing: '0.3px',
-              }}>
-                v2.0
-              </span>
-            </div>
-            <p style={{ color: '#344563', fontSize: 10, marginTop: 1, letterSpacing: '0.2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Imperial Healthcare Systems
-            </p>
+          {/* White logo — mix-blend-mode:screen makes the black bg invisible on dark navbar */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
+            <Image
+              src="/imperial-logo-white.png"
+              alt="Imperial Healthcare Systems"
+              width={180}
+              height={56}
+              style={{
+                width: '100%',
+                maxWidth: 180,
+                height: 'auto',
+                objectFit: 'contain',
+                mixBlendMode: 'screen',
+              }}
+              priority
+            />
           </div>
 
           {/* Mobile close button */}

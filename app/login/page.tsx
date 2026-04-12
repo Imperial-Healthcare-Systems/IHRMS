@@ -15,7 +15,6 @@ import {
   Loader2,
   Mail,
   Shield,
-  Stethoscope,
   Users,
 } from 'lucide-react'
 
@@ -164,14 +163,13 @@ export default function LoginPage() {
       >
         <div style={{ position: 'absolute', inset: 0, opacity: 0.04, backgroundImage: 'linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
         <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '32px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #F47920 0%, #FFD700 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(244,121,32,0.4)' }}>
-              <Stethoscope size={24} color="#ffffff" />
-            </div>
-            <div>
-              <div style={{ color: '#FFFFFF', fontWeight: 800, fontSize: '24px', fontFamily: "'Outfit', sans-serif" }}>IHRMS</div>
-              <p style={{ color: '#64748B', fontSize: '12px' }}>Imperial Healthcare Systems</p>
-            </div>
+          <div style={{ marginBottom: '32px' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/imperial-logo-white.png"
+              alt="Imperial Healthcare Systems"
+              style={{ width: 260, height: 'auto', mixBlendMode: 'screen' }}
+            />
           </div>
 
           <div style={{ flex: 1 }}>
@@ -230,14 +228,13 @@ export default function LoginPage() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', padding: '32px 24px', position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0, opacity: 0.025, backgroundImage: 'radial-gradient(circle at 1px 1px, #0A1628 1px, transparent 0)', backgroundSize: '28px 28px' }} />
         <div style={{ width: '100%', maxWidth: '420px', position: 'relative', zIndex: 1 }}>
-          <div className="flex lg:hidden" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '32px' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg, #F47920 0%, #FFD700 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Stethoscope size={20} color="#ffffff" />
-            </div>
-            <div>
-              <span style={{ fontWeight: 800, fontSize: '20px', color: '#0A1628', fontFamily: "'Outfit', sans-serif" }}>IHRMS</span>
-              <p style={{ fontSize: '11px', color: '#94A3B8' }}>Imperial Healthcare Systems</p>
-            </div>
+          <div className="flex lg:hidden" style={{ display: 'flex', justifyContent: 'center', marginBottom: '32px' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/imperial-logo-color.png"
+              alt="Imperial Healthcare Systems"
+              style={{ width: 220, height: 'auto' }}
+            />
           </div>
 
           <div style={cardStyle}>

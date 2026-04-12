@@ -324,9 +324,8 @@ function buildPayslipHTML(emp: Payslip, period = 'March 2026'): string {
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#1f2937;padding:32px}
     .header{text-align:center;padding-bottom:16px;border-bottom:3px solid #E8622A;margin-bottom:20px}
-    .company-logo{display:inline-flex;align-items:center;gap:10px;margin-bottom:6px}
-    .logo-box{width:40px;height:40px;border-radius:10px;background:#E8622A;color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center}
-    .company-name{font-size:18px;font-weight:800;color:#111}
+    .company-logo{display:flex;justify-content:center;margin-bottom:8px}
+    .company-logo img{height:60px;width:auto}
     .company-addr{font-size:11px;color:#6b7280;margin-top:4px}
     .badge{display:inline-block;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;margin-top:8px}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
@@ -352,8 +351,7 @@ function buildPayslipHTML(emp: Payslip, period = 'March 2026'): string {
   </style></head><body>
   <div class="header">
     <div class="company-logo">
-      <div class="logo-box">IH</div>
-      <span class="company-name">Imperial Healthcare</span>
+      <img src="/imperial-logo-color.png" alt="Imperial Healthcare Systems" />
     </div>
     <div class="company-addr">123 Business Park, Whitefield, Bengaluru – 560066</div>
     <div class="badge">Payslip · ${period}</div>
@@ -556,9 +554,9 @@ function PayslipModal({ emp, period = 'March 2026', onClose }: { emp: Payslip; p
         <div style={{ padding: '24px' }}>
           {/* Company header */}
           <div style={{ textAlign: 'center', marginBottom: 20, paddingBottom: 16, borderBottom: '2px solid #E8622A' }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: '#E8622A', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.875rem', fontWeight: 700 }}>IH</div>
-              <span style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--color-gray-900)' }}>Imperial Healthcare</span>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/imperial-logo-color.png" alt="Imperial Healthcare Systems" style={{ height: 56, width: 'auto' }} />
             </div>
             <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)' }}>123 Business Park, Whitefield, Bengaluru – 560066</p>
             <span className="badge" style={{ marginTop: 8, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', display: 'inline-flex' }}>
