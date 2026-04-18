@@ -56,6 +56,7 @@ export interface AttendanceLog {
   id: string; employee_id: string; date: string; punch_in: string | null; punch_out: string | null
   hours_worked: number | null; status: string; is_wfh: boolean; is_half_day: boolean
   overtime_hours: number | null; regularized: boolean; notes: string | null
+  geo_lat: number | null; geo_lng: number | null; geo_location: string | null
   employee: { id: string; first_name: string; last_name: string; emp_id: string; department: { name: string } | null } | null
 }
 
@@ -224,7 +225,7 @@ export const attendanceApi = {
   list: (params: { employee_id?: string; date?: string; date_from?: string; date_to?: string; status?: string; limit?: number } = {}) =>
     apiFetch<AttendanceListResponse>(`/api/attendance${qs(params)}`),
 
-  punchIn: (payload?: { employee_id?: string; punch_method?: string; is_wfh?: boolean; notes?: string }) =>
+  punchIn: (payload?: { employee_id?: string; punch_method?: string; is_wfh?: boolean; notes?: string; geo_lat?: number; geo_lng?: number; geo_location?: string }) =>
     apiFetch<{ data: AttendanceLog; message: string }>('/api/attendance', {
       method: 'POST', body: JSON.stringify({ action: 'punch_in', ...payload }),
     }),

@@ -321,13 +321,12 @@ export default function AttendancePage() {
   const [punchingIn, setPunchingIn] = useState(false)
   const [punchingOut, setPunchingOut] = useState(false)
 
+  // Explicit punch state — seeded from own attendance fetch, updated on action
+  const [hasPunchedIn,  setHasPunchedIn]  = useState(false)
+  const [hasPunchedOut, setHasPunchedOut] = useState(false)
+  const [punchInTime,   setPunchInTime]   = useState<string | null>(null)
+
   const myUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
-  const myTodayLog = useMemo(
-    () => attendanceLogs.find(l => l.employee_id === myUserId) ?? null,
-    [attendanceLogs, myUserId],
-  )
-  const hasPunchedIn  = !!myTodayLog?.punch_in
-  const hasPunchedOut = !!myTodayLog?.punch_out
 
   const [today, setToday] = useState('')
   const todayISO = useMemo(() => {
@@ -341,6 +340,7 @@ export default function AttendancePage() {
     setToday(istDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }))
   }, [])
 
+  // Fetch all today's attendance (for the table)
   useEffect(() => {
     setLoadingAttendance(true)
     attendanceApi.list({ date: todayISO, limit: 200 })
@@ -348,6 +348,19 @@ export default function AttendancePage() {
       .catch(console.error)
       .finally(() => setLoadingAttendance(false))
   }, [todayISO])
+
+  // Separately fetch own punch status for today — drives button state reliably
+  useEffect(() => {
+    if (!myUserId) return
+    attendanceApi.list({ employee_id: myUserId, date: todayISO, limit: 1 })
+      .then(r => {
+        const own = r.data[0] ?? null
+        setHasPunchedIn(!!own?.punch_in)
+        setHasPunchedOut(!!own?.punch_out)
+        setPunchInTime(own?.punch_in ?? null)
+      })
+      .catch(() => {})
+  }, [myUserId, todayISO])
 
   /* Adapt API shape → UI shape */
   const adaptedLogs = useMemo(() => attendanceLogs.map(log => ({
@@ -361,6 +374,9 @@ export default function AttendancePage() {
     status: ({ present: 'Present', late: 'Late', absent: 'Absent', work_from_home: 'WFH', on_leave: 'On Leave', half_day: 'Present' } as Record<string, string>)[log.status] ?? log.status as AttendanceStatus,
     wfh: log.is_wfh,
     punchMethod: 'Manual' as const,
+    geoLat: log.geo_lat,
+    geoLng: log.geo_lng,
+    geoLocation: log.geo_location,
   })), [attendanceLogs])
 
   /* No mock fallback — show real data or empty state */
@@ -418,13 +434,45 @@ export default function AttendancePage() {
     }
   }, [activeTab, selectedMonth, loadedMonth, fetchMonthlySummary])
 
+  async function captureGeolocation(): Promise<{ geo_lat?: number; geo_lng?: number; geo_location?: string }> {
+    if (!navigator.geolocation) return {}
+    return new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(
+        async pos => {
+          const lat = pos.coords.latitude
+          const lng = pos.coords.longitude
+          let geo_location: string | undefined
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,
+              { headers: { 'Accept-Language': 'en' } },
+            )
+            const json = await res.json()
+            geo_location = json.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+          } catch {
+            geo_location = `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+          }
+          resolve({ geo_lat: lat, geo_lng: lng, geo_location })
+        },
+        () => resolve({}),   // permission denied or unavailable — punch in without geo
+        { timeout: 8000, maximumAge: 60000 },
+      )
+    })
+  }
+
   async function handlePunchIn() {
     setPunchingIn(true)
     try {
-      await attendanceApi.punchIn({ punch_method: 'Manual' })
+      const geo = await captureGeolocation()
+      const res = await attendanceApi.punchIn({ punch_method: 'Manual', ...geo })
+      setHasPunchedIn(true)
+      setHasPunchedOut(false)
+      setPunchInTime(res.data.punch_in ?? null)
       toast.success('Punched in successfully!')
-      const r = await attendanceApi.list({ date: todayISO, limit: 200 })
-      setAttendanceLogs(r.data)
+      // Refresh the full table in background
+      attendanceApi.list({ date: todayISO, limit: 200 })
+        .then(r => setAttendanceLogs(r.data))
+        .catch(() => {})
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Punch in failed')
     } finally { setPunchingIn(false) }
@@ -434,9 +482,11 @@ export default function AttendancePage() {
     setPunchingOut(true)
     try {
       await attendanceApi.punchOut({ punch_method: 'Manual' })
+      setHasPunchedOut(true)
       toast.success('Punched out successfully!')
-      const r = await attendanceApi.list({ date: todayISO, limit: 200 })
-      setAttendanceLogs(r.data)
+      attendanceApi.list({ date: todayISO, limit: 200 })
+        .then(r => setAttendanceLogs(r.data))
+        .catch(() => {})
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Punch out failed')
     } finally { setPunchingOut(false) }
@@ -519,7 +569,7 @@ export default function AttendancePage() {
               className="btn btn-primary btn-sm"
               onClick={handlePunchIn}
               disabled={punchingIn || hasPunchedIn || loadingAttendance}
-              title={hasPunchedIn ? `Already punched in at ${myTodayLog?.punch_in} IST` : ''}
+              title={hasPunchedIn ? `Already punched in at ${punchInTime} IST` : ''}
             >
               <Clock size={14} />
               {punchingIn ? 'Punching In…' : hasPunchedIn ? 'Punched In ✓' : 'Punch In'}
@@ -626,7 +676,7 @@ export default function AttendancePage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
-                      {['Employee', 'Department', 'Check-In', 'Check-Out', 'Hours Worked', 'Status', 'WFH', 'Actions'].map((h) => (
+                      {['Employee', 'Department', 'Check-In', 'Check-Out', 'Hours Worked', 'Status', 'WFH', 'Location', 'Actions'].map((h) => (
                         <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -667,6 +717,26 @@ export default function AttendancePage() {
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#1d4ed8', background: '#eff6ff', padding: '2px 8px', borderRadius: 'var(--radius-full)', border: '1px solid #bfdbfe' }}>
                               <Home size={11} /> WFH
                             </span>
+                          ) : (
+                            <span style={{ color: 'var(--color-gray-300)', fontSize: '0.8rem' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px 16px', maxWidth: 200 }}>
+                          {rec.geoLat && rec.geoLng ? (
+                            <a
+                              href={`https://www.google.com/maps?q=${rec.geoLat},${rec.geoLng}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={rec.geoLocation ?? `${rec.geoLat}, ${rec.geoLng}`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: '#1d4ed8', fontSize: '0.8rem', textDecoration: 'none', maxWidth: 180 }}
+                            >
+                              <MapPin size={13} style={{ flexShrink: 0, color: '#ef4444' }} />
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {rec.geoLocation
+                                  ? rec.geoLocation.split(',').slice(0, 2).join(',').trim()
+                                  : `${Number(rec.geoLat).toFixed(4)}, ${Number(rec.geoLng).toFixed(4)}`}
+                              </span>
+                            </a>
                           ) : (
                             <span style={{ color: 'var(--color-gray-300)', fontSize: '0.8rem' }}>—</span>
                           )}

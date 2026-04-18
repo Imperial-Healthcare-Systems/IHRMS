@@ -49,6 +49,9 @@ function mapRow(r: any) {
     overtime_hours: null,
     regularized:    r.is_regularized ?? false,
     notes:          r.remarks ?? null,
+    geo_lat:        r.geo_lat      ?? null,
+    geo_lng:        r.geo_lng      ?? null,
+    geo_location:   r.geo_location ?? null,
     employee:       Array.isArray(r.employee) ? r.employee[0] ?? null : r.employee ?? null,
   }
 }
@@ -74,6 +77,7 @@ export async function GET(req: NextRequest) {
       .select(`
         id, employee_id, date, check_in, check_out,
         total_hours, status, is_regularized, remarks,
+        geo_lat, geo_lng, geo_location,
         employee:employees(id, first_name, last_name, emp_id, department_id)
       `, { count: 'exact' })
       .order('date', { ascending: false })
@@ -111,7 +115,7 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { action, employee_id, is_wfh, notes } = body
+    const { action, employee_id, is_wfh, notes, geo_lat, geo_lng, geo_location } = body
 
     const targetEmployee = employee_id ?? (session.user as any)?.id
     if (!targetEmployee) return NextResponse.json({ error: 'Employee ID required' }, { status: 400 })
@@ -172,10 +176,16 @@ export async function POST(req: NextRequest) {
 
       let data: any, error: any
 
+      const geoFields = {
+        ...(geo_lat  != null ? { geo_lat }      : {}),
+        ...(geo_lng  != null ? { geo_lng }      : {}),
+        ...(geo_location    ? { geo_location }  : {}),
+      }
+
       if (bareRecord) {
         ;({ data, error } = await supabaseAdmin
           .from('attendance_daily')
-          .update({ check_in: now.toISOString(), status, remarks: notes ?? null })
+          .update({ check_in: now.toISOString(), status, remarks: notes ?? null, ...geoFields })
           .eq('id', bareRecord.id)
           .select()
           .single())
@@ -188,6 +198,7 @@ export async function POST(req: NextRequest) {
             check_in:    now.toISOString(),
             status,
             remarks:     notes ?? null,
+            ...geoFields,
           })
           .select()
           .single())
