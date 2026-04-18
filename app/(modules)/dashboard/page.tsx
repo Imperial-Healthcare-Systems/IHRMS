@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import toast from 'react-hot-toast'
 import { Topbar } from '@/components/layout/Topbar'
 import {
@@ -15,6 +16,8 @@ import {
   dashboardApi, attendanceApi, reportsApi, employeesApi, leavesApi,
   type DashboardStats, type AttendanceLog, type Employee, type LeaveBalance,
 } from '@/lib/api-client'
+
+const MANAGEMENT_ROLES = ['super_admin', 'hr_admin', 'admin', 'hr', 'payroll_admin', 'finance_admin', 'operations_head', 'manager']
 
 /* ─────────────────────────────────────────────────────────────
    TYPES & DATA
@@ -228,6 +231,10 @@ function exportDashboardHTML(totalStaff: number, presentToday: number, onLeave: 
 export default function DashboardPage() {
   const router       = useRouter()
   const searchParams = useSearchParams()
+  const { data: session } = useSession()
+  const userRole = ((session?.user as Record<string, unknown>)?.role as string | null) ?? 'employee'
+  const userName = session?.user?.name ?? 'there'
+  const isEmployee = !MANAGEMENT_ROLES.includes(userRole)
   const [stats,        setStats]        = useState<DashboardStats | null>(null)
   const [todayLogs,    setTodayLogs]    = useState<AttendanceLog[]>([])
   const [deptDist,     setDeptDist]     = useState<{ dept: string; count: number; pct: number; color: string }[]>([])
@@ -327,14 +334,14 @@ export default function DashboardPage() {
   return (
     <>
       <Topbar
-        title="HR Dashboard"
-        subtitle={`Welcome back — ${payrollPeriod}`}
-        notificationCount={pendingLeaves + pendingExpenses + pendingRegs}
+        title={isEmployee ? 'My Dashboard' : 'HR Dashboard'}
+        subtitle={isEmployee ? `Welcome, ${userName} — ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : `Welcome back — ${payrollPeriod}`}
+        notificationCount={isEmployee ? 0 : pendingLeaves + pendingExpenses + pendingRegs}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
-            {/* ── Export dropdown ── */}
-            <div ref={exportRef} style={{ position: 'relative' }}>
+            {/* ── Export dropdown — management only ── */}
+            {!isEmployee && <div ref={exportRef} style={{ position: 'relative' }}>
               <button
                 onClick={() => { setShowExport(v => !v); setShowQuickActions(false) }}
                 className="btn btn-outline btn-sm"
@@ -376,10 +383,10 @@ export default function DashboardPage() {
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
-            {/* ── Quick Actions dropdown ── */}
-            <div ref={quickActRef} style={{ position: 'relative' }}>
+            {/* ── Quick Actions dropdown — management only ── */}
+            {!isEmployee && <div ref={quickActRef} style={{ position: 'relative' }}>
               <button
                 onClick={() => { setShowQuickActions(v => !v); setShowExport(false) }}
                 style={{
@@ -428,13 +435,154 @@ export default function DashboardPage() {
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
 
           </div>
         }
       />
 
       <div style={{ padding: '16px 16px 56px', maxWidth: 1600 }} className="sm:!px-6">
+
+        {/* ══════════════════════════════════════════
+            EMPLOYEE PERSONAL DASHBOARD
+            Shown only to users with role=employee
+        ══════════════════════════════════════════ */}
+        {isEmployee ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Welcome banner */}
+            <div style={{
+              background: 'linear-gradient(135deg, #1E3A5F 0%, #1565C0 100%)',
+              borderRadius: 14, padding: '24px 28px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+              boxShadow: '0 4px 20px rgba(21,101,192,0.2)',
+            }}>
+              <div>
+                <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>
+                  {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </p>
+                <h2 style={{ color: '#FFFFFF', fontSize: 22, fontWeight: 800, fontFamily: "'Outfit', sans-serif", margin: 0 }}>
+                  Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {userName.split(' ')[0]}!
+                </h2>
+                <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 4 }}>
+                  Imperial Healthcare Systems · Employee Portal
+                </p>
+              </div>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%', flexShrink: 0,
+                background: 'rgba(255,255,255,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <UserCheck size={26} color="#FFFFFF" />
+              </div>
+            </div>
+
+            {/* Quick action tiles */}
+            <div className="grid grid-cols-2 sm:grid-cols-4" style={{ gap: 12 }}>
+              {[
+                { icon: Clock,     label: 'My Attendance', sub: 'View your records',    color: '#2563EB', bg: '#EFF6FF', path: '/attendance' },
+                { icon: Calendar,  label: 'Apply Leave',   sub: 'Submit leave request', color: '#16A34A', bg: '#F0FDF4', path: '/leaves' },
+                { icon: IndianRupee, label: 'My Payslips', sub: 'View salary slips',    color: '#7C3AED', bg: '#F5F3FF', path: '/payroll' },
+                { icon: AlertCircle, label: 'Announcements', sub: 'Company updates',    color: '#EA580C', bg: '#FFF7ED', path: '/announcements' },
+              ].map(tile => (
+                <button
+                  key={tile.label}
+                  onClick={() => router.push(tile.path)}
+                  style={{
+                    background: '#FFFFFF', borderRadius: 12, padding: '18px 16px',
+                    border: '1px solid rgba(0,0,0,0.06)',
+                    borderTop: `3px solid ${tile.color}`,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    cursor: 'pointer', textAlign: 'left',
+                    display: 'flex', flexDirection: 'column', gap: 10,
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 24px ${tile.color}20` }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)' }}
+                >
+                  <div style={{ width: 38, height: 38, borderRadius: 10, background: tile.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <tile.icon size={18} style={{ color: tile.color }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', lineHeight: 1.3 }}>{tile.label}</p>
+                    <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>{tile.sub}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Leave balance + upcoming events */}
+            <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: 16 }}>
+
+              {/* My Leave Balance */}
+              <div className="card" style={{ padding: '20px 22px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>My Leave Balance</p>
+                    <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Current year · {new Date().getFullYear()}</p>
+                  </div>
+                  <button onClick={() => router.push('/leaves')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#F47920', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                    Apply Leave <ChevronRight size={12} />
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {loading ? (
+                    <p style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>Loading…</p>
+                  ) : leaveStatusRows.length === 0 ? (
+                    <p style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>No leave balance data</p>
+                  ) : leaveStatusRows.map((l) => (
+                    <div key={l.type}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: l.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12.5, color: '#374151', fontWeight: 500 }}>{l.type}</span>
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: l.color }}>
+                          {l.used}{l.total > 0 ? ` / ${l.total} days` : ' days used'}
+                        </span>
+                      </div>
+                      {l.total > 0 && (
+                        <div style={{ height: 4, borderRadius: 99, background: '#F1F5F9', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${l.pct}%`, background: l.color, borderRadius: 99, transition: 'width 0.6s ease' }} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Upcoming Events */}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #F1F4F9' }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Upcoming Events</p>
+                    <p style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 2 }}>Holidays & company events</p>
+                  </div>
+                </div>
+                <div>
+                  {upcomingEvents.filter(ev => ['Holiday', 'Compliance'].includes(ev.badge)).concat(upcomingEvents.filter(ev => !['Holiday', 'Compliance'].includes(ev.badge))).slice(0, 4).map((ev, i, arr) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px',
+                      borderBottom: i < arr.length - 1 ? '1px solid #F8FAFC' : 'none',
+                    }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: ev.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+                        {ev.icon}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 12.5, color: '#1E293B', fontWeight: 500, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.label}</p>
+                        <p style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>{ev.date}</p>
+                      </div>
+                      <span style={{ background: ev.bg, color: ev.color, border: `1px solid ${ev.color}30`, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0 }}>
+                        {ev.badge}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        ) : (<>
 
         {/* ── KPI Strip ── */}
         <div
@@ -943,6 +1091,8 @@ export default function DashboardPage() {
             <ArrowUpRight size={13} /> Connect Supabase
           </button>
         </div>
+
+        </>)}
 
       </div>
     </>
