@@ -420,6 +420,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
     first_name:      emp.first_name,
     last_name:       emp.last_name,
     work_location:   emp.work_location ?? '',
+    work_type:       (emp as any).work_type ?? 'office',
     employment_type: emp.employment_type ?? 'full_time',
     status:          emp.status ?? 'active',
     role:            emp.role ?? 'employee',
@@ -500,7 +501,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
         body: JSON.stringify({
           first_name: form.first_name.trim(), last_name: form.last_name.trim(),
           full_name: `${form.first_name.trim()} ${form.last_name.trim()}`,
-          work_location: form.work_location, employment_type: form.employment_type,
+          work_location: form.work_location, work_type: form.work_type, employment_type: form.employment_type,
           status: form.status, role: form.role, department_id: form.department_id || null,
         }),
       })
@@ -618,6 +619,14 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
             <div>
               <label style={LS}>Work Location</label>
               <input style={IS} value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} placeholder="e.g. Mumbai" />
+            </div>
+            <div>
+              <label style={LS}>Work Type</label>
+              <select style={IS} value={form.work_type} onChange={e => setForm(f => ({ ...f, work_type: e.target.value }))}>
+                <option value="office">Work From Office</option>
+                <option value="home">Work From Home</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
             </div>
             <div>
               <label style={LS}>Role</label>
@@ -935,7 +944,7 @@ export default function EmployeesPage() {
   const [form, setForm]               = useState({
     first_name: '', last_name: '', email: '', phone: '',
     department_id: '', designation_id: '', employment_type: 'full_time',
-    hire_date: '', work_location: '', role: 'employee',
+    hire_date: '', work_location: '', work_type: 'office', role: 'employee',
   })
 
   const BLANK_SALARY = { ctc_annual: '', basic: '', hra: '', conveyance: '', medical: '', special: '', lta: '', pf: '', esic: '', metro: true, effective_from: new Date().toISOString().slice(0, 10) }
@@ -943,7 +952,7 @@ export default function EmployeesPage() {
 
   function closAddModal() {
     setShowAdd(false); setAddStep(1); setNewEmpId(''); setNewEmpName('')
-    setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', role: 'employee' })
+    setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', work_type: 'office', role: 'employee' })
     setSalary(BLANK_SALARY)
   }
 
@@ -1039,7 +1048,7 @@ export default function EmployeesPage() {
         email: form.email, phone: form.phone || undefined,
         department_id: form.department_id, designation_id: form.designation_id || undefined,
         employment_type: form.employment_type, hire_date: form.hire_date,
-        work_location: form.work_location || undefined, role: form.role,
+        work_location: form.work_location || undefined, work_type: form.work_type || undefined, role: form.role,
       })
       const empId   = (res as { data?: { id?: string } }).data?.id ?? ''
       const empName = `${form.first_name} ${form.last_name}`.trim()
@@ -1610,16 +1619,26 @@ export default function EmployeesPage() {
                       <input value={form.work_location} onChange={e => setForm(f => ({ ...f, work_location: e.target.value }))} style={FLD} placeholder="e.g. Bengaluru, Remote" />
                     </div>
                   </div>
-                  <div>
-                    <label style={LBL}>Role</label>
-                    <div style={{ position: 'relative' }}>
-                      <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={SEL}>
-                        <option value="employee">Employee</option>
-                        <option value="manager">Manager</option>
-                        <option value="hr_admin">HR Admin</option>
-                        <option value="operations_head">Operations Head</option>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <label style={LBL}>Work Type</label>
+                      <select value={form.work_type} onChange={e => setForm(f => ({ ...f, work_type: e.target.value }))} style={FLD}>
+                        <option value="office">Work From Office</option>
+                        <option value="home">Work From Home</option>
+                        <option value="hybrid">Hybrid</option>
                       </select>
-                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div>
+                      <label style={LBL}>Role</label>
+                      <div style={{ position: 'relative' }}>
+                        <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={SEL}>
+                          <option value="employee">Employee</option>
+                          <option value="manager">Manager</option>
+                          <option value="hr_admin">HR Admin</option>
+                          <option value="operations_head">Operations Head</option>
+                        </select>
+                        <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1820,6 +1839,7 @@ export default function EmployeesPage() {
                 ['Designation',     viewEmp.designation?.title ?? '—'],
                 ['Employment Type', viewEmp.employment_type],
                 ['Work Location',   viewEmp.work_location || '—'],
+                ['Work Type',       ({ office: 'Work From Office', home: 'Work From Home', hybrid: 'Hybrid' } as Record<string, string>)[(viewEmp as any).work_type] ?? '—'],
                 ['Status',          viewEmp.status],
                 ['Joining Date',    viewEmp.hire_date || '—'],
                 ['Role',            viewEmp.role],

@@ -196,7 +196,7 @@ export interface EmployeeListResponse { data: Employee[]; count: number }
 export interface CreateEmployeePayload {
   first_name: string; last_name: string; email: string; phone?: string
   department_id: string; designation_id?: string; employment_type?: string
-  hire_date: string; work_location?: string; ctc_annual?: number; basic_salary?: number
+  hire_date: string; work_location?: string; work_type?: string; ctc_annual?: number; basic_salary?: number
   hra?: number; special_allowance?: number; pf_applicable?: boolean; esic_applicable?: boolean
   pt_applicable?: boolean; pan_number?: string; aadhaar_number?: string; tax_regime?: string
   reporting_manager_id?: string; role?: string; gender?: string; date_of_birth?: string

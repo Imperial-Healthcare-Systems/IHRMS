@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('employees')
       .select(
-        'id, first_name, last_name, status, employment_type, work_location, avatar_url',
+        'id, first_name, last_name, status, employment_type, work_location, work_type, avatar_url',
         { count: 'exact' }
       )
       .order('created_at', { ascending: false })
@@ -135,6 +135,7 @@ export async function GET(req: NextRequest) {
         employment_type:  e.employment_type,
         hire_date:        ex.hire_date         ?? '',
         work_location:    e.work_location      ?? '',
+        work_type:        e.work_type          ?? 'office',
         avatar_url:       e.avatar_url         ?? null,
         role:             ex.role              ?? 'employee',
         is_admin:         ex.is_admin          ?? false,
@@ -162,7 +163,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const {
       first_name, last_name, email, phone, department_id, designation_id,
-      employment_type, hire_date, work_location, ctc_annual,
+      employment_type, hire_date, work_location, work_type, ctc_annual,
       pf_applicable, esic_applicable, pt_applicable,
       pan_number, aadhaar_number, tax_regime, reporting_manager_id,
       role, gender, date_of_birth,
@@ -194,6 +195,7 @@ export async function POST(req: NextRequest) {
       employment_type: employment_type ?? 'full_time',
       status: 'active',
       work_location,
+      work_type: work_type ?? 'office',
       pf_applicable:  pf_applicable  ?? true,
       esic_applicable: esic_applicable ?? false,
       pt_applicable:  pt_applicable  ?? true,
