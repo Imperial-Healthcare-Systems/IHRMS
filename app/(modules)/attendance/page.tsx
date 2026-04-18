@@ -1042,7 +1042,7 @@ export default function AttendancePage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
                 <div>
                   <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Daily Attendance — {monthLabel}</h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 2 }}>Company-wide attendance percentage per working day</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 2 }}>{isEmployee ? 'Your daily attendance for the month' : 'Company-wide attendance percentage per working day'}</p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <button className="btn btn-ghost btn-sm btn-icon" onClick={goPrevMonth}><ChevronLeft size={16} /></button>
@@ -1131,7 +1131,7 @@ export default function AttendancePage() {
             {/* Employee Monthly Table */}
             <div className="card" style={{ overflow: 'hidden' }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-gray-200)' }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Employee Attendance Summary — {monthLabel}</h3>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>{isEmployee ? 'My Attendance Summary' : 'Employee Attendance Summary'} — {monthLabel}</h3>
               </div>
 
               {loadingMonthly ? (

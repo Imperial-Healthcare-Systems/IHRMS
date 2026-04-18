@@ -85,7 +85,21 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
   const userName = session?.user?.name ?? 'User'
   const userEmail = session?.user?.email ?? ''
   const userImage = session?.user?.image
+  const userRole  = (session?.user as any)?.role as string | undefined
   const initials = getInitials(userName)
+
+  const ROLE_LABELS: Record<string, string> = {
+    super_admin:     'Super Admin',
+    hr_admin:        'HR Administrator',
+    admin:           'Administrator',
+    hr:              'HR',
+    operations_head: 'Operations Head',
+    manager:         'Manager',
+    payroll_admin:   'Payroll Admin',
+    finance_admin:   'Finance Admin',
+    employee:        'Employee',
+  }
+  const roleLabel = userRole ? (ROLE_LABELS[userRole] ?? userRole) : 'Employee'
 
   /* Fetch live notifications */
   const fetchNotifications = useCallback(async () => {
@@ -431,7 +445,7 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
                 border: '1px solid rgba(244,121,32,0.2)',
               }}>
                 <Zap size={9} />
-                HR Administrator
+                {roleLabel}
               </span>
             </div>
 
