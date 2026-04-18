@@ -21,6 +21,7 @@ import {
   Upload,
   Layers,
   X,
+  Play,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -415,55 +416,300 @@ function CompanyProfilePanel() {
 /* ─────────────────────────────────────────────────────────────
    PANEL: LEAVE CONFIGURATION
 ───────────────────────────────────────────────────────────── */
-const LEAVE_TYPES = [
-  { code: 'CL', name: 'Casual Leave', days: '12', carryFwd: '0', accrual: 'Monthly', paid: 'Yes', encashable: 'No' },
-  { code: 'SL', name: 'Sick Leave', days: '12', carryFwd: '3', accrual: 'Monthly', paid: 'Yes', encashable: 'No' },
-  { code: 'EL', name: 'Earned Leave', days: '18', carryFwd: '30', accrual: 'Monthly', paid: 'Yes', encashable: 'Yes' },
-  { code: 'LOP', name: 'Loss of Pay', days: '—', carryFwd: '—', accrual: '—', paid: 'No', encashable: 'No' },
-  { code: 'ML', name: 'Maternity Leave', days: '182', carryFwd: '0', accrual: 'Upfront', paid: 'Yes', encashable: 'No' },
-  { code: 'PL', name: 'Paternity Leave', days: '15', carryFwd: '0', accrual: 'Upfront', paid: 'Yes', encashable: 'No' },
-  { code: 'CompOff', name: 'Compensatory Off', days: '—', carryFwd: '2', accrual: 'On approval', paid: 'Yes', encashable: 'No' },
-  { code: 'Bereavement', name: 'Bereavement Leave', days: '3', carryFwd: '0', accrual: 'On event', paid: 'Yes', encashable: 'No' },
+interface LeavePolicyRow {
+  code: string
+  name: string
+  annualDays: number | null
+  monthlyRate: number | null
+  accrualType: 'monthly' | 'upfront' | 'on_event' | 'none'
+  carryFwdMax: number
+  paid: boolean
+  encashable: boolean
+  active: boolean
+}
+
+const DEFAULT_LEAVE_POLICY: LeavePolicyRow[] = [
+  { code: 'CL',          name: 'Casual Leave',       annualDays: 12,  monthlyRate: null, accrualType: 'monthly',  carryFwdMax: 0,  paid: true,  encashable: false, active: true },
+  { code: 'SL',          name: 'Sick Leave',          annualDays: 12,  monthlyRate: null, accrualType: 'monthly',  carryFwdMax: 3,  paid: true,  encashable: false, active: true },
+  { code: 'EL',          name: 'Earned Leave',        annualDays: 15,  monthlyRate: 1.25, accrualType: 'monthly',  carryFwdMax: 30, paid: true,  encashable: true,  active: true },
+  { code: 'LOP',         name: 'Loss of Pay',         annualDays: null,monthlyRate: null, accrualType: 'none',     carryFwdMax: 0,  paid: false, encashable: false, active: true },
+  { code: 'ML',          name: 'Maternity Leave',     annualDays: 182, monthlyRate: null, accrualType: 'upfront',  carryFwdMax: 0,  paid: true,  encashable: false, active: true },
+  { code: 'PL',          name: 'Paternity Leave',     annualDays: 15,  monthlyRate: null, accrualType: 'upfront',  carryFwdMax: 0,  paid: true,  encashable: false, active: true },
+  { code: 'CompOff',     name: 'Compensatory Off',    annualDays: null,monthlyRate: null, accrualType: 'on_event', carryFwdMax: 2,  paid: true,  encashable: false, active: true },
+  { code: 'Bereavement', name: 'Bereavement Leave',   annualDays: 3,   monthlyRate: null, accrualType: 'on_event', carryFwdMax: 0,  paid: true,  encashable: false, active: true },
 ]
 
+const ACCRUAL_LABELS: Record<string, string> = {
+  monthly:  'Monthly',
+  upfront:  'Upfront (year start)',
+  on_event: 'On Event',
+  none:     'N/A',
+}
+
+function effectiveMonthlyRate(lt: LeavePolicyRow): string {
+  if (lt.accrualType !== 'monthly') return '—'
+  const r = lt.monthlyRate !== null ? lt.monthlyRate : (lt.annualDays ? lt.annualDays / 12 : null)
+  if (!r) return '—'
+  return `${Math.round(r * 100) / 100} days/mo`
+}
+
+function LeaveTypeEditModal({
+  row, isNew, onClose, onSave,
+}: {
+  row: LeavePolicyRow; isNew: boolean; onClose: () => void; onSave: (r: LeavePolicyRow) => void
+}) {
+  const [form, setForm] = useState<LeavePolicyRow>({ ...row })
+  const setF = <K extends keyof LeavePolicyRow>(k: K) => (v: LeavePolicyRow[K]) => setForm(f => ({ ...f, [k]: v }))
+  const autoRate = form.annualDays ? Math.round(form.annualDays / 12 * 100) / 100 : null
+  const displayRate = form.accrualType === 'monthly' ? (form.monthlyRate ?? autoRate) : null
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto' }}>
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0 }}>
+            {isNew ? 'Add Leave Type' : `Edit — ${row.name}`}
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: 14 }}>
+            <div>
+              <FieldLabel>Code *</FieldLabel>
+              <Input value={form.code} onChange={v => setF('code')(v.toUpperCase() as string)} placeholder="CL" disabled={!isNew} />
+            </div>
+            <div>
+              <FieldLabel>Leave Name *</FieldLabel>
+              <Input value={form.name} onChange={setF('name')} placeholder="Casual Leave" />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <FieldLabel>Annual Days (blank = unlimited)</FieldLabel>
+              <Input
+                value={form.annualDays !== null ? String(form.annualDays) : ''}
+                onChange={v => setF('annualDays')(v === '' ? null : (Number(v) as unknown as null))}
+                placeholder="e.g. 12"
+              />
+            </div>
+            <div>
+              <FieldLabel>Monthly Rate Override (blank = annual ÷ 12)</FieldLabel>
+              <Input
+                value={form.monthlyRate !== null ? String(form.monthlyRate) : ''}
+                onChange={v => setF('monthlyRate')(v === '' ? null : (Number(v) as unknown as null))}
+                placeholder={autoRate ? `auto: ${autoRate}` : 'e.g. 1.25'}
+              />
+              {displayRate !== null && (
+                <p style={{ fontSize: '0.75rem', color: '#1d4ed8', marginTop: 4 }}>
+                  Will accrue {displayRate} days / month
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <FieldLabel>Accrual Type</FieldLabel>
+              <Select
+                value={form.accrualType}
+                onChange={v => setF('accrualType')(v as LeavePolicyRow['accrualType'])}
+                options={[
+                  { value: 'monthly',  label: 'Monthly (credited each month)' },
+                  { value: 'upfront',  label: 'Upfront (all at year start)' },
+                  { value: 'on_event', label: 'On Event (comp-off, bereavement)' },
+                  { value: 'none',     label: 'None / As Applicable (LOP)' },
+                ]}
+              />
+            </div>
+            <div>
+              <FieldLabel>Carry Forward Max (0 = none)</FieldLabel>
+              <Input value={String(form.carryFwdMax)} onChange={v => setF('carryFwdMax')(Number(v) || 0 as unknown as number)} placeholder="0" />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 24, padding: '12px 16px', background: 'var(--color-gray-50)', borderRadius: 10 }}>
+            {([['paid', 'Paid Leave'], ['encashable', 'Encashable'], ['active', 'Active']] as [keyof LeavePolicyRow, string][]).map(([k, label]) => (
+              <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem', color: 'var(--color-gray-700)' }}>
+                <input type="checkbox" checked={!!form[k]} onChange={e => setF(k)(e.target.checked as unknown as LeavePolicyRow[typeof k])} style={{ width: 15, height: 15, accentColor: '#1E3A5F' }} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-200)', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} className="btn btn-outline btn-sm">Cancel</button>
+          <button
+            onClick={() => {
+              if (!form.code.trim() || !form.name.trim()) { alert('Code and Name are required'); return }
+              onSave(form)
+            }}
+            className="btn btn-primary btn-sm"
+          >
+            {isNew ? 'Add Leave Type' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function LeaveConfigPanel() {
+  const [policy, setPolicy]       = useState<LeavePolicyRow[]>(DEFAULT_LEAVE_POLICY)
+  const [loading, setLoading]     = useState(true)
+  const [saving, setSaving]       = useState(false)
+  const [saved, setSaved]         = useState(false)
+  const [editRow, setEditRow]     = useState<LeavePolicyRow | null>(null)
+  const [editIsNew, setEditIsNew] = useState(false)
+  const [accruing, setAccruing]   = useState(false)
+  const [lastRun, setLastRun]     = useState<string | null>(null)
+  const [accrualMsg, setAccrualMsg] = useState('')
+
+  useEffect(() => {
+    Promise.all([
+      loadSettings<LeavePolicyRow[]>('leave_policy'),
+      loadSettings<{ timestamp: string }>('leave_accrual_last_run'),
+    ]).then(([pol, run]) => {
+      if (Array.isArray(pol) && pol.length) setPolicy(pol)
+      if (run?.timestamp) setLastRun(run.timestamp)
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true); setSaved(false)
+    try {
+      await saveSettings('leave_policy', policy)
+      setSaved(true); setTimeout(() => setSaved(false), 2500)
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
+
+  const handleRunAccrual = async () => {
+    if (!confirm('Run monthly accrual now? This will credit leave balances for all active employees based on the saved policy.')) return
+    setAccruing(true); setAccrualMsg('')
+    try {
+      const res = await fetch('/api/leaves/accrue', { method: 'POST' })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Accrual failed')
+      const ts = new Date().toISOString()
+      setLastRun(ts)
+      setAccrualMsg(`Accrual complete — ${j.updatedCount} balance records updated for ${j.employeeCount} employees (${j.month} ${j.year})`)
+    } catch (e) {
+      setAccrualMsg(e instanceof Error ? e.message : 'Accrual failed')
+    } finally { setAccruing(false) }
+  }
+
+  const saveEdit = (updated: LeavePolicyRow) => {
+    setPolicy(p => editIsNew ? [...p, updated] : p.map(r => r.code === updated.code ? updated : r))
+    setEditRow(null); setEditIsNew(false)
+  }
+
+  const openAdd = () => {
+    setEditIsNew(true)
+    setEditRow({ code: '', name: '', annualDays: null, monthlyRate: null, accrualType: 'monthly', carryFwdMax: 0, paid: true, encashable: false, active: true })
+  }
+
+  const toggleActive = (code: string) =>
+    setPolicy(p => p.map(r => r.code === code ? { ...r, active: !r.active } : r))
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <SectionHeader title="Leave Configuration" description="Configure leave types, entitlements and policies" />
-        <button className="btn btn-primary btn-sm" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={14} />
-          Add Leave Type
-        </button>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <SectionHeader
+          title="Leave Policy Configuration"
+          description="Define leave types, annual entitlements, and monthly accrual rates. Customisable per company for SaaS deployments."
+        />
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={handleRunAccrual}
+            disabled={accruing}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontSize: '0.8125rem', fontWeight: 600, cursor: accruing ? 'not-allowed' : 'pointer', opacity: accruing ? 0.7 : 1 }}
+          >
+            <Play size={13} />
+            {accruing ? 'Running Accrual…' : 'Run Monthly Accrual'}
+          </button>
+          <button
+            onClick={openAdd}
+            className="btn btn-primary btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <Plus size={14} /> Add Leave Type
+          </button>
+        </div>
       </div>
 
+      {/* Last run + accrual feedback */}
+      {(lastRun || accrualMsg) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {lastRun && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0', width: 'fit-content' }}>
+              <CheckCircle2 size={13} style={{ color: '#16a34a' }} />
+              <span style={{ fontSize: '0.8rem', color: '#15803d' }}>
+                Last accrual: {new Date(lastRun).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+              </span>
+            </div>
+          )}
+          {accrualMsg && (
+            <div style={{ padding: '8px 14px', background: '#eff6ff', borderRadius: 8, border: '1px solid #bfdbfe', fontSize: '0.8rem', color: '#1d4ed8' }}>
+              {accrualMsg}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Policy table */}
       <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
           <thead>
             <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
-              {['Code', 'Leave Name', 'Annual Days', 'Carry Fwd Max', 'Accrual', 'Paid', 'Encashable', 'Actions'].map((h) => (
-                <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>{h}</th>
+              {['Code', 'Leave Name', 'Annual Days', 'Monthly Rate', 'Accrual Type', 'Carry Fwd Max', 'Paid', 'Encash.', 'Status', 'Actions'].map(h => (
+                <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', whiteSpace: 'nowrap', fontSize: '0.75rem' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {LEAVE_TYPES.map((lt, i) => (
-              <tr key={lt.code} style={{ borderBottom: i < LEAVE_TYPES.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ background: '#eff6ff', color: '#1E3A5F', padding: '2px 8px', borderRadius: 6, fontWeight: 600, fontSize: '0.75rem' }}>{lt.code}</span>
+            {loading ? (
+              <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: 'var(--color-gray-400)' }}>Loading policy…</td></tr>
+            ) : policy.map((lt, i) => (
+              <tr key={lt.code} style={{ borderBottom: i < policy.length - 1 ? '1px solid var(--color-gray-100)' : 'none', opacity: lt.active ? 1 : 0.5 }}>
+                <td style={{ padding: '11px 14px' }}>
+                  <span style={{ background: '#eff6ff', color: '#1E3A5F', padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontSize: '0.75rem' }}>{lt.code}</span>
                 </td>
-                <td style={{ padding: '12px 16px', fontWeight: 500, color: 'var(--color-gray-900)' }}>{lt.name}</td>
-                <td style={{ padding: '12px 16px', color: 'var(--color-gray-700)' }}>{lt.days}</td>
-                <td style={{ padding: '12px 16px', color: 'var(--color-gray-700)' }}>{lt.carryFwd}</td>
-                <td style={{ padding: '12px 16px', color: 'var(--color-gray-700)' }}>{lt.accrual}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ color: lt.paid === 'Yes' ? '#16a34a' : '#dc2626', fontWeight: 500 }}>{lt.paid}</span>
+                <td style={{ padding: '11px 14px', fontWeight: 500, color: 'var(--color-gray-900)' }}>{lt.name}</td>
+                <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{lt.annualDays ?? '—'}</td>
+                <td style={{ padding: '11px 14px', color: lt.accrualType === 'monthly' ? '#1d4ed8' : 'var(--color-gray-400)', fontWeight: lt.accrualType === 'monthly' ? 600 : 400 }}>
+                  {effectiveMonthlyRate(lt)}
                 </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ color: lt.encashable === 'Yes' ? '#16a34a' : '#6b7280', fontWeight: 500 }}>{lt.encashable}</span>
+                <td style={{ padding: '11px 14px' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 500, padding: '2px 8px', borderRadius: 20,
+                    background: lt.accrualType === 'monthly' ? '#eff6ff' : lt.accrualType === 'upfront' ? '#f0fdf4' : '#f3f4f6',
+                    color:      lt.accrualType === 'monthly' ? '#1d4ed8' : lt.accrualType === 'upfront' ? '#16a34a' : '#6b7280',
+                  }}>
+                    {ACCRUAL_LABELS[lt.accrualType] ?? lt.accrualType}
+                  </span>
                 </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, padding: '4px 8px', borderRadius: 6 }}>
+                <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{lt.carryFwdMax > 0 ? `${lt.carryFwdMax} days` : '—'}</td>
+                <td style={{ padding: '11px 14px', color: lt.paid ? '#16a34a' : '#dc2626', fontWeight: 500 }}>{lt.paid ? 'Yes' : 'No'}</td>
+                <td style={{ padding: '11px 14px', color: lt.encashable ? '#16a34a' : '#6b7280', fontWeight: 500 }}>{lt.encashable ? 'Yes' : 'No'}</td>
+                <td style={{ padding: '11px 14px' }}>
+                  <button
+                    onClick={() => toggleActive(lt.code)}
+                    style={{ fontSize: '0.72rem', fontWeight: 500, padding: '2px 8px', borderRadius: 20, cursor: 'pointer',
+                      background: lt.active ? '#f0fdf4' : '#f3f4f6', color: lt.active ? '#16a34a' : '#9ca3af',
+                      border: 'none',
+                    }}
+                  >
+                    {lt.active ? 'Active' : 'Disabled'}
+                  </button>
+                </td>
+                <td style={{ padding: '11px 14px' }}>
+                  <button
+                    onClick={() => { setEditIsNew(false); setEditRow({ ...lt }) }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500, padding: '4px 8px', borderRadius: 6 }}
+                  >
                     <Edit2 style={{ width: 13, height: 13 }} /> Edit
                   </button>
                 </td>
@@ -473,7 +719,16 @@ function LeaveConfigPanel() {
         </table>
       </div>
 
-      <NoteBlock text="Changes to leave policies will take effect from next accrual cycle. Current leave balances will not be altered retroactively." />
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <SaveButton label="Save Policy" onClick={handleSave} saving={saving} saved={saved} />
+        <span style={{ fontSize: '0.8rem', color: 'var(--color-gray-400)' }}>Save first, then run accrual.</span>
+      </div>
+
+      <NoteBlock text="Monthly accrual credits leave balances for all active employees each month. Run it on the 1st of each month or schedule it via your cron/automation. Changes take effect on the next accrual run — existing balances are not retroactively altered." />
+
+      {editRow && (
+        <LeaveTypeEditModal row={editRow} isNew={editIsNew} onClose={() => { setEditRow(null); setEditIsNew(false) }} onSave={saveEdit} />
+      )}
     </div>
   )
 }

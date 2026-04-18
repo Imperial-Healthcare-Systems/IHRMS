@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { Topbar } from '@/components/layout/Topbar'
 import { employeesApi, payrollApi, type Employee as ApiEmployee, type Department } from '@/lib/api-client'
 import toast from 'react-hot-toast'
@@ -20,6 +21,8 @@ import {
   LogOut,
   Filter,
   X,
+  UserCheck,
+  CheckCircle2,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -746,10 +749,166 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   ASSIGN MANAGER MODAL
+───────────────────────────────────────────────────────────── */
+function AssignManagerModal({
+  emp,
+  onClose,
+  onSaved,
+}: {
+  emp: ApiEmployee
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [search, setSearch]         = useState('')
+  const [candidates, setCandidates] = useState<ApiEmployee[]>([])
+  const [fetching, setFetching]     = useState(false)
+  const [selected, setSelected]     = useState<ApiEmployee | null>(
+    emp.reporting_manager
+      ? ({ id: (emp.reporting_manager as Record<string,string>).id, first_name: (emp.reporting_manager as Record<string,string>).first_name, last_name: (emp.reporting_manager as Record<string,string>).last_name } as ApiEmployee)
+      : null
+  )
+  const [saving, setSaving]         = useState(false)
+
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      setFetching(true)
+      try {
+        const params = new URLSearchParams({ limit: '60', status: 'active' })
+        if (search) params.set('search', search)
+        const res = await fetch(`/api/employees?${params}`)
+        const j   = await res.json()
+        setCandidates((j.data ?? []).filter((e: ApiEmployee) => e.id !== emp.id))
+      } catch { setCandidates([]) }
+      finally { setFetching(false) }
+    }, 280)
+    return () => clearTimeout(t)
+  }, [search, emp.id])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/employees/${emp.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reporting_manager_id: selected?.id ?? null }),
+      })
+      if (!res.ok) {
+        const j = await res.json()
+        throw new Error(j.error ?? 'Update failed')
+      }
+      toast.success(`Manager ${selected ? 'assigned' : 'removed'} for ${emp.first_name} ${emp.last_name}`)
+      onSaved()
+      onClose()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to assign manager')
+    } finally { setSaving(false) }
+  }
+
+  const currentName = emp.reporting_manager
+    ? `${(emp.reporting_manager as Record<string,string>).first_name} ${(emp.reporting_manager as Record<string,string>).last_name}`
+    : 'None'
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+        {/* Header */}
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0 }}>Assign Reporting Manager</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 2 }}>
+              {emp.first_name} {emp.last_name} · Current: <strong>{currentName}</strong>
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '16px 20px', flexShrink: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-gray-400)', pointerEvents: 'none' }} />
+            <input
+              autoFocus
+              placeholder="Search by name or employee ID…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px 9px 34px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {/* Unassign option */}
+          <button
+            onClick={() => setSelected(null)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
+              border: `2px solid ${selected === null ? '#1E3A5F' : 'var(--color-gray-200)'}`,
+              background: selected === null ? '#eff6ff' : '#fff',
+              color: selected === null ? '#1E3A5F' : 'var(--color-gray-500)',
+              fontSize: '0.8125rem', fontWeight: selected === null ? 600 : 400, marginBottom: 4,
+            }}
+          >
+            — No manager (unassign)
+          </button>
+
+          {fetching ? (
+            <p style={{ textAlign: 'center', padding: 16, color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading…</p>
+          ) : candidates.length === 0 ? (
+            <p style={{ textAlign: 'center', padding: 16, color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>No employees found</p>
+          ) : candidates.map(c => {
+            const isSel = selected?.id === c.id
+            return (
+              <button
+                key={c.id}
+                onClick={() => setSelected(c)}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                  border: `2px solid ${isSel ? '#1E3A5F' : 'transparent'}`,
+                  background: isSel ? '#eff6ff' : 'var(--color-gray-50)',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}
+              >
+                <Avatar name={`${c.first_name} ${c.last_name}`} size={32} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, color: isSel ? '#1E3A5F' : 'var(--color-gray-800)', margin: 0 }}>
+                    {c.first_name} {c.last_name}
+                  </p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-gray-500)', margin: 0 }}>
+                    {c.emp_id} · {c.designation?.title ?? c.department?.name ?? 'Employee'}
+                  </p>
+                </div>
+                {isSel && <CheckCircle2 size={16} style={{ color: '#1E3A5F', flexShrink: 0 }} />}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--color-gray-200)', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button onClick={onClose} className="btn btn-outline btn-sm">Cancel</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="btn btn-primary btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: saving ? 0.7 : 1 }}
+          >
+            <UserCheck size={14} />
+            {saving ? 'Saving…' : 'Assign Manager'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    MAIN COMPONENT
 ───────────────────────────────────────────────────────────── */
 export default function EmployeesPage() {
   const router = useRouter()
+  const { data: session } = useSession()
+  const userRole = ((session?.user as Record<string, unknown>)?.role as string) ?? 'employee'
+  const canAssignManager = ['super_admin', 'hr_admin', 'admin', 'hr'].includes(userRole)
+
   const [search, setSearch]           = useState('')
   const [deptFilter, setDeptFilter]   = useState('All Departments')
   const [statusFilter, setStatusFilter] = useState('All Status')
@@ -765,6 +924,7 @@ export default function EmployeesPage() {
   /* View / Edit modals */
   const [viewEmp, setViewEmp]         = useState<ApiEmployee | null>(null)
   const [editEmp, setEditEmp]         = useState<ApiEmployee | null>(null)
+  const [assignMgrEmp, setAssignMgrEmp] = useState<ApiEmployee | null>(null)
 
   /* Add Employee modal — 2-step wizard */
   const [showAdd, setShowAdd]         = useState(false)
@@ -1238,6 +1398,15 @@ export default function EmployeesPage() {
                           >
                             <Edit size={15} />
                           </button>
+                          {canAssignManager && (
+                            <button
+                              className="btn btn-ghost btn-sm btn-icon"
+                              title={`Assign manager to ${emp.name}`}
+                              onClick={() => setAssignMgrEmp(employees.find(e => e.id === emp.id) ?? null)}
+                            >
+                              <UserCheck size={15} />
+                            </button>
+                          )}
                           <MoreMenu empId={emp.id} empName={emp.name} onExitSuccess={fetchEmployees} />
                         </div>
                       </td>
@@ -1685,6 +1854,15 @@ export default function EmployeesPage() {
             <EditEmployeeForm emp={editEmp} departments={departments} onClose={() => setEditEmp(null)} onSaved={() => { setEditEmp(null); fetchEmployees() }} />
           </div>
         </div>
+      )}
+
+      {/* ── Assign Manager Modal ── */}
+      {assignMgrEmp && (
+        <AssignManagerModal
+          emp={assignMgrEmp}
+          onClose={() => setAssignMgrEmp(null)}
+          onSaved={() => { setAssignMgrEmp(null); fetchEmployees() }}
+        />
       )}
     </>
   )
