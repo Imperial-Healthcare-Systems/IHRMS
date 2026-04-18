@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 import { Topbar } from '@/components/layout/Topbar'
 import { attendanceApi, type AttendanceLog } from '@/lib/api-client'
 import toast from 'react-hot-toast'
@@ -23,7 +24,11 @@ import {
   Monitor,
   Smartphone,
   PenLine,
+  Plus,
+  Send,
 } from 'lucide-react'
+
+const MANAGEMENT_ROLES = ['super_admin', 'hr_admin', 'admin', 'hr', 'payroll_admin', 'finance_admin', 'operations_head', 'manager']
 
 /* ─────────────────────────────────────────────────────────────
    TYPES
@@ -167,6 +172,10 @@ function Badge({ label, config }: { label: string; config: { bg: string; color: 
    MAIN PAGE
 ───────────────────────────────────────────────────────────── */
 export default function AttendancePage() {
+  const { data: session } = useSession()
+  const userRole = ((session?.user as Record<string, unknown>)?.role as string | null) ?? 'employee'
+  const isEmployee = !MANAGEMENT_ROLES.includes(userRole)
+
   const [activeTab, setActiveTab] = useState<'today' | 'regularization' | 'monthly'>('today')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'All' | AttendanceStatus>('All')
@@ -176,6 +185,42 @@ export default function AttendancePage() {
   const [regRequests, setRegRequests] = useState<RegularizationRequest[]>([])
   const [loadingReg, setLoadingReg] = useState(false)
   const [regLoaded, setRegLoaded] = useState(false)
+
+  /* Employee — submit new regularization request */
+  const [showEmpRegForm, setShowEmpRegForm] = useState(false)
+  const [empRegForm, setEmpRegForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    requestedIn: '',
+    requestedOut: '',
+    reason: '',
+  })
+  const [empRegSaving, setEmpRegSaving] = useState(false)
+
+  async function submitEmpRegularization() {
+    if (!empRegForm.reason.trim()) { toast.error('Please provide a reason for the correction'); return }
+    if (!empRegForm.date) { toast.error('Please select the date'); return }
+    setEmpRegSaving(true)
+    try {
+      const res = await fetch('/api/attendance/regularization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date:                empRegForm.date,
+          reason:              empRegForm.reason.trim(),
+          requested_punch_in:  empRegForm.requestedIn  || null,
+          requested_punch_out: empRegForm.requestedOut || null,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Submission failed')
+      toast.success('Correction request submitted! HR will review it shortly.')
+      setShowEmpRegForm(false)
+      setEmpRegForm({ date: new Date().toISOString().split('T')[0], requestedIn: '', requestedOut: '', reason: '' })
+      setRegLoaded(false) // trigger refresh of the list
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to submit request')
+    } finally { setEmpRegSaving(false) }
+  }
 
   /* Monthly summary — real data */
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary[]>([])
@@ -627,100 +672,270 @@ export default function AttendancePage() {
             TAB 2 — Regularization Requests
         ════════════════════════════════════════ */}
         {activeTab === 'regularization' && (
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Regularization Requests</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 2 }}>Review and approve employee attendance corrections</p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
-                  {regRequests.filter((r) => r.status === 'Pending').length} Pending
-                </span>
+          isEmployee ? (
+            /* ── EMPLOYEE VIEW: Submit + track own requests ── */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Submit new request banner */}
+              <div style={{
+                background: 'linear-gradient(135deg, #EFF6FF 0%, #F0F7FF 100%)',
+                border: '1px solid #BFDBFE', borderRadius: 12, padding: '20px 24px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
+              }}>
+                <div>
+                  <p style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#1E3A5F', margin: 0 }}>Attendance Correction Request</p>
+                  <p style={{ fontSize: '0.8125rem', color: '#475569', marginTop: 4 }}>
+                    Missed a punch-in or punch-out? Submit a correction and HR will review it.
+                  </p>
+                </div>
                 <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => { setRegLoaded(false) }}
-                  disabled={loadingReg}
-                  style={{ fontSize: '0.75rem' }}
+                  onClick={() => setShowEmpRegForm(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    padding: '9px 18px', borderRadius: 9,
+                    background: 'linear-gradient(135deg, #1E3A5F, #1565C0)',
+                    color: '#fff', border: 'none', cursor: 'pointer',
+                    fontSize: '0.875rem', fontWeight: 700,
+                    boxShadow: '0 2px 8px rgba(21,101,192,0.3)', flexShrink: 0,
+                  }}
                 >
-                  {loadingReg ? 'Loading…' : 'Refresh'}
+                  <Plus size={15} /> New Correction Request
                 </button>
               </div>
+
+              {/* My submitted requests */}
+              <div className="card" style={{ overflow: 'hidden' }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>My Correction Requests</h3>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 2 }}>Track the status of your submitted attendance corrections</p>
+                  </div>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setRegLoaded(false)} disabled={loadingReg} style={{ fontSize: '0.75rem' }}>
+                    {loadingReg ? 'Loading…' : 'Refresh'}
+                  </button>
+                </div>
+
+                {loadingReg ? (
+                  <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                    <Clock size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                    <p style={{ fontSize: '0.875rem' }}>Loading your requests…</p>
+                  </div>
+                ) : regRequests.length === 0 ? (
+                  <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                    <Edit size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>No correction requests yet</p>
+                    <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Click &ldquo;New Correction Request&rdquo; above to submit one.</p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
+                          {['Date', 'Requested Check-In', 'Requested Check-Out', 'Reason', 'Status', 'Submitted On'].map((h) => (
+                            <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {regRequests.map((req) => (
+                          <tr key={req.id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-gray-50)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-700)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{req.date}</td>
+                            <td style={{ padding: '12px 16px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{req.requestedIn}</td>
+                            <td style={{ padding: '12px 16px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{req.requestedOut}</td>
+                            <td style={{ padding: '12px 16px', maxWidth: 260 }}>
+                              <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={req.reason}>{req.reason}</p>
+                            </td>
+                            <td style={{ padding: '12px 16px' }}>
+                              <Badge label={req.status} config={REG_STATUS_CONFIG[req.status]} />
+                            </td>
+                            <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap' }}>{req.requestedOn}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Employee Submit Modal ── */}
+              {showEmpRegForm && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(6px)' }}>
+                  <div style={{ background: '#fff', width: 500, maxWidth: '95vw', borderRadius: 18, boxShadow: '0 24px 64px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+
+                    {/* Header */}
+                    <div style={{ padding: '18px 22px 14px', borderBottom: '1.5px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Attendance Correction Request</h2>
+                        <p style={{ fontSize: '0.775rem', color: '#9ca3af', margin: '3px 0 0' }}>Provide the correct times and a reason for the correction</p>
+                      </div>
+                      <button onClick={() => setShowEmpRegForm(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 4 }}><X size={18} /></button>
+                    </div>
+
+                    {/* Form */}
+                    <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                      {/* Date */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>Date to Correct *</label>
+                        <input
+                          type="date"
+                          value={empRegForm.date}
+                          max={new Date().toISOString().split('T')[0]}
+                          onChange={e => setEmpRegForm(f => ({ ...f, date: e.target.value }))}
+                          style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      {/* Times row */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>Correct Check-In Time</label>
+                          <input
+                            type="time"
+                            value={empRegForm.requestedIn}
+                            onChange={e => setEmpRegForm(f => ({ ...f, requestedIn: e.target.value }))}
+                            style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>Correct Check-Out Time</label>
+                          <input
+                            type="time"
+                            value={empRegForm.requestedOut}
+                            onChange={e => setEmpRegForm(f => ({ ...f, requestedOut: e.target.value }))}
+                            style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Reason */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>Reason for Correction *</label>
+                        <textarea
+                          value={empRegForm.reason}
+                          onChange={e => setEmpRegForm(f => ({ ...f, reason: e.target.value }))}
+                          placeholder="e.g. Forgot to punch in — was in office from 9:00 AM. Biometric device showed error."
+                          rows={3}
+                          style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: '0.875rem', outline: 'none', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      {/* Info note */}
+                      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+                        <AlertCircle size={14} style={{ color: '#b45309', flexShrink: 0, marginTop: 1 }} />
+                        <p style={{ fontSize: '0.78rem', color: '#92400e', lineHeight: 1.5, margin: 0 }}>
+                          Your request will be reviewed by HR. You will be notified once it is approved or rejected.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div style={{ padding: '14px 22px 20px', borderTop: '1.5px solid #f1f5f9', display: 'flex', gap: 10 }}>
+                      <button onClick={() => setShowEmpRegForm(false)} style={{ flex: 1, padding: '9px', borderRadius: 9, border: '1.5px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer' }}>
+                        Cancel
+                      </button>
+                      <button
+                        onClick={submitEmpRegularization}
+                        disabled={empRegSaving}
+                        style={{ flex: 2, padding: '9px', borderRadius: 9, border: 'none', background: 'linear-gradient(135deg, #1E3A5F, #1565C0)', color: '#fff', fontSize: '0.875rem', fontWeight: 700, cursor: empRegSaving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, opacity: empRegSaving ? 0.7 : 1 }}
+                      >
+                        {empRegSaving ? 'Submitting…' : <><Send size={14} /> Submit Request</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {loadingReg ? (
-              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
-                <Clock size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.875rem' }}>Loading regularization requests…</p>
+          ) : (
+            /* ── MANAGEMENT VIEW: Review & approve all requests ── */
+            <div className="card" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-gray-200)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)' }}>Regularization Requests</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-500)', marginTop: 2 }}>Review and approve employee attendance corrections</p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', borderRadius: 'var(--radius-full)', fontWeight: 600 }}>
+                    {regRequests.filter((r) => r.status === 'Pending').length} Pending
+                  </span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setRegLoaded(false) }} disabled={loadingReg} style={{ fontSize: '0.75rem' }}>
+                    {loadingReg ? 'Loading…' : 'Refresh'}
+                  </button>
+                </div>
               </div>
-            ) : regRequests.length === 0 ? (
-              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
-                <CheckCircle2 size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>No regularization requests</p>
-                <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Employees can submit requests from the attendance table.</p>
-              </div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
-                      {['Employee', 'Date', 'Requested In', 'Requested Out', 'Reason', 'Status', 'Requested On', 'Actions'].map((h) => (
-                        <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {regRequests.map((req) => (
-                      <tr key={req.id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-gray-50)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <td style={{ padding: '12px 16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                            <Avatar name={req.name} size={32} />
-                            <div>
-                              <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-gray-900)' }}>{req.name}</p>
-                              <p style={{ fontSize: '0.7rem', color: 'var(--color-gray-400)' }}>{req.empId}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-700)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{req.date}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{req.requestedIn}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{req.requestedOut}</td>
-                        <td style={{ padding: '12px 16px', maxWidth: 220 }}>
-                          <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={req.reason}>{req.reason}</p>
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <Badge label={req.status} config={REG_STATUS_CONFIG[req.status]} />
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap' }}>{req.requestedOn}</td>
-                        <td style={{ padding: '12px 16px' }}>
-                          {req.status === 'Pending' ? (
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button
-                                onClick={() => approveReg(req.id)}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 'var(--radius-sm)', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
-                              >
-                                <Check size={12} /> Approve
-                              </button>
-                              <button
-                                onClick={() => rejectReg(req.id)}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 'var(--radius-sm)', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
-                              >
-                                <X size={12} /> Reject
-                              </button>
-                            </div>
-                          ) : (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--color-gray-400)' }}>—</span>
-                          )}
-                        </td>
+
+              {loadingReg ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                  <Clock size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                  <p style={{ fontSize: '0.875rem' }}>Loading regularization requests…</p>
+                </div>
+              ) : regRequests.length === 0 ? (
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
+                  <CheckCircle2 size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>No regularization requests</p>
+                  <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Employees can submit requests from the attendance table.</p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
+                        {['Employee', 'Date', 'Requested In', 'Requested Out', 'Reason', 'Status', 'Requested On', 'Actions'].map((h) => (
+                          <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-gray-500)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                    </thead>
+                    <tbody>
+                      {regRequests.map((req) => (
+                        <tr key={req.id} style={{ borderBottom: '1px solid var(--color-gray-100)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-gray-50)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <td style={{ padding: '12px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                              <Avatar name={req.name} size={32} />
+                              <div>
+                                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-gray-900)' }}>{req.name}</p>
+                                <p style={{ fontSize: '0.7rem', color: 'var(--color-gray-400)' }}>{req.empId}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-700)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{req.date}</td>
+                          <td style={{ padding: '12px 16px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{req.requestedIn}</td>
+                          <td style={{ padding: '12px 16px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-800)', fontVariantNumeric: 'tabular-nums' }}>{req.requestedOut}</td>
+                          <td style={{ padding: '12px 16px', maxWidth: 220 }}>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-gray-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={req.reason}>{req.reason}</p>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <Badge label={req.status} config={REG_STATUS_CONFIG[req.status]} />
+                          </td>
+                          <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap' }}>{req.requestedOn}</td>
+                          <td style={{ padding: '12px 16px' }}>
+                            {req.status === 'Pending' ? (
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button onClick={() => approveReg(req.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 'var(--radius-sm)', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                                  <Check size={12} /> Approve
+                                </button>
+                                <button onClick={() => rejectReg(req.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 'var(--radius-sm)', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                                  <X size={12} /> Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: 'var(--color-gray-400)' }}>—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )
         )}
 
         {/* ════════════════════════════════════════
