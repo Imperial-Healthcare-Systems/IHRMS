@@ -12,13 +12,25 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-// Extract HH:MM from a TIMESTAMPTZ string (or return as-is if already HH:MM)
+// IST = UTC + 05:30
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+
+function nowIST(): Date {
+  return new Date(Date.now() + IST_OFFSET_MS)
+}
+
+function todayIST(): string {
+  return nowIST().toISOString().split('T')[0]
+}
+
+// Extract HH:MM in IST from a TIMESTAMPTZ string (or return as-is if already HH:MM)
 function toTimeStr(ts: string | null | undefined): string | null {
   if (!ts) return null
   if (/^\d{2}:\d{2}/.test(ts)) return ts.slice(0, 5)
   try {
-    const d = new Date(ts)
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const utc = new Date(ts)
+    const ist = new Date(utc.getTime() + IST_OFFSET_MS)
+    return `${String(ist.getUTCHours()).padStart(2, '0')}:${String(ist.getUTCMinutes()).padStart(2, '0')}`
   } catch { return null }
 }
 
@@ -104,36 +116,67 @@ export async function POST(req: NextRequest) {
     const targetEmployee = employee_id ?? (session.user as any)?.id
     if (!targetEmployee) return NextResponse.json({ error: 'Employee ID required' }, { status: 400 })
 
-    const today  = new Date().toISOString().split('T')[0]
-    const now    = new Date()
-    const h      = now.getHours()
-    const m      = now.getMinutes()
+    const today  = todayIST()             // date in IST — correct for India
+    const now    = new Date()             // UTC timestamp stored in DB (correct for TIMESTAMPTZ)
+    const istNow = nowIST()
+    const h      = istNow.getUTCHours()  // IST hour for late/half-day logic
+    const m      = istNow.getUTCMinutes()
 
     // ── PUNCH IN ──────────────────────────────────────────────
     if (action === 'punch_in') {
-      const { data: existing, error: chkErr } = await supabaseAdmin
+      const istDayStart = new Date(`${today}T00:00:00+05:30`).toISOString()
+      const istDayEnd   = new Date(`${today}T23:59:59+05:30`).toISOString()
+
+      // Duplicate check: only trust the check_in TIMESTAMPTZ — date column may be stale
+      const { data: alreadyPunched, error: chkErr } = await supabaseAdmin
         .from('attendance_daily')
-        .select('id, check_in')
+        .select('id, check_in, check_out')
         .eq('employee_id', targetEmployee)
-        .eq('date', today)
+        .gte('check_in', istDayStart)
+        .lte('check_in', istDayEnd)
+        .order('check_in', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
-      if (chkErr) { console.error('[punch_in check]', chkErr); throw chkErr }
+      if (chkErr && chkErr.code !== 'PGRST116') {
+        console.error('[punch_in check]', chkErr)
+        throw chkErr
+      }
 
-      if (existing?.check_in) {
-        return NextResponse.json({ error: 'Already punched in today' }, { status: 409 })
+      if (alreadyPunched?.check_in) {
+        const inIST = toTimeStr(alreadyPunched.check_in)
+        const alreadyOut = !!alreadyPunched.check_out
+        return NextResponse.json(
+          {
+            error: alreadyOut
+              ? `Already completed attendance today (in: ${inIST}). Please contact HR to regularize.`
+              : `Already punched in at ${inIST} IST today.`,
+            existing_check_in: inIST,
+            already_checked_out: alreadyOut,
+          },
+          { status: 409 },
+        )
       }
 
       const isLate = h > 9 || (h === 9 && m > 15)
       const status = is_wfh ? 'work_from_home' : isLate ? 'late' : 'present'
 
+      // Look for a bare date-only record (no check_in yet) to update instead of insert
+      const { data: bareRecord } = await supabaseAdmin
+        .from('attendance_daily')
+        .select('id')
+        .eq('employee_id', targetEmployee)
+        .eq('date', today)
+        .is('check_in', null)
+        .maybeSingle()
+
       let data: any, error: any
 
-      if (existing) {
+      if (bareRecord) {
         ;({ data, error } = await supabaseAdmin
           .from('attendance_daily')
           .update({ check_in: now.toISOString(), status, remarks: notes ?? null })
-          .eq('id', existing.id)
+          .eq('id', bareRecord.id)
           .select()
           .single())
       } else {
@@ -154,7 +197,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json(
         { data: mapRow(data), message: 'Punched in successfully' },
-        { status: existing ? 200 : 201 },
+        { status: bareRecord ? 200 : 201 },
       )
     }
 

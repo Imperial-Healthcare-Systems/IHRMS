@@ -1,5 +1,21 @@
 import { supabaseAdmin } from '@/lib/supabase'
 
+// IST = UTC + 05:30
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+
+function nowIST(): Date {
+  return new Date(Date.now() + IST_OFFSET_MS)
+}
+
+function todayIST(): string {
+  return nowIST().toISOString().split('T')[0]
+}
+
+function timeStrIST(): string {
+  const ist = nowIST()
+  return `${ist.getUTCHours().toString().padStart(2, '0')}:${ist.getUTCMinutes().toString().padStart(2, '0')}`
+}
+
 export async function getAttendanceLogs(filters: {
   employee_id?: string
   date?: string
@@ -33,7 +49,7 @@ export async function getAttendanceLogs(filters: {
 }
 
 export async function getTodayAttendance() {
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayIST()
   return getAttendanceLogs({ date: today, limit: 500 })
 }
 
@@ -46,9 +62,8 @@ export async function punchIn(employee_id: string, payload: {
   notes?: string
   is_wfh?: boolean
 }) {
-  const today = new Date().toISOString().split('T')[0]
-  const now = new Date()
-  const punch_in = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+  const today    = todayIST()
+  const punch_in = timeStrIST()
 
   // Check if already punched in today
   const { data: existing } = await supabaseAdmin
@@ -62,7 +77,7 @@ export async function punchIn(employee_id: string, payload: {
     throw new Error('Already punched in for today')
   }
 
-  // Determine late status (assuming 9:15 AM grace)
+  // Determine late status (9:15 AM IST grace)
   const [h, m] = punch_in.split(':').map(Number)
   const isLate = h > 9 || (h === 9 && m > 15)
 
@@ -89,9 +104,8 @@ export async function punchOut(employee_id: string, payload: {
   ip_address?: string
   notes?: string
 }) {
-  const today = new Date().toISOString().split('T')[0]
-  const now = new Date()
-  const punch_out = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+  const today     = todayIST()
+  const punch_out = timeStrIST()
 
   const { data: log } = await supabaseAdmin
     .from('attendance_logs')

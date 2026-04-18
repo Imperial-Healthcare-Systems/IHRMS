@@ -321,11 +321,24 @@ export default function AttendancePage() {
   const [punchingIn, setPunchingIn] = useState(false)
   const [punchingOut, setPunchingOut] = useState(false)
 
+  const myUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
+  const myTodayLog = useMemo(
+    () => attendanceLogs.find(l => l.employee_id === myUserId) ?? null,
+    [attendanceLogs, myUserId],
+  )
+  const hasPunchedIn  = !!myTodayLog?.punch_in
+  const hasPunchedOut = !!myTodayLog?.punch_out
+
   const [today, setToday] = useState('')
-  const todayISO = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const todayISO = useMemo(() => {
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+    return new Date(Date.now() + IST_OFFSET_MS).toISOString().split('T')[0]
+  }, [])
 
   useEffect(() => {
-    setToday(new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+    const istDate = new Date(Date.now() + IST_OFFSET_MS)
+    setToday(istDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }))
   }, [])
 
   useEffect(() => {
@@ -493,13 +506,23 @@ export default function AttendancePage() {
               <Download size={14} />
               Download Report
             </button>
-            <button className="btn btn-outline btn-sm" onClick={handlePunchOut} disabled={punchingOut}>
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={handlePunchOut}
+              disabled={punchingOut || !hasPunchedIn || hasPunchedOut || loadingAttendance}
+              title={!hasPunchedIn ? 'Punch in first' : hasPunchedOut ? 'Already punched out today' : ''}
+            >
               <Clock size={14} />
-              {punchingOut ? 'Punching Out…' : 'Punch Out'}
+              {punchingOut ? 'Punching Out…' : hasPunchedOut ? 'Punched Out ✓' : 'Punch Out'}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={handlePunchIn} disabled={punchingIn}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handlePunchIn}
+              disabled={punchingIn || hasPunchedIn || loadingAttendance}
+              title={hasPunchedIn ? `Already punched in at ${myTodayLog?.punch_in} IST` : ''}
+            >
               <Clock size={14} />
-              {punchingIn ? 'Punching In…' : 'Punch In'}
+              {punchingIn ? 'Punching In…' : hasPunchedIn ? 'Punched In ✓' : 'Punch In'}
             </button>
           </div>
         }
