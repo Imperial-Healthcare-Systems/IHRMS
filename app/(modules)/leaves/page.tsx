@@ -368,28 +368,91 @@ const HOLIDAY_TYPE_COLORS: Record<string, { bg: string; color: string }> = {
 }
 
 type HolidayEntry = { id: string; name: string; date: string; type: string; description?: string | null }
+type HolidayClaim = { id: string; from_date: string; reason: string }
+
+const MAX_CLAIMS = 2
 
 function HolidayCalendarTab() {
   const [year, setYear]         = useState(new Date().getFullYear())
   const [holidays, setHolidays] = useState<HolidayEntry[]>([])
+  const [claims, setClaims]     = useState<HolidayClaim[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
+  const [acting, setActing]     = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState('')
 
-  useEffect(() => {
+  const loadAll = (yr: number) => {
     setLoading(true)
     setError('')
-    fetch(`/api/holidays?year=${year}`)
-      .then(r => r.json())
-      .then(json => {
-        if (json.error) throw new Error(json.error)
-        setHolidays(json.data ?? [])
-      })
-      .catch((e: any) => setError(e.message))
+    Promise.all([
+      fetch(`/api/holidays?year=${yr}`).then(r => r.json()),
+      fetch(`/api/holidays/claim?year=${yr}`).then(r => r.json()),
+    ]).then(([hJson, cJson]) => {
+      if (hJson.error) throw new Error(hJson.error)
+      setHolidays(hJson.data ?? [])
+      setClaims(cJson.data ?? [])
+    }).catch((e: any) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [year])
+  }
+
+  useEffect(() => { loadAll(year) }, [year])
+
+  const claimedHolidayIds = new Set(
+    claims.map(c => {
+      const m = c.reason?.match(/\[holiday:([^\]]+)\]/)
+      return m ? m[1] : null
+    }).filter(Boolean) as string[]
+  )
+
+  const getClaimForHoliday = (holidayId: string) =>
+    claims.find(c => c.reason?.includes(`[holiday:${holidayId}]`))
+
+  const today = new Date().toISOString().split('T')[0]
+
+  const handleClaim = async (h: HolidayEntry) => {
+    setActing(h.id)
+    setActionErr('')
+    try {
+      const res = await fetch('/api/holidays/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ holiday_id: h.id, holiday_date: h.date, holiday_name: h.name }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to claim')
+      loadAll(year)
+    } catch (e: any) {
+      setActionErr(e.message)
+    } finally {
+      setActing(null)
+    }
+  }
+
+  const handleUnclaim = async (h: HolidayEntry) => {
+    const claim = getClaimForHoliday(h.id)
+    if (!claim) return
+    setActing(h.id)
+    setActionErr('')
+    try {
+      const res = await fetch('/api/holidays/claim', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim_id: claim.id }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to cancel')
+      loadAll(year)
+    } catch (e: any) {
+      setActionErr(e.message)
+    } finally {
+      setActing(null)
+    }
+  }
 
   const fixed    = holidays.filter(h => ['company', 'national'].includes(h.type))
   const optional = holidays.filter(h => !['company', 'national'].includes(h.type))
+  const claimsUsed = claims.length
+  const claimsLeft = MAX_CLAIMS - claimsUsed
 
   const byMonth = holidays.reduce<Record<number, HolidayEntry[]>>((acc, h) => {
     const m = new Date(h.date + 'T00:00:00').getMonth()
@@ -428,7 +491,20 @@ function HolidayCalendarTab() {
             <div style={{ fontSize: '0.75rem', color: b.color, marginTop: 2 }}>{b.label}</div>
           </div>
         ))}
+        {/* Optional claims tracker */}
+        <div style={{ padding: '12px 20px', borderRadius: 10, background: claimsLeft === 0 ? '#f0fdf4' : '#fffbeb', border: `1px solid ${claimsLeft === 0 ? '#bbf7d0' : '#fde68a'}`, marginLeft: 'auto' }}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: claimsLeft === 0 ? '#15803d' : '#92400e' }}>{claimsLeft} / {MAX_CLAIMS}</div>
+          <div style={{ fontSize: '0.75rem', color: claimsLeft === 0 ? '#15803d' : '#92400e', marginTop: 2 }}>Optional claims left</div>
+        </div>
       </div>
+
+      {/* Optional holiday claim info banner */}
+      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px', fontSize: '0.8125rem', color: '#92400e', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span style={{ fontSize: '1rem' }}>💡</span>
+        <span>You can claim up to <strong>2 optional holidays</strong> per year as paid leave. Choose wisely — claims auto-approved. You can cancel anytime before the holiday date.</span>
+      </div>
+
+      {actionErr && <p style={{ color: '#ef4444', fontSize: '0.8125rem', margin: 0 }}>{actionErr}</p>}
 
       {loading && <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading holidays…</p>}
       {error   && <p style={{ color: '#ef4444', fontSize: '0.875rem' }}>{error}</p>}
@@ -448,8 +524,12 @@ function HolidayCalendarTab() {
                     const d = new Date(h.date + 'T00:00:00')
                     const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]
                     const badge = HOLIDAY_TYPE_COLORS[h.type] ?? { bg: '#f3f4f6', color: '#374151' }
+                    const isOptional = !['company', 'national'].includes(h.type)
+                    const isClaimed  = claimedHolidayIds.has(h.id)
+                    const isPast     = h.date < today
+                    const isActing   = acting === h.id
                     return (
-                      <tr key={h.id} style={{ borderTop: i === 0 ? 'none' : '1px solid var(--color-gray-100)', background: i % 2 === 0 ? '#fff' : 'var(--color-gray-50)' }}>
+                      <tr key={h.id} style={{ borderTop: i === 0 ? 'none' : '1px solid var(--color-gray-100)', background: isClaimed ? '#f0fdf4' : (i % 2 === 0 ? '#fff' : 'var(--color-gray-50)') }}>
                         <td style={{ padding: '10px 14px', fontSize: '0.8125rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap', width: 130 }}>
                           {d.getDate()} {HOLIDAY_MONTH_NAMES[m].slice(0,3)} · {dayName}
                         </td>
@@ -457,10 +537,38 @@ function HolidayCalendarTab() {
                           {h.name}
                           {h.description && <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', marginLeft: 8 }}>{h.description}</span>}
                         </td>
-                        <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                        <td style={{ padding: '10px 14px' }}>
                           <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: '0.71rem', fontWeight: 600, background: badge.bg, color: badge.color }}>
                             {HOLIDAY_TYPE_LABELS[h.type] ?? h.type}
                           </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right', width: 120 }}>
+                          {isOptional && !isPast && (
+                            isClaimed ? (
+                              <button
+                                onClick={() => handleUnclaim(h)}
+                                disabled={isActing}
+                                style={{ padding: '4px 12px', fontSize: '0.75rem', fontWeight: 600, background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              >
+                                {isActing ? '…' : '✓ Claimed'}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleClaim(h)}
+                                disabled={isActing || claimsLeft === 0}
+                                title={claimsLeft === 0 ? 'You have used both optional holiday claims' : 'Claim this optional holiday'}
+                                style={{ padding: '4px 12px', fontSize: '0.75rem', fontWeight: 600, background: claimsLeft === 0 ? 'var(--color-gray-100)' : '#1E3A5F', color: claimsLeft === 0 ? 'var(--color-gray-400)' : '#fff', border: 'none', borderRadius: 6, cursor: claimsLeft === 0 ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                              >
+                                {isActing ? '…' : 'Claim'}
+                              </button>
+                            )
+                          )}
+                          {isOptional && isPast && isClaimed && (
+                            <span style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>✓ Used</span>
+                          )}
+                          {isOptional && isPast && !isClaimed && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-300)' }}>—</span>
+                          )}
                         </td>
                       </tr>
                     )
