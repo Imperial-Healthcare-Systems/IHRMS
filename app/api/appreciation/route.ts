@@ -18,7 +18,13 @@ export async function GET(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { searchParams } = new URL(req.url)
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '100'), 200)
+    const limit       = Math.min(parseInt(searchParams.get('limit') ?? '100'), 200)
+    const filterEmpId = searchParams.get('employee_id')
+
+    const userRole = (session.user as Record<string, unknown>)?.role as string | undefined
+    const userId   = (session.user as Record<string, unknown>)?.id   as string | undefined
+    const FULL_ACCESS = ['hr_admin', 'super_admin', 'admin', 'hr', 'manager', 'operations_head']
+    const targetEmpId = FULL_ACCESS.includes(userRole ?? '') ? (filterEmpId ?? null) : (userId ?? null)
 
     // Use RPC to bypass PostgREST schema cache
     const { data: rows, error } = await supabaseAdmin.rpc('get_appreciations', { p_limit: limit })
@@ -33,12 +39,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 500 })
     }
 
-    if (!rows || rows.length === 0) return NextResponse.json({ data: [], count: 0 })
+    // Filter to own records if not full-access
+    const filteredRows = targetEmpId
+      ? (rows ?? []).filter((r: Record<string, unknown>) => r.employee_id === targetEmpId)
+      : (rows ?? [])
+
+    if (!filteredRows || filteredRows.length === 0) return NextResponse.json({ data: [], count: 0 })
 
     // Enrich with employee names via employees table
     const employeeIds = [...new Set([
-      ...rows.map((r: Record<string, unknown>) => r.employee_id as string),
-      ...rows.map((r: Record<string, unknown>) => r.given_by as string),
+      ...filteredRows.map((r: Record<string, unknown>) => r.employee_id as string),
+      ...filteredRows.map((r: Record<string, unknown>) => r.given_by as string),
     ].filter(Boolean))]
 
     const { data: emps } = await supabaseAdmin
@@ -48,7 +59,7 @@ export async function GET(req: NextRequest) {
 
     const empMap = Object.fromEntries((emps ?? []).map((e: Record<string, unknown>) => [e.id, e]))
 
-    const enriched = rows.map((r: Record<string, unknown>) => ({
+    const enriched = filteredRows.map((r: Record<string, unknown>) => ({
       ...r,
       employee: empMap[r.employee_id as string] ?? null,
       given_by: empMap[r.given_by as string] ?? null,

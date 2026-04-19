@@ -37,6 +37,11 @@ export async function GET(req: NextRequest) {
     const limit       = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset      = parseInt(searchParams.get('offset') ?? '0')
 
+    const userRole = (session.user as Record<string, unknown>)?.role as string | undefined
+    const userId   = (session.user as Record<string, unknown>)?.id   as string | undefined
+    const FULL_ACCESS = ['hr_admin', 'super_admin', 'admin', 'hr', 'manager', 'operations_head']
+    const isFullAccess = FULL_ACCESS.includes(userRole ?? '')
+
     let query = supabaseAdmin
       .from('warning_letters')
       .select(WARNING_SELECT, { count: 'exact' })
@@ -44,7 +49,12 @@ export async function GET(req: NextRequest) {
       .limit(limit)
       .range(offset, offset + limit - 1)
 
-    if (employee_id) query = query.eq('employee_id', employee_id)
+    // Employees only see their own records
+    if (!isFullAccess) {
+      query = query.eq('employee_id', userId as string)
+    } else if (employee_id) {
+      query = query.eq('employee_id', employee_id)
+    }
     if (status)      query = query.eq('status', status)
     if (year) {
       query = query
