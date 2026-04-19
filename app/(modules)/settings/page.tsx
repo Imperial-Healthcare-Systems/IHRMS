@@ -37,6 +37,7 @@ type Panel =
   | 'users'
   | 'integrations'
   | 'departments'
+  | 'holidays'
 
 /* ─────────────────────────────────────────────────────────────
    NAV ITEMS
@@ -51,6 +52,7 @@ const NAV_ITEMS: { key: Panel; label: string; icon: React.ElementType }[] = [
   { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'users', label: 'User Management', icon: Users },
   { key: 'integrations', label: 'Integrations', icon: Plug },
+  { key: 'holidays', label: 'Holiday Calendar', icon: Calendar },
 ]
 
 /* ─────────────────────────────────────────────────────────────
@@ -1974,6 +1976,268 @@ function DepartmentsPanel() {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   HOLIDAY CALENDAR PANEL
+───────────────────────────────────────────────────────────── */
+type Holiday = { id: string; name: string; date: string; type: string; description?: string | null }
+
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+const TYPE_LABELS: Record<string, string> = {
+  company: 'Fixed Holiday',
+  national: 'National Holiday',
+  state: 'State Holiday',
+  optional: 'Optional Holiday',
+  restricted: 'Restricted Holiday',
+}
+
+const TYPE_COLORS: Record<string, { bg: string; color: string }> = {
+  company:    { bg: '#dbeafe', color: '#1d4ed8' },
+  national:   { bg: '#dcfce7', color: '#15803d' },
+  state:      { bg: '#fef9c3', color: '#a16207' },
+  optional:   { bg: '#fce7f3', color: '#be185d' },
+  restricted: { bg: '#f3e8ff', color: '#7e22ce' },
+}
+
+function HolidayCalendarPanel() {
+  const [year, setYear]           = useState(new Date().getFullYear())
+  const [holidays, setHolidays]   = useState<Holiday[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [showAdd, setShowAdd]     = useState(false)
+  const [deleting, setDeleting]   = useState<string | null>(null)
+  const [saving, setSaving]       = useState(false)
+  const [formErr, setFormErr]     = useState('')
+  const [isAdmin, setIsAdmin]     = useState(false)
+  const [form, setForm]           = useState({ name: '', date: '', type: 'company', description: '' })
+
+  useEffect(() => {
+    fetch('/api/auth/session').then(r => r.json()).then(s => {
+      const role = s?.user?.role as string | undefined
+      setIsAdmin(['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? ''))
+    }).catch(() => {})
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/holidays?year=${year}`)
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to load')
+      setHolidays(json.data ?? [])
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [year])
+
+  useEffect(() => { load() }, [load])
+
+  const handleAdd = async () => {
+    if (!form.name.trim() || !form.date || !form.type) {
+      setFormErr('Name, date, and type are required.')
+      return
+    }
+    setSaving(true)
+    setFormErr('')
+    try {
+      const res = await fetch('/api/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name.trim(), date: form.date, type: form.type, description: form.description.trim() || null }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to save')
+      setShowAdd(false)
+      setForm({ name: '', date: '', type: 'company', description: '' })
+      load()
+    } catch (e: any) {
+      setFormErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    setDeleting(id)
+    try {
+      const res = await fetch('/api/holidays', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? 'Failed') }
+      load()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  // Group by month
+  const byMonth = holidays.reduce<Record<number, Holiday[]>>((acc, h) => {
+    const m = new Date(h.date + 'T00:00:00').getMonth()
+    ;(acc[m] ??= []).push(h)
+    return acc
+  }, {})
+
+  const fixed    = holidays.filter(h => ['company', 'national'].includes(h.type))
+  const optional = holidays.filter(h => !['company', 'national'].includes(h.type))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)', margin: 0 }}>Holiday Calendar</h3>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 4 }}>
+            IHS company holidays — {fixed.length} fixed, {optional.length} optional
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select
+            value={year}
+            onChange={e => setYear(Number(e.target.value))}
+            style={{ padding: '6px 28px 6px 10px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', background: '#fff', cursor: 'pointer' }}
+          >
+            {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          {isAdmin && (
+            <button
+              onClick={() => { setShowAdd(true); setFormErr('') }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#1E3A5F', color: '#fff', border: 'none', borderRadius: 8, fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Plus size={14} /> Add Holiday
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Summary badges */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Total Holidays', count: holidays.length, bg: '#f0f4ff', color: '#1E3A5F' },
+          { label: 'Fixed', count: fixed.length, bg: '#dbeafe', color: '#1d4ed8' },
+          { label: 'Optional', count: optional.length, bg: '#fce7f3', color: '#be185d' },
+        ].map(b => (
+          <div key={b.label} style={{ padding: '12px 20px', borderRadius: 10, background: b.bg, minWidth: 120 }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: b.color }}>{b.count}</div>
+            <div style={{ fontSize: '0.75rem', color: b.color, marginTop: 2 }}>{b.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading && <p style={{ color: 'var(--color-gray-500)', fontSize: '0.875rem' }}>Loading...</p>}
+      {error   && <p style={{ color: '#ef4444', fontSize: '0.875rem' }}>{error}</p>}
+
+      {/* Month groups */}
+      {!loading && !error && Object.keys(byMonth).sort((a, b) => Number(a) - Number(b)).map(mStr => {
+        const m = Number(mStr)
+        return (
+          <div key={m}>
+            <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-gray-700)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {MONTH_NAMES[m]}
+            </div>
+            <div style={{ border: '1px solid var(--color-gray-200)', borderRadius: 10, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <colgroup>
+                  <col style={{ width: 110 }} />
+                  <col />
+                  <col style={{ width: 140 }} />
+                  {isAdmin && <col style={{ width: 60 }} />}
+                </colgroup>
+                <tbody>
+                  {byMonth[m].map((h, i) => {
+                    const d = new Date(h.date + 'T00:00:00')
+                    const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]
+                    const badgeStyle = TYPE_COLORS[h.type] ?? { bg: '#f3f4f6', color: '#374151' }
+                    return (
+                      <tr key={h.id} style={{ borderTop: i === 0 ? 'none' : '1px solid var(--color-gray-100)', background: i % 2 === 0 ? '#fff' : 'var(--color-gray-50)' }}>
+                        <td style={{ padding: '10px 14px', fontSize: '0.8125rem', color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>
+                          {d.getDate()} {MONTH_NAMES[m].slice(0,3)} · {dayName}
+                        </td>
+                        <td style={{ padding: '10px 14px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-900)' }}>
+                          {h.name}
+                          {h.description && <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-500)', marginLeft: 8 }}>{h.description}</span>}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: '0.71rem', fontWeight: 600, background: badgeStyle.bg, color: badgeStyle.color }}>
+                            {TYPE_LABELS[h.type] ?? h.type}
+                          </span>
+                        </td>
+                        {isAdmin && (
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => handleDelete(h.id)}
+                              disabled={deleting === h.id}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 4 }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })}
+
+      {!loading && holidays.length === 0 && !error && (
+        <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem', textAlign: 'center', padding: 40 }}>No holidays found for {year}.</p>
+      )}
+
+      {/* Add modal */}
+      {showAdd && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 420, maxWidth: '92vw', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Add Holiday</h4>
+              <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-500)' }}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <FieldLabel>Holiday Name *</FieldLabel>
+                <Input value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="e.g. Independence Day" />
+              </div>
+              <div>
+                <FieldLabel>Date *</FieldLabel>
+                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <FieldLabel>Type *</FieldLabel>
+                <Select
+                  value={form.type}
+                  onChange={v => setForm(f => ({ ...f, type: v }))}
+                  options={Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                />
+              </div>
+              <div>
+                <FieldLabel>Description</FieldLabel>
+                <Input value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} placeholder="Optional note" />
+              </div>
+              {formErr && <p style={{ color: '#ef4444', fontSize: '0.8125rem', margin: 0 }}>{formErr}</p>}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+                <button onClick={() => setShowAdd(false)} style={{ padding: '8px 18px', border: '1px solid var(--color-gray-300)', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+                <button onClick={handleAdd} disabled={saving} style={{ padding: '8px 18px', background: '#1E3A5F', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontSize: '0.875rem' }}>
+                  {saving ? 'Saving…' : 'Add Holiday'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────────────────────── */
 // Panels that have a SaveButton — topbar "Save Changes" delegates to it
@@ -1998,6 +2262,7 @@ export default function SettingsPage() {
       case 'notifications': return <NotificationsPanel />
       case 'users':         return <UserManagementPanel />
       case 'integrations':  return <IntegrationsPanel />
+      case 'holidays':      return <HolidayCalendarPanel />
     }
   }
 

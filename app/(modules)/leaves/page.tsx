@@ -348,10 +348,142 @@ function RejectModal({ name, onClose, onReject }: { name: string; onClose: () =>
 }
 
 /* ─────────────────────────────────────────────────────────────
+   HOLIDAY CALENDAR TAB
+───────────────────────────────────────────────────────────── */
+const HOLIDAY_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+const HOLIDAY_TYPE_LABELS: Record<string, string> = {
+  company:    'Fixed Holiday',
+  national:   'National Holiday',
+  optional:   'Optional Holiday',
+  state:      'State Holiday',
+  restricted: 'Restricted Holiday',
+}
+const HOLIDAY_TYPE_COLORS: Record<string, { bg: string; color: string }> = {
+  company:    { bg: '#dbeafe', color: '#1d4ed8' },
+  national:   { bg: '#dcfce7', color: '#15803d' },
+  optional:   { bg: '#fce7f3', color: '#be185d' },
+  state:      { bg: '#fef9c3', color: '#a16207' },
+  restricted: { bg: '#f3e8ff', color: '#7e22ce' },
+}
+
+type HolidayEntry = { id: string; name: string; date: string; type: string; description?: string | null }
+
+function HolidayCalendarTab() {
+  const [year, setYear]         = useState(new Date().getFullYear())
+  const [holidays, setHolidays] = useState<HolidayEntry[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    fetch(`/api/holidays?year=${year}`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.error) throw new Error(json.error)
+        setHolidays(json.data ?? [])
+      })
+      .catch((e: any) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [year])
+
+  const fixed    = holidays.filter(h => ['company', 'national'].includes(h.type))
+  const optional = holidays.filter(h => !['company', 'national'].includes(h.type))
+
+  const byMonth = holidays.reduce<Record<number, HolidayEntry[]>>((acc, h) => {
+    const m = new Date(h.date + 'T00:00:00').getMonth()
+    ;(acc[m] ??= []).push(h)
+    return acc
+  }, {})
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-gray-900)', margin: 0 }}>IHS Holiday Calendar {year}</h3>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 4 }}>
+            {fixed.length} fixed holidays · {optional.length} optional holidays
+          </p>
+        </div>
+        <select
+          value={year}
+          onChange={e => setYear(Number(e.target.value))}
+          style={{ padding: '6px 10px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', background: '#fff', cursor: 'pointer' }}
+        >
+          {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      {/* Summary badges */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Total Holidays', count: holidays.length, bg: '#f0f4ff', color: '#1E3A5F' },
+          { label: 'Fixed',          count: fixed.length,    bg: '#dbeafe', color: '#1d4ed8' },
+          { label: 'Optional',       count: optional.length, bg: '#fce7f3', color: '#be185d' },
+        ].map(b => (
+          <div key={b.label} style={{ padding: '12px 20px', borderRadius: 10, background: b.bg }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: b.color }}>{b.count}</div>
+            <div style={{ fontSize: '0.75rem', color: b.color, marginTop: 2 }}>{b.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading && <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading holidays…</p>}
+      {error   && <p style={{ color: '#ef4444', fontSize: '0.875rem' }}>{error}</p>}
+
+      {/* Month-grouped table */}
+      {!loading && !error && Object.keys(byMonth).sort((a, b) => Number(a) - Number(b)).map(mStr => {
+        const m = Number(mStr)
+        return (
+          <div key={m}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-gray-500)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              {HOLIDAY_MONTH_NAMES[m]}
+            </div>
+            <div style={{ border: '1px solid var(--color-gray-200)', borderRadius: 10, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  {byMonth[m].map((h, i) => {
+                    const d = new Date(h.date + 'T00:00:00')
+                    const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]
+                    const badge = HOLIDAY_TYPE_COLORS[h.type] ?? { bg: '#f3f4f6', color: '#374151' }
+                    return (
+                      <tr key={h.id} style={{ borderTop: i === 0 ? 'none' : '1px solid var(--color-gray-100)', background: i % 2 === 0 ? '#fff' : 'var(--color-gray-50)' }}>
+                        <td style={{ padding: '10px 14px', fontSize: '0.8125rem', color: 'var(--color-gray-500)', whiteSpace: 'nowrap', width: 130 }}>
+                          {d.getDate()} {HOLIDAY_MONTH_NAMES[m].slice(0,3)} · {dayName}
+                        </td>
+                        <td style={{ padding: '10px 14px', fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-gray-900)' }}>
+                          {h.name}
+                          {h.description && <span style={{ fontSize: '0.75rem', color: 'var(--color-gray-400)', marginLeft: 8 }}>{h.description}</span>}
+                        </td>
+                        <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: '0.71rem', fontWeight: 600, background: badge.bg, color: badge.color }}>
+                            {HOLIDAY_TYPE_LABELS[h.type] ?? h.type}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })}
+
+      {!loading && !error && holidays.length === 0 && (
+        <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem', textAlign: 'center', padding: 40 }}>No holidays found for {year}.</p>
+      )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    MAIN PAGE
 ───────────────────────────────────────────────────────────── */
 export default function LeavesPage() {
-  const [activeTab, setActiveTab] = useState<'my' | 'calendar' | 'approvals' | 'policies'>('my')
+  const [activeTab, setActiveTab] = useState<'my' | 'calendar' | 'approvals' | 'policies' | 'holidays'>('my')
   const [applyOpen, setApplyOpen] = useState(false)
   const [rejectTarget, setRejectTarget] = useState<PendingApproval | null>(null)
   const [viewLeave, setViewLeave] = useState<LeaveRequest | null>(null)
@@ -541,6 +673,7 @@ export default function LeavesPage() {
     { key: 'calendar',  label: 'Team Leave Calendar' },
     { key: 'approvals', label: 'Pending Approvals', badge: pendingCount },
     { key: 'policies',  label: 'Leave Policies' },
+    { key: 'holidays',  label: 'Holiday Calendar' },
   ] as const
 
   return (
@@ -938,6 +1071,13 @@ export default function LeavesPage() {
           </div>
         )}
       </div>
+
+        {/* ════════════════════════════════════════
+            TAB 5 — Holiday Calendar
+        ════════════════════════════════════════ */}
+        {activeTab === 'holidays' && (
+          <HolidayCalendarTab />
+        )}
 
       {/* ── View Leave Detail Modal ── */}
       {viewLeave && (
