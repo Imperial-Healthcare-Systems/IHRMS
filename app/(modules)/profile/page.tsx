@@ -79,6 +79,33 @@ export default function ProfilePage() {
     { label: 'Warnings',           value: '…', color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
   ])
 
+  // Avatar upload state
+  const [avatarUrl,      setAvatarUrl]      = useState<string | null>(null)
+  const [avatarUploading,setAvatarUploading]= useState(false)
+  const [avatarErr,      setAvatarErr]      = useState('')
+  const avatarInputRef = React.useRef<HTMLInputElement>(null)
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarUploading(true)
+    setAvatarErr('')
+    try {
+      const fd = new FormData()
+      fd.append('avatar', file)
+      const res  = await fetch('/api/employees/avatar', { method: 'POST', body: fd })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Upload failed')
+      setAvatarUrl(json.avatar_url)
+    } catch (err: any) {
+      setAvatarErr(err.message)
+    } finally {
+      setAvatarUploading(false)
+      // Reset input so same file can be re-selected
+      if (avatarInputRef.current) avatarInputRef.current.value = ''
+    }
+  }
+
   // Edit Profile state
   const [showEdit,   setShowEdit]   = useState(false)
   const [editForm,   setEditForm]   = useState({ first_name:'', last_name:'', personal_phone:'', work_location:'', date_of_birth:'', gender:'' })
@@ -189,7 +216,14 @@ export default function ProfilePage() {
     ? `${(empProfile as any).reporting_manager.first_name} ${(empProfile as any).reporting_manager.last_name}`
     : PROFILE.reportingTo
   const workMode    = WORK_TYPE_MAP[(empProfile as any)?.work_type ?? ''] ?? PROFILE.workMode
-  const image       = session?.user?.image
+  // avatarUrl state takes priority (just uploaded), then DB value, then session image
+  const displayAvatar = avatarUrl ?? (empProfile as any)?.avatar_url ?? session?.user?.image ?? null
+
+  // Seed avatarUrl once profile loads (so existing avatar renders without waiting for state)
+  useEffect(() => {
+    const dbAvatar = (empProfile as any)?.avatar_url
+    if (dbAvatar) setAvatarUrl(dbAvatar)
+  }, [empProfile])
 
   // Use session role (set by NextAuth from DB on login) — most reliable
   const roleLabel   = ROLE_MAP[sessionRole ?? ''] ?? (sessionRole ?? 'Employee')
@@ -293,18 +327,49 @@ export default function ProfilePage() {
             {/* Avatar row */}
             <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginTop: -44, marginBottom: 20 }}>
               <div style={{ position:'relative', flexShrink:0 }}>
-                {image ? (
+                {/* Hidden file input */}
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  style={{ display:'none' }}
+                  onChange={handleAvatarChange}
+                />
+
+                {/* Avatar display */}
+                {displayAvatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={image} alt={name} style={{ width:88, height:88, borderRadius:18, objectFit:'cover', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)' }} />
+                  <img src={displayAvatar} alt={name} style={{ width:88, height:88, borderRadius:18, objectFit:'cover', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)', opacity: avatarUploading ? 0.6 : 1, transition:'opacity 0.2s' }} />
                 ) : (
-                  <div style={{ width:88, height:88, borderRadius:18, background:'linear-gradient(135deg,#E8622A,#F59E0B)', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:'1.75rem', fontWeight:800 }}>
+                  <div style={{ width:88, height:88, borderRadius:18, background:'linear-gradient(135deg,#E8622A,#F59E0B)', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:'1.75rem', fontWeight:800, opacity: avatarUploading ? 0.6 : 1 }}>
                     {initials}
                   </div>
                 )}
-                <button style={{ position:'absolute', bottom:-6, right:-6, width:28, height:28, borderRadius:8, background:'#E8622A', border:'none', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', boxShadow:'0 2px 8px rgba(232,98,42,0.4)' }}>
+
+                {/* Uploading spinner overlay */}
+                {avatarUploading && (
+                  <div style={{ position:'absolute', inset:4, borderRadius:14, background:'rgba(0,0,0,0.35)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <div style={{ width:20, height:20, border:'2px solid rgba(255,255,255,0.4)', borderTopColor:'#fff', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />
+                  </div>
+                )}
+
+                {/* Camera button */}
+                <button
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                  title="Change profile photo"
+                  style={{ position:'absolute', bottom:-6, right:-6, width:28, height:28, borderRadius:8, background:'#E8622A', border:'none', display:'flex', alignItems:'center', justifyContent:'center', cursor: avatarUploading ? 'not-allowed' : 'pointer', boxShadow:'0 2px 8px rgba(232,98,42,0.4)', opacity: avatarUploading ? 0.6 : 1 }}>
                   <Camera size={12} color="#fff" />
                 </button>
               </div>
+
+              {/* Upload error toast */}
+              {avatarErr && (
+                <div style={{ position:'absolute', top:16, left:'50%', transform:'translateX(-50%)', background:'#FEF2F2', border:'1px solid #FECACA', color:'#DC2626', borderRadius:8, padding:'8px 16px', fontSize:'0.8rem', fontWeight:600, whiteSpace:'nowrap', zIndex:10, boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }}>
+                  {avatarErr}
+                  <button onClick={() => setAvatarErr('')} style={{ marginLeft:10, background:'none', border:'none', cursor:'pointer', color:'#DC2626', fontWeight:700 }}>✕</button>
+                </div>
+              )}
 
               <div style={{ display:'flex', alignItems:'center', gap:10, paddingBottom:4 }}>
                 <span style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:999, fontSize:'0.75rem', fontWeight:700, background:'#FFF7ED', color:'#EA580C', border:'1px solid #FED7AA' }}>

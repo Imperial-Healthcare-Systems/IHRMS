@@ -2216,3 +2216,7 @@ body {
   font-weight: 700;
 }
 
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
