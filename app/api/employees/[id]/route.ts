@@ -36,11 +36,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const sessionUserId = (session.user as any)?.id as string | undefined
+    const sessionRole   = (session.user as any)?.role as string | undefined
+    const FULL_ACCESS   = ['hr_admin', 'super_admin', 'admin', 'hr']
+
+    if (!FULL_ACCESS.includes(sessionRole ?? '') && id !== sessionUserId) {
+      return NextResponse.json({ error: 'Forbidden — you can only update your own record' }, { status: 403 })
+    }
+
     const body = await req.json()
     // Remove protected fields
     delete body.emp_id
     delete body.id
     delete body.created_at
+
+    // Employees can only update personal fields — prevent role/salary escalation
+    if (!FULL_ACCESS.includes(sessionRole ?? '')) {
+      const allowedFields = ['first_name', 'last_name', 'personal_phone', 'work_location', 'date_of_birth', 'gender', 'avatar_url', 'updated_at']
+      for (const key of Object.keys(body)) {
+        if (!allowedFields.includes(key)) delete body[key]
+      }
+    }
 
     const { data, error } = await supabaseAdmin
       .from('employees')

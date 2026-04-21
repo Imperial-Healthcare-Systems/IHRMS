@@ -23,13 +23,15 @@ const MANAGEMENT_ROLES = ['super_admin', 'hr_admin', 'admin', 'hr', 'payroll_adm
    TYPES & DATA
 ───────────────────────────────────────────── */
 
-const upcomingEvents = [
-  { label: 'Priya Desai — Last working day',   date: '15 Apr',  color: '#F59E0B', bg: '#FFFBEB', badge: 'Notice Period', icon: '👋' },
-  { label: 'Rohit Jain — Last working day',    date: '22 Apr',  color: '#F59E0B', bg: '#FFFBEB', badge: 'Notice Period', icon: '👋' },
-  { label: 'Arjun Krishnan — Probation ends',  date: '28 Sep',  color: '#8B5CF6', bg: '#F5F3FF', badge: 'Probation',     icon: '⏳' },
-  { label: 'EPF Return Filing due',            date: '15 Apr',  color: '#EF4444', bg: '#FEF2F2', badge: 'Compliance',    icon: '📋' },
-  { label: 'Ram Navami — Public Holiday',      date: '2 Apr',   color: '#10B981', bg: '#F0FDF4', badge: 'Holiday',       icon: '🎉' },
-]
+// upcomingEvents is populated from live holidays API — see useEffect below
+type UpcomingEvent = { label: string; date: string; color: string; bg: string; badge: string; icon: string }
+const HOLIDAY_TYPE_CFG: Record<string, { color: string; bg: string; badge: string; icon: string }> = {
+  national:   { color: '#10B981', bg: '#F0FDF4', badge: 'Holiday',  icon: '🎉' },
+  regional:   { color: '#10B981', bg: '#F0FDF4', badge: 'Holiday',  icon: '🎉' },
+  optional:   { color: '#8B5CF6', bg: '#F5F3FF', badge: 'Optional', icon: '📅' },
+  restricted: { color: '#8B5CF6', bg: '#F5F3FF', badge: 'Optional', icon: '📅' },
+  company:    { color: '#3B82F6', bg: '#EFF6FF', badge: 'Company',  icon: '🏢' },
+}
 
 /* ─────────────────────────────────────────────────────────────
    HELPERS
@@ -235,11 +237,12 @@ export default function DashboardPage() {
   const userRole = ((session?.user as Record<string, unknown>)?.role as string | null) ?? 'employee'
   const userName = session?.user?.name ?? 'there'
   const isEmployee = !MANAGEMENT_ROLES.includes(userRole)
-  const [stats,        setStats]        = useState<DashboardStats | null>(null)
-  const [todayLogs,    setTodayLogs]    = useState<AttendanceLog[]>([])
-  const [deptDist,     setDeptDist]     = useState<{ dept: string; count: number; pct: number; color: string }[]>([])
-  const [recentEmps,   setRecentEmps]   = useState<Employee[]>([])
-  const [leaveBalance, setLeaveBalance] = useState<LeaveBalance[]>([])
+  const [stats,          setStats]          = useState<DashboardStats | null>(null)
+  const [todayLogs,      setTodayLogs]      = useState<AttendanceLog[]>([])
+  const [deptDist,       setDeptDist]       = useState<{ dept: string; count: number; pct: number; color: string }[]>([])
+  const [recentEmps,     setRecentEmps]     = useState<Employee[]>([])
+  const [leaveBalance,   setLeaveBalance]   = useState<LeaveBalance[]>([])
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [loadingWidgets, setLoadingWidgets] = useState(true)
   const [showExport,       setShowExport]       = useState(false)
   const [showQuickActions, setShowQuickActions] = useState(false)
@@ -261,13 +264,15 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const todayISO = new Date().toISOString().split('T')[0]
+    const year = new Date().getFullYear()
     Promise.all([
       dashboardApi.stats(),
       attendanceApi.list({ date: todayISO, limit: 8 }),
       reportsApi.analytics(),
       employeesApi.list({ status: 'active', limit: 20 }),
       leavesApi.balance(),
-    ]).then(([statsRes, attendRes, analyticsRes, empsRes, balRes]) => {
+      fetch(`/api/holidays?year=${year}`).then(r => r.json()).catch(() => ({ data: [] })),
+    ]).then(([statsRes, attendRes, analyticsRes, empsRes, balRes, holidaysRes]) => {
       setStats(statsRes)
       setTodayLogs(attendRes.data.slice(0, 8))
       setDeptDist((analyticsRes.department_distribution ?? []).slice(0, 5))
@@ -276,6 +281,24 @@ export default function DashboardPage() {
       )
       setRecentEmps(sorted.slice(0, 5))
       setLeaveBalance(balRes.data ?? [])
+
+      // Build upcoming events from live holidays (next 60 days)
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      const cutoff = new Date(today); cutoff.setDate(today.getDate() + 60)
+      const holidays: UpcomingEvent[] = ((holidaysRes.data ?? []) as Record<string, unknown>[])
+        .filter(h => {
+          const d = new Date(h.date as string)
+          return d >= today && d <= cutoff
+        })
+        .sort((a, b) => new Date(a.date as string).getTime() - new Date(b.date as string).getTime())
+        .slice(0, 6)
+        .map(h => {
+          const cfg = HOLIDAY_TYPE_CFG[(h.type as string) ?? 'national'] ?? HOLIDAY_TYPE_CFG.national
+          const d = new Date(h.date as string)
+          const dateLabel = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+          return { label: h.name as string, date: dateLabel, ...cfg }
+        })
+      setUpcomingEvents(holidays)
     }).catch(console.error).finally(() => setLoadingWidgets(false))
   }, [])
 
@@ -560,7 +583,10 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div>
-                  {upcomingEvents.filter(ev => ['Holiday', 'Compliance'].includes(ev.badge)).concat(upcomingEvents.filter(ev => !['Holiday', 'Compliance'].includes(ev.badge))).slice(0, 4).map((ev, i, arr) => (
+                  {upcomingEvents.length === 0 && !loadingWidgets && (
+                    <p style={{ textAlign: 'center', padding: '24px', fontSize: 12.5, color: '#94A3B8' }}>No upcoming holidays in the next 60 days</p>
+                  )}
+                  {upcomingEvents.slice(0, 4).map((ev, i, arr) => (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px',
                       borderBottom: i < arr.length - 1 ? '1px solid #F8FAFC' : 'none',
@@ -1015,6 +1041,9 @@ export default function DashboardPage() {
               </button>
             </div>
             <div>
+              {upcomingEvents.length === 0 && !loadingWidgets && (
+                <p style={{ textAlign: 'center', padding: '24px', fontSize: 12.5, color: '#94A3B8' }}>No upcoming holidays in the next 60 days</p>
+              )}
               {upcomingEvents.map((ev, i) => (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 12,

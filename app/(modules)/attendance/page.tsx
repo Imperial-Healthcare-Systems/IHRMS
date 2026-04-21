@@ -112,7 +112,8 @@ function mapRegRequest(r: Record<string, unknown>): RegularizationRequest {
   }
 }
 
-const DEPARTMENTS = ['All Departments', 'Engineering', 'Human Resources', 'Sales', 'Finance', 'Operations', 'Marketing', 'Customer Support']
+// Departments are fetched from API; this is the fallback used during loading
+const DEPARTMENTS_FALLBACK = ['All Departments']
 const STATUSES: ['All', ...AttendanceStatus[]] = ['All', 'Present', 'Absent', 'Late', 'WFH', 'On Leave']
 
 const PALETTE = ['#1E3A5F','#FF6B00','#1A7A4A','#7C3AED','#0369A1','#BE185D','#0F766E','#B45309']
@@ -180,6 +181,17 @@ export default function AttendancePage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'All' | AttendanceStatus>('All')
   const [deptFilter, setDeptFilter] = useState('All Departments')
+  const [departments, setDepartments] = useState<string[]>(DEPARTMENTS_FALLBACK)
+
+  useEffect(() => {
+    fetch('/api/departments')
+      .then(r => r.json())
+      .then(j => {
+        const names = (j.data ?? []).map((d: { name: string }) => d.name)
+        if (names.length > 0) setDepartments(['All Departments', ...names])
+      })
+      .catch(() => {/* use fallback */})
+  }, [])
 
   /* Regularization requests — real data */
   const [regRequests, setRegRequests] = useState<RegularizationRequest[]>([])
@@ -652,7 +664,7 @@ export default function AttendancePage() {
                 onChange={(e) => setDeptFilter(e.target.value)}
                 style={{ padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-gray-300)', fontSize: '0.875rem', fontFamily: 'var(--font-body)', background: '#fff', color: 'var(--color-gray-700)', cursor: 'pointer' }}
               >
-                {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
+                {departments.map((d) => <option key={d}>{d}</option>)}
               </select>
               <span style={{ fontSize: '0.8rem', color: 'var(--color-gray-400)', marginLeft: 'auto' }}>
                 {loadingAttendance ? 'Loading…' : `Showing ${filteredAttendance.length} of ${displayLogs.length} employees`}

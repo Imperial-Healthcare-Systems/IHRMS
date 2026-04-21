@@ -96,13 +96,35 @@ export default function ProfilePage() {
       const res  = await fetch('/api/employees/avatar', { method: 'POST', body: fd })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Upload failed')
-      setAvatarUrl(json.avatar_url)
+      // Append cache-buster so browser fetches the new image (Supabase upsert keeps same URL)
+      const freshUrl = `${json.avatar_url}?t=${Date.now()}`
+      setAvatarUrl(freshUrl)
+      setEmpProfile(prev => prev ? { ...prev, avatar_url: freshUrl } as any : prev)
     } catch (err: any) {
       setAvatarErr(err.message)
     } finally {
       setAvatarUploading(false)
-      // Reset input so same file can be re-selected
       if (avatarInputRef.current) avatarInputRef.current.value = ''
+    }
+  }
+
+  const handleAvatarRemove = async () => {
+    if (!sessionUserId) return
+    setAvatarUploading(true)
+    setAvatarErr('')
+    try {
+      const res = await fetch(`/api/employees/${sessionUserId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avatar_url: null }),
+      })
+      if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? 'Failed') }
+      setAvatarUrl(null)
+      setEmpProfile(prev => prev ? { ...prev, avatar_url: null } as any : prev)
+    } catch (err: any) {
+      setAvatarErr(err.message)
+    } finally {
+      setAvatarUploading(false)
     }
   }
 
@@ -216,13 +238,17 @@ export default function ProfilePage() {
     ? `${(empProfile as any).reporting_manager.first_name} ${(empProfile as any).reporting_manager.last_name}`
     : PROFILE.reportingTo
   const workMode    = WORK_TYPE_MAP[(empProfile as any)?.work_type ?? ''] ?? PROFILE.workMode
-  // avatarUrl state takes priority (just uploaded), then DB value, then session image
-  const displayAvatar = avatarUrl ?? (empProfile as any)?.avatar_url ?? session?.user?.image ?? null
+  // Only use explicitly uploaded/saved avatar — never session.user.image (stale JWT, may be company logo)
+  const displayAvatar = avatarUrl  // seeded from DB on load, updated after upload
 
-  // Seed avatarUrl once profile loads (so existing avatar renders without waiting for state)
+  // Seed from DB once profile loads — only if we don't already have a freshly uploaded URL
   useEffect(() => {
-    const dbAvatar = (empProfile as any)?.avatar_url
-    if (dbAvatar) setAvatarUrl(dbAvatar)
+    const dbAvatar = (empProfile as any)?.avatar_url ?? null
+    setAvatarUrl(prev => {
+      // If we already set a cache-busted URL (contains ?t=), keep it
+      if (prev && prev.includes('?t=')) return prev
+      return dbAvatar
+    })
   }, [empProfile])
 
   // Use session role (set by NextAuth from DB on login) — most reliable
@@ -339,7 +365,12 @@ export default function ProfilePage() {
                 {/* Avatar display */}
                 {displayAvatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={displayAvatar} alt={name} style={{ width:88, height:88, borderRadius:18, objectFit:'cover', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)', opacity: avatarUploading ? 0.6 : 1, transition:'opacity 0.2s' }} />
+                  <img
+                    src={displayAvatar}
+                    alt={name}
+                    onError={() => setAvatarUrl(null)}  // broken URL → fall back to initials
+                    style={{ width:88, height:88, borderRadius:18, objectFit:'cover', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)', opacity: avatarUploading ? 0.6 : 1, transition:'opacity 0.2s' }}
+                  />
                 ) : (
                   <div style={{ width:88, height:88, borderRadius:18, background:'linear-gradient(135deg,#E8622A,#F59E0B)', border:'4px solid #fff', boxShadow:'0 6px 24px rgba(0,0,0,0.16)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:'1.75rem', fontWeight:800, opacity: avatarUploading ? 0.6 : 1 }}>
                     {initials}
@@ -357,11 +388,20 @@ export default function ProfilePage() {
                 <button
                   onClick={() => avatarInputRef.current?.click()}
                   disabled={avatarUploading}
-                  title="Change profile photo"
+                  title="Upload new photo"
                   style={{ position:'absolute', bottom:-6, right:-6, width:28, height:28, borderRadius:8, background:'#E8622A', border:'none', display:'flex', alignItems:'center', justifyContent:'center', cursor: avatarUploading ? 'not-allowed' : 'pointer', boxShadow:'0 2px 8px rgba(232,98,42,0.4)', opacity: avatarUploading ? 0.6 : 1 }}>
                   <Camera size={12} color="#fff" />
                 </button>
               </div>
+
+              {/* Remove photo link — only visible when a photo is set */}
+              {displayAvatar && !avatarUploading && (
+                <button
+                  onClick={handleAvatarRemove}
+                  style={{ position:'absolute', bottom:-24, left:0, fontSize:'0.7rem', color:'#94A3B8', background:'none', border:'none', cursor:'pointer', padding:0, textDecoration:'underline', whiteSpace:'nowrap' }}>
+                  Remove photo
+                </button>
+              )}
 
               {/* Upload error toast */}
               {avatarErr && (

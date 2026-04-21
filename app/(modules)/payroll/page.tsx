@@ -16,10 +16,6 @@ import {
 type PayrollStatus = 'Paid' | 'Processing' | 'Draft'
 type Tab = 'runs' | 'payslips' | 'structures' | 'statutory'
 
-interface PayrollRun {
-  id: string; period: string; employees: number; gross: string
-  deductions: string; net: string; status: PayrollStatus; runDate: string
-}
 interface Payslip {
   id: string; empId: string; name: string; department: string; designation: string
   email: string
@@ -34,23 +30,7 @@ interface Payslip {
   grossNum: number; deductionsNum: number; netNum: number
   hasSalary: boolean
 }
-interface SalaryStructure {
-  id: string; empId: string; name: string; department: string; annualCTC: string
-  basic: string; hra: string; specialAllowance: string; conveyance: string; medical: string
-  epfApplicable: boolean; esicApplicable: boolean; effectiveFrom: string; location: string
-}
 
-/* ─────────────────────────────────────────────────────────────
-   MOCK DATA
-───────────────────────────────────────────────────────────── */
-const PAYROLL_RUNS: PayrollRun[] = [
-  { id: '1', period: 'March 2026',    employees: 87, gross: '₹48,25,000', deductions: '₹6,15,200', net: '₹42,09,800', status: 'Draft',      runDate: '—' },
-  { id: '2', period: 'February 2026', employees: 87, gross: '₹47,80,000', deductions: '₹6,08,500', net: '₹41,71,500', status: 'Paid',       runDate: '05 Mar 2026' },
-  { id: '3', period: 'January 2026',  employees: 85, gross: '₹47,20,000', deductions: '₹5,98,000', net: '₹41,22,000', status: 'Paid',       runDate: '05 Feb 2026' },
-  { id: '4', period: 'December 2025', employees: 84, gross: '₹46,90,000', deductions: '₹5,92,000', net: '₹40,98,000', status: 'Paid',       runDate: '05 Jan 2026' },
-  { id: '5', period: 'November 2025', employees: 83, gross: '₹46,10,000', deductions: '₹5,85,000', net: '₹40,25,000', status: 'Paid',       runDate: '05 Dec 2025' },
-  { id: '6', period: 'October 2025',  employees: 82, gross: '₹45,60,000', deductions: '₹5,78,000', net: '₹39,82,000', status: 'Paid',       runDate: '05 Nov 2025' },
-]
 
 function buildPayslipFromComponents(overrides: Partial<Payslip> & { id: string; empId: string; name: string; email: string; department: string; designation: string; location: string; basicAmt: number; hraAmt: number; conveyanceAmt: number; medicalAmt: number; specialAmt: number; ltaAmt: number; workingDays?: number; presentDays?: number; lopDays?: number }): Payslip {
   const { basicAmt, hraAmt, conveyanceAmt, medicalAmt, specialAmt, ltaAmt } = overrides
@@ -81,16 +61,6 @@ function buildPayslipFromComponents(overrides: Partial<Payslip> & { id: string; 
   }
 }
 
-const SALARY_STRUCTURES: SalaryStructure[] = [
-  { id: '1', empId: 'EMP/2024/001', name: 'Rajesh Kumar',  department: 'Engineering',      annualCTC: '₹5,86,200', basic: '₹25,000', hra: '₹12,500', specialAllowance: '₹8,500',  conveyance: '₹1,600', medical: '₹1,250', epfApplicable: true,  esicApplicable: false, effectiveFrom: '01 Jan 2024', location: 'Bengaluru' },
-  { id: '2', empId: 'EMP/2024/002', name: 'Priya Sharma',  department: 'Human Resources',  annualCTC: '₹7,50,000', basic: '₹31,250', hra: '₹15,625', specialAllowance: '₹12,125', conveyance: '₹1,600', medical: '₹1,900', epfApplicable: true,  esicApplicable: false, effectiveFrom: '01 Jan 2024', location: 'Mumbai' },
-  { id: '3', empId: 'EMP/2024/003', name: 'Amit Patel',    department: 'Finance',          annualCTC: '₹6,96,000', basic: '₹29,000', hra: '₹11,600', specialAllowance: '₹14,150', conveyance: '₹1,600', medical: '₹1,650', epfApplicable: true,  esicApplicable: false, effectiveFrom: '01 Jan 2024', location: 'Ahmedabad' },
-  { id: '4', empId: 'EMP/2024/004', name: 'Sneha Gupta',   department: 'Sales',            annualCTC: '₹4,22,400', basic: '₹17,600', hra: '₹8,800',  specialAllowance: '₹6,800',  conveyance: '₹1,600', medical: '₹1,000', epfApplicable: true,  esicApplicable: true,  effectiveFrom: '01 Feb 2024', location: 'Delhi' },
-  { id: '5', empId: 'EMP/2024/005', name: 'Rahul Mehta',   department: 'Operations',       annualCTC: '₹6,24,000', basic: '₹26,000', hra: '₹10,400', specialAllowance: '₹11,600', conveyance: '₹1,600', medical: '₹2,400', epfApplicable: true,  esicApplicable: false, effectiveFrom: '01 Jan 2024', location: 'Pune' },
-  { id: '6', empId: 'EMP/2024/006', name: 'Deepika Nair',  department: 'Marketing',        annualCTC: '₹6,67,200', basic: '₹27,800', hra: '₹11,120', specialAllowance: '₹13,280', conveyance: '₹1,600', medical: '₹1,800', epfApplicable: true,  esicApplicable: false, effectiveFrom: '01 Jan 2024', location: 'Chennai' },
-  { id: '7', empId: 'EMP/2024/007', name: 'Vikram Singh',  department: 'Engineering',      annualCTC: '₹8,16,000', basic: '₹34,000', hra: '₹13,600', specialAllowance: '₹16,200', conveyance: '₹1,600', medical: '₹2,600', epfApplicable: true,  esicApplicable: false, effectiveFrom: '01 Mar 2024', location: 'Hyderabad' },
-  { id: '8', empId: 'EMP/2024/008', name: 'Kavitha Reddy', department: 'Customer Support', annualCTC: '₹5,10,000', basic: '₹21,250', hra: '₹8,500',  specialAllowance: '₹8,750',  conveyance: '₹1,600', medical: '₹2,400', epfApplicable: true,  esicApplicable: true,  effectiveFrom: '01 Mar 2024', location: 'Bengaluru' },
-]
 
 /* ─────────────────────────────────────────────────────────────
    DESIGN TOKENS  — same bg/color/border triads as Employee page
