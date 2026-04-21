@@ -12,8 +12,8 @@ function errMsg(err: unknown) {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession>>) {
-  const role = (session?.user as Record<string, unknown>)?.role as string | undefined
+function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>) {
+  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
   return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
 }
 
