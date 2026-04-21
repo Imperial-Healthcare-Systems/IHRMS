@@ -4,8 +4,8 @@ import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
 const ADMIN_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession>>) {
-  const role = (session?.user as Record<string, unknown>)?.role as string | undefined
+function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>) {
+  const role = ((session as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
   return ADMIN_ROLES.includes(role ?? '')
 }
 
