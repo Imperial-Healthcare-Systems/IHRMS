@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSession } from 'next-auth/react'
 import { Topbar } from '@/components/layout/Topbar'
 import { announcementsApi, employeesApi, type Announcement as ApiAnnouncement } from '@/lib/api-client'
 import toast from 'react-hot-toast'
@@ -189,9 +190,9 @@ function EditModal({ announcement, onClose, onSuccess }: {
 /* ─────────────────────────────────────────────────────────────
    ANNOUNCEMENT CARD
 ───────────────────────────────────────────────────────────── */
-function AnnouncementCard({ a, expanded, onToggle, onEdit, onDelete }: {
+function AnnouncementCard({ a, expanded, onToggle, onEdit, onDelete, canManage }: {
   a: Announcement; expanded: boolean; onToggle: () => void
-  onEdit: () => void; onDelete: () => void
+  onEdit: () => void; onDelete: () => void; canManage: boolean
 }) {
   const [hovered, setHovered] = useState(false)
   const cfg = TYPE_CFG[a.type]
@@ -223,14 +224,16 @@ function AnnouncementCard({ a, expanded, onToggle, onEdit, onDelete }: {
               <Pin size={10} /> Pinned
             </span>
           )}
-          <div style={{ display: 'flex', gap: 2, opacity: hovered ? 1 : 0, transition: 'opacity 150ms' }}>
-            <button onClick={onEdit} className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26 }} title="Edit">
-              <Edit size={12} />
-            </button>
-            <button onClick={onDelete} className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26, color: '#dc2626' }} title="Delete">
-              <Trash2 size={12} />
-            </button>
-          </div>
+          {canManage && (
+            <div style={{ display: 'flex', gap: 2, opacity: hovered ? 1 : 0, transition: 'opacity 150ms' }}>
+              <button onClick={onEdit} className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26 }} title="Edit">
+                <Edit size={12} />
+              </button>
+              <button onClick={onDelete} className="btn btn-ghost btn-sm btn-icon" style={{ width: 26, height: 26, color: '#dc2626' }} title="Delete">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -263,7 +266,12 @@ function AnnouncementCard({ a, expanded, onToggle, onEdit, onDelete }: {
 /* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────────────────────── */
+const ADMIN_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+
 export default function AnnouncementsPage() {
+  const { data: session } = useSession()
+  const canManage = ADMIN_ROLES.includes((session?.user as any)?.role ?? '')
+
   const [activeFilter, setActiveFilter]   = useState<FilterOption>('All')
   const [expandedIds, setExpandedIds]     = useState<Set<string>>(new Set())
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
@@ -420,16 +428,18 @@ export default function AnnouncementsPage() {
 
       <Topbar
         title="Announcements"
-        subtitle="Post and manage company-wide communications"
+        subtitle={canManage ? 'Post and manage company-wide communications' : 'Company-wide communications'}
         notificationCount={urgentCount}
       >
-        <button
-          className="btn btn-primary btn-sm"
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          onClick={() => composeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-        >
-          <Plus size={14} /> Post Announcement
-        </button>
+        {canManage && (
+          <button
+            className="btn btn-primary btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            onClick={() => composeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          >
+            <Plus size={14} /> Post Announcement
+          </button>
+        )}
       </Topbar>
 
       <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
@@ -491,6 +501,7 @@ export default function AnnouncementsPage() {
                     onToggle={() => toggleExpand(a.id)}
                     onEdit={() => setEditTarget(a)}
                     onDelete={() => setDeleteTarget(a)}
+                    canManage={canManage}
                   />
                 ))}
               </div>
@@ -500,8 +511,8 @@ export default function AnnouncementsPage() {
           {/* ── RIGHT: Compose + Stats ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            {/* Compose card */}
-            <div ref={composeRef} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {/* Compose card — admin only */}
+            {canManage && <div ref={composeRef} className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 18px', borderBottom: '1.5px solid #f1f5f9', background: '#fafafa' }}>
                 <Megaphone size={14} style={{ color: '#E8622A' }} />
                 <p style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#111827', margin: 0 }}>Post Announcement</p>
@@ -599,7 +610,7 @@ export default function AnnouncementsPage() {
                   </button>
                 </div>
               </div>
-            </div>
+            </div>}
 
             {/* Stats card */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>

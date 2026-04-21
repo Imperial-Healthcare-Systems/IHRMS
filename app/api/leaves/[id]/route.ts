@@ -3,12 +3,23 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 import sql, { ensureSchema } from '@/lib/pg'
+import { sendLeaveStatusEmail } from '@/lib/mailer'
 
-async function sendLeaveNotification(employeeId: string, action: 'approve' | 'reject', leaveType: string, fromDate: string, remarks?: string) {
+async function sendLeaveNotification(
+  employeeId: string,
+  action: 'approve' | 'reject',
+  leaveType: string,
+  fromDate: string,
+  toDate: string,
+  totalDays: number,
+  remarks?: string,
+) {
+  const isApproved = action === 'approve'
+  const dateLabel = fromDate ? new Date(fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : fromDate
+
+  // In-app notification
   try {
     await ensureSchema()
-    const isApproved = action === 'approve'
-    const dateLabel = fromDate ? new Date(fromDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : fromDate
     await sql`
       INSERT INTO notifications (recipient_id, title, body, type)
       VALUES (
@@ -20,9 +31,28 @@ async function sendLeaveNotification(employeeId: string, action: 'approve' | 're
         ${isApproved ? 'success' : 'warning'}
       )
     `
-  } catch (e) {
-    console.warn('[leaves notify] non-fatal:', e)
-  }
+  } catch (e) { console.warn('[leaves notify] in-app non-fatal:', e) }
+
+  // Email notification
+  try {
+    const { data: emp } = await supabaseAdmin
+      .from('employees')
+      .select('first_name, last_name, work_email')
+      .eq('id', employeeId)
+      .single()
+    if (emp?.work_email) {
+      await sendLeaveStatusEmail({
+        to: emp.work_email,
+        empName: `${emp.first_name} ${emp.last_name}`,
+        leaveType,
+        fromDate,
+        toDate,
+        totalDays,
+        status: action === 'approve' ? 'approved' : 'rejected',
+        remarks,
+      })
+    }
+  } catch (e) { console.warn('[leaves notify] email non-fatal:', e) }
 }
 
 function errMsg(err: unknown): string {
@@ -89,34 +119,49 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (error) { console.error('[leaves PATCH approve]', error); throw error }
       const row = data as Record<string, unknown>
 
-      // Decrement leave_balances — non-fatal if balance row missing
+      // Decrement leave_balances
       try {
-        const totalDays = Number(row.total_days ?? 0)
-        const year = new Date(String(row.from_date ?? now)).getFullYear()
+        const fromDate  = String(row.from_date ?? '')
+        const toDate    = String(row.to_date   ?? '')
+        const msPerDay  = 86400000
+        // Prefer stored total_days; fall back to calculating from dates
+        const totalDays = Number(row.total_days ?? 0) > 0
+          ? Number(row.total_days)
+          : fromDate && toDate
+            ? Math.round((new Date(toDate).getTime() - new Date(fromDate).getTime()) / msPerDay) + 1
+            : 0
+
+        const year = fromDate ? new Date(fromDate).getFullYear() : new Date().getFullYear()
+
         if (totalDays > 0) {
-          // Try to decrement used_days and remaining_days
-          const { data: bal } = await supabaseAdmin
+          const { data: bal, error: balFetchErr } = await supabaseAdmin
             .from('leave_balances')
-            .select('id, used_days, remaining_days')
+            .select('id, used_days, remaining_days, total_days')
             .eq('employee_id', String(row.employee_id))
             .eq('leave_type', String(row.leave_type))
             .eq('year', year)
             .maybeSingle()
 
-          if (bal) {
+          if (balFetchErr) {
+            console.warn('[leaves approve] balance fetch error:', balFetchErr)
+          } else if (bal) {
             const newUsed      = Number(bal.used_days ?? 0) + totalDays
-            const newRemaining = Math.max(0, Number(bal.remaining_days ?? 0) - totalDays)
-            await supabaseAdmin
+            const newRemaining = Math.max(0, Number(bal.remaining_days ?? bal.total_days ?? 0) - totalDays)
+            const { error: balUpdateErr } = await supabaseAdmin
               .from('leave_balances')
               .update({ used_days: newUsed, remaining_days: newRemaining })
               .eq('id', bal.id)
+            if (balUpdateErr) console.warn('[leaves approve] balance update error:', balUpdateErr)
+            else console.log(`[leaves approve] balance updated: employee=${row.employee_id} type=${row.leave_type} used=${newUsed} remaining=${newRemaining}`)
+          } else {
+            console.warn(`[leaves approve] no leave_balances row found for employee=${row.employee_id} type=${row.leave_type} year=${year}`)
           }
         }
       } catch (balErr) {
         console.warn('[leaves approve] balance update non-fatal:', balErr)
       }
 
-      await sendLeaveNotification(String(row.employee_id), 'approve', String(row.leave_type ?? ''), String(row.from_date ?? ''), remarks)
+      await sendLeaveNotification(String(row.employee_id), 'approve', String(row.leave_type ?? ''), String(row.from_date ?? ''), String(row.to_date ?? ''), Number(row.total_days ?? 0), remarks)
       return NextResponse.json({ data })
     }
 
@@ -129,7 +174,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         .single()
       if (error) { console.error('[leaves PATCH reject]', error); throw error }
       const row = data as Record<string, unknown>
-      await sendLeaveNotification(String(row.employee_id), 'reject', String(row.leave_type ?? ''), String(row.from_date ?? ''), remarks)
+      await sendLeaveNotification(String(row.employee_id), 'reject', String(row.leave_type ?? ''), String(row.from_date ?? ''), String(row.to_date ?? ''), Number(row.total_days ?? 0), remarks)
       return NextResponse.json({ data })
     }
 

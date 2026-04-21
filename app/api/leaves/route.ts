@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { sendLeaveSubmittedEmail } from '@/lib/mailer'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -131,6 +132,40 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (error) { console.error('[leaves POST]', error); throw error }
+
+    // Email HR — fetch employee name + HR emails (non-blocking)
+    ;(async () => {
+      try {
+        const { data: emp } = await supabaseAdmin
+          .from('employees')
+          .select('first_name, last_name, emp_id')
+          .eq('id', targetEmployee)
+          .single()
+        const { data: hrs } = await supabaseAdmin
+          .from('employees')
+          .select('work_email, first_name')
+          .in('role', ['hr_admin', 'hr', 'admin'])
+          .eq('status', 'active')
+          .limit(5)
+        if (emp && hrs && hrs.length > 0) {
+          const empName = `${emp.first_name} ${emp.last_name}`
+          await Promise.all((hrs as any[]).map(hr =>
+            hr.work_email ? sendLeaveSubmittedEmail({
+              to: hr.work_email,
+              hrName: hr.first_name ?? 'HR',
+              empName,
+              empId: emp.emp_id ?? '',
+              leaveType: dbLeaveType,
+              fromDate: effectiveFrom,
+              toDate: effectiveTo,
+              totalDays,
+              reason,
+            }) : Promise.resolve()
+          ))
+        }
+      } catch (e) { console.warn('[leaves POST] email notify non-fatal:', e) }
+    })()
+
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
     console.error('[leaves POST catch]', errMsg(err))

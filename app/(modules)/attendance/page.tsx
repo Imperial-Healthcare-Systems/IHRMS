@@ -30,6 +30,19 @@ import {
 
 const MANAGEMENT_ROLES = ['super_admin', 'hr_admin', 'admin', 'hr', 'payroll_admin', 'finance_admin', 'operations_head', 'manager']
 
+/* ── Geofencing constants ── */
+const OFFICE_LAT = 28.4186153
+const OFFICE_LNG = 77.0382462
+const OFFICE_RADIUS_KM = 2
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
 /* ─────────────────────────────────────────────────────────────
    TYPES
 ───────────────────────────────────────────────────────────── */
@@ -340,6 +353,11 @@ export default function AttendancePage() {
 
   const myUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
 
+  // Work type drives geofencing rules
+  const [myWorkType, setMyWorkType] = useState<'office' | 'home' | 'hybrid'>('office')
+  // Hybrid employees toggle this when punching in on a WFH day
+  const [isWfhToday, setIsWfhToday] = useState(false)
+
   const [today, setToday] = useState('')
   const todayISO = useMemo(() => {
     const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
@@ -373,6 +391,18 @@ export default function AttendancePage() {
       })
       .catch(() => {})
   }, [myUserId, todayISO])
+
+  // Fetch employee's work type for geofencing
+  useEffect(() => {
+    if (!myUserId) return
+    fetch(`/api/employees/${myUserId}`)
+      .then(r => r.json())
+      .then(j => {
+        const wt = (j.data?.work_type ?? 'office') as string
+        setMyWorkType(wt === 'home' ? 'home' : wt === 'hybrid' ? 'hybrid' : 'office')
+      })
+      .catch(() => {})
+  }, [myUserId])
 
   /* Adapt API shape → UI shape */
   const adaptedLogs = useMemo(() => attendanceLogs.map(log => ({
@@ -475,13 +505,32 @@ export default function AttendancePage() {
   async function handlePunchIn() {
     setPunchingIn(true)
     try {
+      // Determine whether geo-fence check is required for this punch
+      const isWfh = myWorkType === 'home' || (myWorkType === 'hybrid' && isWfhToday)
+      const needsGeoFence = !isWfh // WFO always; hybrid on office days
+
       const geo = await captureGeolocation()
-      const res = await attendanceApi.punchIn({ punch_method: 'Manual', ...geo })
+
+      if (needsGeoFence) {
+        if (geo.geo_lat == null || geo.geo_lng == null) {
+          toast.error('Location access is required for office punch-in. Please allow location permissions and try again.', { duration: 5000 })
+          return
+        }
+        const distKm = haversineKm(geo.geo_lat, geo.geo_lng, OFFICE_LAT, OFFICE_LNG)
+        if (distKm > OFFICE_RADIUS_KM) {
+          toast.error(
+            `You are ${distKm.toFixed(1)} km from the office. Punch-in is only allowed within ${OFFICE_RADIUS_KM} km of office premises.`,
+            { duration: 6000 },
+          )
+          return
+        }
+      }
+
+      const res = await attendanceApi.punchIn({ punch_method: 'Manual', ...geo, is_wfh: isWfh })
       setHasPunchedIn(true)
       setHasPunchedOut(false)
       setPunchInTime(res.data.punch_in ?? null)
-      toast.success('Punched in successfully!')
-      // Refresh the full table in background
+      toast.success(isWfh ? 'Punched in — WFH day recorded!' : 'Punched in successfully!')
       attendanceApi.list({ date: todayISO, limit: 200 })
         .then(r => setAttendanceLogs(r.data))
         .catch(() => {})
@@ -568,6 +617,29 @@ export default function AttendancePage() {
               <Download size={14} />
               Download Report
             </button>
+
+            {/* Hybrid: WFH-day toggle shown before first punch */}
+            {myWorkType === 'hybrid' && !hasPunchedIn && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem', color: 'var(--color-gray-600)', cursor: 'pointer', padding: '4px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-gray-300)', background: isWfhToday ? '#eff6ff' : '#fff' }}>
+                <input
+                  type="checkbox"
+                  checked={isWfhToday}
+                  onChange={e => setIsWfhToday(e.target.checked)}
+                  style={{ width: 13, height: 13, accentColor: '#1d4ed8', cursor: 'pointer' }}
+                />
+                <Home size={12} style={{ color: isWfhToday ? '#1d4ed8' : 'inherit' }} />
+                WFH today
+              </label>
+            )}
+
+            {/* WFO: small geo-fence reminder */}
+            {myWorkType === 'office' && !hasPunchedIn && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+                <MapPin size={11} />
+                Within 2 km required
+              </span>
+            )}
+
             <button
               className="btn btn-outline btn-sm"
               onClick={handlePunchOut}
@@ -581,7 +653,7 @@ export default function AttendancePage() {
               className="btn btn-primary btn-sm"
               onClick={handlePunchIn}
               disabled={punchingIn || hasPunchedIn || loadingAttendance}
-              title={hasPunchedIn ? `Already punched in at ${punchInTime} IST` : ''}
+              title={hasPunchedIn ? `Already punched in at ${punchInTime} IST` : myWorkType === 'office' ? 'Must be within 2 km of office' : ''}
             >
               <Clock size={14} />
               {punchingIn ? 'Punching In…' : hasPunchedIn ? 'Punched In ✓' : 'Punch In'}

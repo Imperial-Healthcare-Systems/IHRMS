@@ -751,6 +751,7 @@ export default function LeavesPage() {
       if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? 'Failed') }
       toast.success('Leave approved')
       setApprovals(prev => prev.map(a => a.id === id ? { ...a, status: 'Approved' as const } : a))
+      fetchBalance()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to approve')
     }

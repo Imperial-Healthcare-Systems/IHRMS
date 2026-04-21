@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { sendWelcomeEmail } from '@/lib/mailer'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -80,16 +81,26 @@ export async function GET(req: NextRequest) {
       })
     } catch { /* skip */ }
 
-    // Try department join
+    // Try department join — use explicit FK hint to avoid silent failures
     type EmpDept = { id: string; department_id?: string; department?: { id: string; name: string; code: string } | null }
     const deptMap: Record<string, EmpDept['department']> = {}
     try {
-      const { data: depts } = await supabaseAdmin
+      const { data: depts, error: deptErr } = await supabaseAdmin
         .from('employees')
-        .select('id, department:departments(id, name, code)')
+        .select('id, department_id, department:departments!employees_department_id_fkey(id, name, code)')
         .in('id', ids)
+      if (deptErr) throw deptErr
       if (depts) (depts as unknown as EmpDept[]).forEach(r => { deptMap[r.id] = r.department ?? null })
-    } catch { /* skip */ }
+    } catch {
+      // Fallback: try without FK hint
+      try {
+        const { data: depts2 } = await supabaseAdmin
+          .from('employees')
+          .select('id, department:departments(id, name, code)')
+          .in('id', ids)
+        if (depts2) (depts2 as unknown as EmpDept[]).forEach(r => { deptMap[r.id] = r.department ?? null })
+      } catch { /* skip */ }
+    }
 
     // Try designation join
     type EmpDesig = { id: string; designation?: { id: string; title: string; level?: number } | null }
@@ -252,6 +263,18 @@ export async function POST(req: NextRequest) {
         outcome: 'pending',
       })
     } catch { /* non-critical */ }
+
+    // Welcome email (non-blocking)
+    if (email) {
+      sendWelcomeEmail({
+        to: email,
+        name: `${first_name} ${last_name}`.trim(),
+        empId: emp_id,
+        joiningDate: hire_date,
+        designation: body.designation_title,
+        department: body.department_name,
+      }).catch(() => {})
+    }
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {

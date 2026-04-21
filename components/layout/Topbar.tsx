@@ -253,7 +253,7 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
       {/* ── Notifications ── */}
       <div className="relative" ref={notifRef}>
         <button
-          onClick={() => setNotifOpen(v => !v)}
+          onClick={() => { setNotifOpen(v => { if (!v) fetchNotifications(); return !v }) }}
           title="Notifications"
           style={{
             position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -359,13 +359,21 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
               </div>
             )}
 
-            <div style={{ padding: '10px 16px', borderTop: '1px solid #F1F5F9', textAlign: 'center' }}>
+            <div style={{ padding: '10px 16px', borderTop: '1px solid #F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <button
-                onClick={() => { fetchNotifications(); setNotifOpen(false) }}
-                style={{ fontSize: 12, color: '#F47920', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={fetchNotifications}
+                style={{ fontSize: 12, color: '#94A3B8', fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer' }}
               >
                 Refresh
               </button>
+              {notifications.length > 0 && (
+                <button
+                  onClick={() => { markAllRead(); setNotifOpen(false) }}
+                  style={{ fontSize: 12, color: '#F47920', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}
+                >
+                  Clear all
+                </button>
+              )}
             </div>
           </div>
         )}

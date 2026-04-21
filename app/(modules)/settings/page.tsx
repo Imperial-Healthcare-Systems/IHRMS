@@ -22,6 +22,7 @@ import {
   Layers,
   X,
   Play,
+  Briefcase,
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────────
@@ -37,6 +38,7 @@ type Panel =
   | 'users'
   | 'integrations'
   | 'departments'
+  | 'designations'
   | 'holidays'
 
 /* ─────────────────────────────────────────────────────────────
@@ -45,6 +47,7 @@ type Panel =
 const NAV_ITEMS: { key: Panel; label: string; icon: React.ElementType }[] = [
   { key: 'company', label: 'Company Profile', icon: Building2 },
   { key: 'departments', label: 'Departments', icon: Layers },
+  { key: 'designations', label: 'Designations', icon: Briefcase },
   { key: 'leave', label: 'Leave Configuration', icon: Calendar },
   { key: 'payroll', label: 'Payroll Settings', icon: IndianRupee },
   { key: 'working', label: 'Working Hours', icon: Clock },
@@ -915,20 +918,50 @@ function PayrollSettingsPanel() {
    PANEL: WORKING HOURS & SHIFTS
 ───────────────────────────────────────────────────────────── */
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const SHIFTS = [
-  { name: 'General Shift', type: 'General', start: '09:00', end: '18:00', breakMin: '60', days: 'Mon–Fri', grace: '15 min' },
-  { name: 'Morning Shift', type: 'Morning', start: '07:00', end: '15:00', breakMin: '30', days: 'Mon–Sat', grace: '10 min' },
-  { name: 'Night Shift', type: 'Night', start: '22:00', end: '06:00', breakMin: '30', days: 'Mon–Sat', grace: '15 min' },
-  { name: 'Flexible', type: 'Flexible', start: 'Flexible', end: '—', breakMin: '60', days: 'Mon–Fri', grace: '30 min' },
-]
+const SHIFT_TYPES = ['General', 'Morning', 'Afternoon', 'Night', 'Flexible', 'Custom']
+
+type Shift = {
+  id: string
+  name: string
+  type: string
+  start: string
+  end: string
+  breakMin: string
+  days: string[]
+  graceMin: string
+  flexible: boolean
+}
+
+const BLANK_SHIFT: Omit<Shift, 'id'> = {
+  name: '', type: 'General', start: '09:00', end: '18:00',
+  breakMin: '60', days: ['Mon','Tue','Wed','Thu','Fri'], graceMin: '15', flexible: false,
+}
+
+function daysLabel(days: string[]): string {
+  if (!days || days.length === 0) return '—'
+  const ALL = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+  const sorted = [...days].sort((a, b) => ALL.indexOf(a) - ALL.indexOf(b))
+  if (sorted.length === 7) return 'All Days'
+  if (sorted.join(',') === 'Mon,Tue,Wed,Thu,Fri') return 'Mon–Fri'
+  if (sorted.join(',') === 'Mon,Tue,Wed,Thu,Fri,Sat') return 'Mon–Sat'
+  return sorted.join(', ')
+}
 
 function WorkingHoursPanel() {
   const [stdHours, setStdHours] = useState('9')
-  const [grace, setGrace] = useState('15')
-  const [halfDay, setHalfDay] = useState('4')
+  const [grace, setGrace]       = useState('15')
+  const [halfDay, setHalfDay]   = useState('4')
   const [workingDays, setWorkingDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri'])
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved]   = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [saved, setSaved]       = useState(false)
+
+  const [shifts, setShifts]         = useState<Shift[]>([])
+  const [shiftsLoading, setShiftsLoading] = useState(true)
+  const [showModal, setShowModal]   = useState(false)
+  const [editingShift, setEditingShift] = useState<Shift | null>(null)
+  const [shiftForm, setShiftForm]   = useState<Omit<Shift, 'id'>>(BLANK_SHIFT)
+  const [shiftSaving, setShiftSaving] = useState(false)
+  const [shiftErr, setShiftErr]     = useState('')
 
   useEffect(() => {
     type W = { stdHours: string; grace: string; halfDay: string; workingDays: string[] }
@@ -941,6 +974,18 @@ function WorkingHoursPanel() {
     }).catch(() => {})
   }, [])
 
+  useEffect(() => {
+    setShiftsLoading(true)
+    loadSettings<Shift[]>('shifts').then((d) => {
+      setShifts(d ?? [])
+    }).catch(() => {}).finally(() => setShiftsLoading(false))
+  }, [])
+
+  const persistShifts = async (updated: Shift[]) => {
+    setShifts(updated)
+    await saveSettings('shifts', updated)
+  }
+
   const handleSave = async () => {
     setSaving(true); setSaved(false)
     try {
@@ -951,6 +996,41 @@ function WorkingHoursPanel() {
 
   const toggleDay = (d: string) =>
     setWorkingDays((ds) => ds.includes(d) ? ds.filter((x) => x !== d) : [...ds, d])
+
+  const toggleShiftDay = (d: string) =>
+    setShiftForm(f => ({ ...f, days: f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d] }))
+
+  const openAdd = () => {
+    setEditingShift(null); setShiftForm(BLANK_SHIFT); setShiftErr(''); setShowModal(true)
+  }
+  const openEdit = (s: Shift) => {
+    setEditingShift(s)
+    setShiftForm({ name: s.name, type: s.type, start: s.start, end: s.end, breakMin: s.breakMin, days: s.days, graceMin: s.graceMin, flexible: s.flexible })
+    setShiftErr(''); setShowModal(true)
+  }
+
+  const handleShiftSave = async () => {
+    if (!shiftForm.name.trim()) { setShiftErr('Shift name is required.'); return }
+    setShiftSaving(true); setShiftErr('')
+    try {
+      if (editingShift) {
+        const updated = shifts.map(s => s.id === editingShift.id ? { ...shiftForm, id: editingShift.id } : s)
+        await persistShifts(updated)
+      } else {
+        const newShift: Shift = { ...shiftForm, id: `shift_${Date.now()}` }
+        await persistShifts([...shifts, newShift])
+      }
+      setShowModal(false)
+    } catch { setShiftErr('Failed to save shift.') } finally { setShiftSaving(false) }
+  }
+
+  const handleShiftDelete = async (id: string) => {
+    await persistShifts(shifts.filter(s => s.id !== id))
+    setShowModal(false)
+  }
+
+  const IS2: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const LS2: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -991,22 +1071,13 @@ function WorkingHoursPanel() {
           {DAYS.map((d) => {
             const active = workingDays.includes(d)
             return (
-              <button
-                key={d}
-                onClick={() => toggleDay(d)}
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 10,
-                  border: `2px solid ${active ? '#22c55e' : 'var(--color-gray-200)'}`,
-                  background: active ? '#f0fdf4' : 'var(--color-gray-50)',
-                  color: active ? '#16a34a' : 'var(--color-gray-400)',
-                  fontWeight: 600,
-                  fontSize: '0.875rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
+              <button key={d} onClick={() => toggleDay(d)} style={{
+                width: 52, height: 52, borderRadius: 10,
+                border: `2px solid ${active ? '#22c55e' : 'var(--color-gray-200)'}`,
+                background: active ? '#f0fdf4' : 'var(--color-gray-50)',
+                color: active ? '#16a34a' : 'var(--color-gray-400)',
+                fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer', transition: 'all 0.15s',
+              }}>
                 {d}
               </button>
             )
@@ -1018,33 +1089,266 @@ function WorkingHoursPanel() {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-gray-800)', margin: 0 }}>Configured Shifts</h4>
-          <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Plus size={13} /> Add Shift
           </button>
         </div>
         <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
+          {shiftsLoading ? (
+            <p style={{ padding: 20, color: 'var(--color-gray-400)', fontSize: '0.875rem', margin: 0 }}>Loading shifts…</p>
+          ) : shifts.length === 0 ? (
+            <p style={{ padding: 20, color: 'var(--color-gray-400)', fontSize: '0.875rem', margin: 0 }}>No shifts configured. Click <strong>Add Shift</strong> to create one.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+              <thead>
+                <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
+                  {['Shift Name', 'Type', 'Start', 'End', 'Break', 'Days', 'Grace', 'Edit'].map((h) => (
+                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {shifts.map((s, i) => (
+                  <tr key={s.id} style={{ borderBottom: i < shifts.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
+                    <td style={{ padding: '11px 14px', fontWeight: 500, color: 'var(--color-gray-900)' }}>{s.name}</td>
+                    <td style={{ padding: '11px 14px' }}>
+                      <span style={{ background: '#f3f4f6', color: '#374151', padding: '2px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{s.type}</span>
+                    </td>
+                    <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.flexible ? 'Flexible' : s.start}</td>
+                    <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.flexible ? '—' : s.end}</td>
+                    <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.breakMin} min</td>
+                    <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{daysLabel(s.days)}</td>
+                    <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.graceMin} min</td>
+                    <td style={{ padding: '11px 14px' }}>
+                      <button onClick={() => openEdit(s)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
+                        <Edit2 style={{ width: 13, height: 13 }} /> Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div><SaveButton label="Save Working Hours" onClick={handleSave} saving={saving} saved={saved} /></div>
+
+      {/* Add / Edit Shift Modal */}
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: '100%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#111827' }}>{editingShift ? 'Edit Shift' : 'Add Shift'}</h3>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: 4 }}><X size={18} /></button>
+            </div>
+
+            {shiftErr && <div style={{ padding: '9px 13px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{shiftErr}</div>}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={LS2}>Shift Name *</label>
+                <input style={IS2} value={shiftForm.name} onChange={e => setShiftForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. General Shift" />
+              </div>
+              <div>
+                <label style={LS2}>Type</label>
+                <select style={IS2} value={shiftForm.type} onChange={e => setShiftForm(f => ({ ...f, type: e.target.value }))}>
+                  {SHIFT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 24 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem', color: '#374151', fontWeight: 500 }}>
+                  <input type="checkbox" checked={shiftForm.flexible} onChange={e => setShiftForm(f => ({ ...f, flexible: e.target.checked }))} />
+                  Flexible timing
+                </label>
+              </div>
+              {!shiftForm.flexible && (<>
+                <div>
+                  <label style={LS2}>Start Time</label>
+                  <input type="time" style={IS2} value={shiftForm.start} onChange={e => setShiftForm(f => ({ ...f, start: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={LS2}>End Time</label>
+                  <input type="time" style={IS2} value={shiftForm.end} onChange={e => setShiftForm(f => ({ ...f, end: e.target.value }))} />
+                </div>
+              </>)}
+              <div>
+                <label style={LS2}>Break (minutes)</label>
+                <input type="number" style={IS2} value={shiftForm.breakMin} onChange={e => setShiftForm(f => ({ ...f, breakMin: e.target.value }))} min="0" />
+              </div>
+              <div>
+                <label style={LS2}>Grace Period (minutes)</label>
+                <input type="number" style={IS2} value={shiftForm.graceMin} onChange={e => setShiftForm(f => ({ ...f, graceMin: e.target.value }))} min="0" />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ ...LS2, marginBottom: 10 }}>Working Days</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {DAYS.map(d => {
+                    const on = shiftForm.days.includes(d)
+                    return (
+                      <button key={d} type="button" onClick={() => toggleShiftDay(d)} style={{
+                        padding: '5px 12px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                        border: `1.5px solid ${on ? '#22c55e' : '#e5e7eb'}`,
+                        background: on ? '#f0fdf4' : '#f9fafb',
+                        color: on ? '#16a34a' : '#6b7280',
+                      }}>
+                        {d}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              {editingShift ? (
+                <button onClick={() => handleShiftDelete(editingShift.id)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 }}>
+                  Delete Shift
+                </button>
+              ) : <div />}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setShowModal(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+                <button onClick={handleShiftSave} disabled={shiftSaving} className="btn btn-primary btn-sm" style={{ opacity: shiftSaving ? 0.7 : 1 }}>
+                  {shiftSaving ? 'Saving…' : editingShift ? 'Save Changes' : 'Add Shift'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PANEL: APPROVAL WORKFLOWS
+───────────────────────────────────────────────────────────── */
+type Workflow = {
+  type: string
+  l1: string
+  l2: string
+  escalateDays: string
+  override: string
+}
+
+const DEFAULT_WORKFLOWS: Workflow[] = [
+  { type: 'Leave Requests',            l1: 'Reporting Manager', l2: 'Operations Head', escalateDays: '3', override: 'HR Admin' },
+  { type: 'Attendance Regularization', l1: 'Reporting Manager', l2: 'HR Admin',         escalateDays: '2', override: 'HR Admin' },
+  { type: 'Expense Claims',            l1: 'Reporting Manager', l2: 'Finance Head',     escalateDays: '3', override: 'HR Admin' },
+  { type: 'Payroll Approval',          l1: 'HR Admin',          l2: '',                 escalateDays: '',  override: 'Super Admin' },
+  { type: 'Warning Letters',           l1: 'HR Admin',          l2: '',                 escalateDays: '',  override: 'Super Admin' },
+  { type: 'Termination',               l1: 'HR Admin',          l2: 'CEO',              escalateDays: '',  override: 'Super Admin' },
+]
+
+const APPROVER_OPTIONS = ['Reporting Manager', 'HR Admin', 'Operations Head', 'Finance Head', 'CEO', 'Super Admin', 'Department Head', 'Team Lead', 'Director']
+const BLANK_WF: Workflow = { type: '', l1: '', l2: '', escalateDays: '', override: 'HR Admin' }
+
+function ApprovalWorkflowsPanel() {
+  const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [saving, setSaving]       = useState(false)
+  const [saved, setSaved]         = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing]     = useState<Workflow | null>(null)
+  const [form, setForm]           = useState<Workflow>(BLANK_WF)
+  const [formErr, setFormErr]     = useState('')
+  const [modalSaving, setModalSaving] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    loadSettings<Workflow[]>('approval_workflows').then(d => {
+      setWorkflows(d ?? DEFAULT_WORKFLOWS)
+    }).catch(() => setWorkflows(DEFAULT_WORKFLOWS)).finally(() => setLoading(false))
+  }, [])
+
+  const persist = async (updated: Workflow[]) => {
+    setWorkflows(updated)
+    await saveSettings('approval_workflows', updated)
+  }
+
+  const handleSaveAll = async () => {
+    setSaving(true); setSaved(false)
+    try {
+      await saveSettings('approval_workflows', workflows)
+      setSaved(true); setTimeout(() => setSaved(false), 2500)
+    } catch { /* silent */ } finally { setSaving(false) }
+  }
+
+  const openEdit = (w: Workflow) => {
+    setEditing(w); setForm({ ...w }); setFormErr(''); setShowModal(true)
+  }
+
+  const openAdd = () => {
+    setEditing(null); setForm(BLANK_WF); setFormErr(''); setShowModal(true)
+  }
+
+  const handleModalSave = async () => {
+    if (!form.type.trim()) { setFormErr('Request type is required.'); return }
+    if (!form.l1.trim())   { setFormErr('Level 1 approver is required.'); return }
+    if (!form.override.trim()) { setFormErr('Override role is required.'); return }
+    setModalSaving(true); setFormErr('')
+    try {
+      if (editing) {
+        await persist(workflows.map(w => w.type === editing.type ? { ...form } : w))
+      } else {
+        if (workflows.find(w => w.type.toLowerCase() === form.type.trim().toLowerCase())) {
+          setFormErr('A workflow for this request type already exists.'); setModalSaving(false); return
+        }
+        await persist([...workflows, { ...form, type: form.type.trim() }])
+      }
+      setShowModal(false)
+    } catch { setFormErr('Failed to save.') } finally { setModalSaving(false) }
+  }
+
+  const handleDelete = async (type: string) => {
+    await persist(workflows.filter(w => w.type !== type))
+    setShowModal(false)
+  }
+
+  const IS2: React.CSSProperties = { width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', color: 'var(--color-gray-900)', background: '#fff', outline: 'none', boxSizing: 'border-box' }
+  const LS2: React.CSSProperties = { display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--color-gray-700)', marginBottom: 6 }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <SectionHeader title="Approval Workflows" description="Configure multi-level approval chains for HR requests" />
+        <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <Plus size={13} /> Add Workflow
+        </button>
+      </div>
+
+      {loading ? (
+        <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading…</p>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
             <thead>
               <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
-                {['Shift Name', 'Type', 'Start', 'End', 'Break', 'Days', 'Grace', 'Edit'].map((h) => (
-                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)' }}>{h}</th>
+                {['Request Type', 'Level 1', 'Level 2', 'Auto-Escalate', 'Override Role', 'Actions'].map((h) => (
+                  <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {SHIFTS.map((s, i) => (
-                <tr key={s.name} style={{ borderBottom: i < SHIFTS.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
-                  <td style={{ padding: '11px 14px', fontWeight: 500, color: 'var(--color-gray-900)' }}>{s.name}</td>
-                  <td style={{ padding: '11px 14px' }}>
-                    <span style={{ background: '#f3f4f6', color: '#374151', padding: '2px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{s.type}</span>
+              {workflows.map((w, i) => (
+                <tr key={w.type} style={{ borderBottom: i < workflows.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
+                  <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-gray-900)' }}>{w.type}</td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span style={{ background: '#eff6ff', color: '#1E3A5F', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.l1}</span>
                   </td>
-                  <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.start}</td>
-                  <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.end}</td>
-                  <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.breakMin} min</td>
-                  <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.days}</td>
-                  <td style={{ padding: '11px 14px', color: 'var(--color-gray-700)' }}>{s.grace}</td>
-                  <td style={{ padding: '11px 14px' }}>
-                    <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
+                  <td style={{ padding: '12px 16px' }}>
+                    {w.l2 ? (
+                      <span style={{ background: '#f0fdf4', color: '#16a34a', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.l2}</span>
+                    ) : <span style={{ color: 'var(--color-gray-400)', fontSize: '0.75rem' }}>N/A</span>}
+                  </td>
+                  <td style={{ padding: '12px 16px', color: w.escalateDays ? 'var(--color-gray-700)' : 'var(--color-gray-400)', fontSize: '0.8125rem' }}>
+                    {w.escalateDays ? `${w.escalateDays} days` : 'N/A'}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.override}</span>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <button onClick={() => openEdit(w)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
                       <Edit2 style={{ width: 13, height: 13 }} /> Edit
                     </button>
                   </td>
@@ -1053,69 +1357,76 @@ function WorkingHoursPanel() {
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div><SaveButton label="Save Working Hours" onClick={handleSave} saving={saving} saved={saved} /></div>
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────
-   PANEL: APPROVAL WORKFLOWS
-───────────────────────────────────────────────────────────── */
-const WORKFLOWS = [
-  { type: 'Leave Requests', l1: 'Reporting Manager', l2: 'Operations Head', escalate: '3 days', override: 'HR Admin' },
-  { type: 'Attendance Regularization', l1: 'Reporting Manager', l2: 'HR Admin', escalate: '2 days', override: 'HR Admin' },
-  { type: 'Expense Claims', l1: 'Reporting Manager', l2: 'Finance Head', escalate: '3 days', override: 'HR Admin' },
-  { type: 'Payroll Approval', l1: 'HR Admin', l2: 'CEO', escalate: 'N/A', override: 'Super Admin' },
-  { type: 'Warning Letters', l1: 'HR Admin', l2: 'N/A', escalate: 'N/A', override: 'Super Admin' },
-  { type: 'Termination', l1: 'HR Admin', l2: 'CEO', escalate: 'N/A', override: 'Super Admin' },
-]
-
-function ApprovalWorkflowsPanel() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <SectionHeader title="Approval Workflows" description="Configure multi-level approval chains for HR requests" />
-
-      <div style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 12, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
-          <thead>
-            <tr style={{ background: 'var(--color-gray-50)', borderBottom: '1px solid var(--color-gray-200)' }}>
-              {['Request Type', 'Level 1', 'Level 2', 'Auto-Escalate', 'Override Role', 'Actions'].map((h) => (
-                <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {WORKFLOWS.map((w, i) => (
-              <tr key={w.type} style={{ borderBottom: i < WORKFLOWS.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
-                <td style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-gray-900)' }}>{w.type}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ background: '#eff6ff', color: '#1E3A5F', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.l1}</span>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  {w.l2 !== 'N/A' ? (
-                    <span style={{ background: '#f0fdf4', color: '#16a34a', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.l2}</span>
-                  ) : (
-                    <span style={{ color: 'var(--color-gray-400)', fontSize: '0.75rem' }}>N/A</span>
-                  )}
-                </td>
-                <td style={{ padding: '12px 16px', color: w.escalate === 'N/A' ? 'var(--color-gray-400)' : 'var(--color-gray-700)', fontSize: '0.8125rem' }}>{w.escalate}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>{w.override}</span>
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1E3A5F', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 }}>
-                    <Edit2 style={{ width: 13, height: 13 }} /> Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      )}
 
       <NoteBlock text="Auto-escalation will reassign pending approvals to the Level 2 approver after the specified days with no action." />
+      <div><SaveButton label="Save Workflows" onClick={handleSaveAll} saving={saving} saved={saved} /></div>
+
+      {/* Edit / Add Modal */}
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: '100%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#111827' }}>{editing ? 'Edit Workflow' : 'Add Workflow'}</h3>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: 4 }}><X size={18} /></button>
+            </div>
+
+            {formErr && <div style={{ padding: '9px 13px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{formErr}</div>}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={LS2}>Request Type *</label>
+                <input style={{ ...IS2, background: editing ? '#f9fafb' : '#fff' }} value={form.type}
+                  readOnly={!!editing}
+                  onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+                  placeholder="e.g. Leave Requests" />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div>
+                  <label style={LS2}>Level 1 Approver *</label>
+                  <select style={IS2} value={form.l1} onChange={e => setForm(f => ({ ...f, l1: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    {APPROVER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LS2}>Level 2 Approver</label>
+                  <select style={IS2} value={form.l2} onChange={e => setForm(f => ({ ...f, l2: e.target.value }))}>
+                    <option value="">None</option>
+                    {APPROVER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LS2}>Auto-Escalate After (days)</label>
+                  <input type="number" style={IS2} value={form.escalateDays}
+                    onChange={e => setForm(f => ({ ...f, escalateDays: e.target.value }))}
+                    placeholder="Leave blank to disable" min="1" />
+                </div>
+                <div>
+                  <label style={LS2}>Override Role *</label>
+                  <select style={IS2} value={form.override} onChange={e => setForm(f => ({ ...f, override: e.target.value }))}>
+                    {APPROVER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              {editing ? (
+                <button onClick={() => handleDelete(editing.type)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 }}>
+                  Delete
+                </button>
+              ) : <div />}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => setShowModal(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
+                <button onClick={handleModalSave} disabled={modalSaving} className="btn btn-primary btn-sm" style={{ opacity: modalSaving ? 0.7 : 1 }}>
+                  {modalSaving ? 'Saving…' : editing ? 'Save Changes' : 'Add Workflow'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1837,14 +2148,23 @@ function DepartmentsPanel() {
   }
 
   const handleToggleActive = async (dept: Department) => {
+    // Optimistically flip in UI
+    setDepartments(prev => prev.map(d => d.id === dept.id ? { ...d, is_active: !d.is_active } : d))
     try {
-      await fetch(`/api/departments/${dept.id}`, {
+      const res  = await fetch(`/api/departments/${dept.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !dept.is_active }),
       })
-      load()
-    } catch { /* silent */ }
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to update')
+      // Sync with server response
+      setDepartments(prev => prev.map(d => d.id === dept.id ? { ...d, ...json.data } : d))
+    } catch (e: unknown) {
+      // Revert on failure
+      setDepartments(prev => prev.map(d => d.id === dept.id ? { ...d, is_active: dept.is_active } : d))
+      setError(e instanceof Error ? e.message : 'Failed to update department')
+    }
   }
 
   return (
@@ -2238,10 +2558,148 @@ function HolidayCalendarPanel() {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   DESIGNATIONS PANEL
+───────────────────────────────────────────────────────────── */
+type Designation = { id: string; title: string; grade: string | null; is_active: boolean; created_at: string }
+
+function DesignationsPanel() {
+  const [designations, setDesignations] = useState<Designation[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState('')
+  const [showModal, setShowModal]       = useState(false)
+  const [editing, setEditing]           = useState<Designation | null>(null)
+  const [saving, setSaving]             = useState(false)
+  const [form, setForm]                 = useState({ title: '', grade: '' })
+  const [formErr, setFormErr]           = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const res  = await fetch('/api/designations')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to load')
+      setDesignations(json.data ?? [])
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const openAdd = () => { setEditing(null); setForm({ title: '', grade: '' }); setFormErr(''); setShowModal(true) }
+  const openEdit = (d: Designation) => { setEditing(d); setForm({ title: d.title, grade: d.grade ?? '' }); setFormErr(''); setShowModal(true) }
+
+  const handleSave = async () => {
+    if (!form.title.trim()) { setFormErr('Title is required.'); return }
+    setSaving(true); setFormErr('')
+    try {
+      const url    = editing ? `/api/designations/${editing.id}` : '/api/designations'
+      const method = editing ? 'PATCH' : 'POST'
+      const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: form.title.trim(), grade: form.grade.trim() || null }) })
+      const json   = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to save')
+      setShowModal(false); load()
+    } catch (e: any) { setFormErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleToggleActive = async (d: Designation) => {
+    setDesignations(prev => prev.map(x => x.id === d.id ? { ...x, is_active: !d.is_active } : x))
+    try {
+      const res  = await fetch(`/api/designations/${d.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: !d.is_active }) })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed')
+      setDesignations(prev => prev.map(x => x.id === d.id ? { ...x, ...json.data } : x))
+    } catch (e: any) {
+      setDesignations(prev => prev.map(x => x.id === d.id ? { ...x, is_active: d.is_active } : x))
+      setError(e.message)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)', margin: 0 }}>Designations</h3>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 4 }}>Manage job titles and grades in your organisation</p>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} /> Add Designation
+        </button>
+      </div>
+
+      {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{error}</div>}
+
+      {loading ? (
+        <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>Loading…</p>
+      ) : designations.length === 0 ? (
+        <p style={{ color: 'var(--color-gray-400)', fontSize: '0.875rem' }}>No designations yet. Click <strong>Add Designation</strong> to create the first one.</p>
+      ) : (
+        <div className="table-wrapper">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {['Title', 'Grade / Level', 'Status', 'Actions'].map(h => <th key={h}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {designations.map((d, i) => (
+                <tr key={d.id} style={{ borderBottom: i < designations.length - 1 ? '1px solid var(--color-gray-100)' : 'none' }}>
+                  <td style={{ fontWeight: 600, color: 'var(--color-gray-900)' }}>{d.title}</td>
+                  <td style={{ color: 'var(--color-gray-500)' }}>{d.grade ?? '—'}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, background: d.is_active ? '#f0fdf4' : '#f9fafb', color: d.is_active ? '#15803d' : '#6b7280', border: `1px solid ${d.is_active ? '#bbf7d0' : '#e5e7eb'}` }}>
+                      {d.is_active ? <CheckCircle2 size={11} /> : <XCircle size={11} />} {d.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-outline btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={() => openEdit(d)}>
+                        <Edit2 size={12} /> Edit
+                      </button>
+                      <button className="btn btn-sm" onClick={() => handleToggleActive(d)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: d.is_active ? '#fef2f2' : '#f0fdf4', color: d.is_active ? '#dc2626' : '#15803d', border: `1px solid ${d.is_active ? '#fecaca' : '#bbf7d0'}` }}>
+                        {d.is_active ? <><XCircle size={11} /> Deactivate</> : <><CheckCircle2 size={11} /> Activate</>}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Add / Edit modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" style={{ padding: 28 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 20 }}>{editing ? 'Edit Designation' : 'Add Designation'}</h3>
+            {formErr && <div style={{ marginBottom: 14, padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{formErr}</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: 6 }}>Title *</label>
+                <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="e.g. Senior Software Engineer" style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: 6 }}>Grade / Level <span style={{ color: '#94a3b8' }}>(optional)</span></label>
+                <input value={form.grade} onChange={e => setForm(f => ({ ...f, grade: e.target.value }))} placeholder="e.g. L3, M1, Senior" style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-gray-300)', borderRadius: 8, fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
+              <button onClick={() => setShowModal(false)} className="btn btn-outline btn-sm">Cancel</button>
+              <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Designation'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────────────────────── */
 // Panels that have a SaveButton — topbar "Save Changes" delegates to it
-const SAVEABLE_PANELS: Panel[] = ['company', 'payroll', 'working', 'notifications', 'users']
+const SAVEABLE_PANELS: Panel[] = ['company', 'payroll', 'working', 'approval', 'notifications', 'users']
 
 export default function SettingsPage() {
   const [activePanel, setActivePanel] = useState<Panel>('company')
@@ -2255,6 +2713,7 @@ export default function SettingsPage() {
     switch (activePanel) {
       case 'company':       return <CompanyProfilePanel />
       case 'departments':   return <DepartmentsPanel />
+      case 'designations':  return <DesignationsPanel />
       case 'leave':         return <LeaveConfigPanel />
       case 'payroll':       return <PayrollSettingsPanel />
       case 'working':       return <WorkingHoursPanel />

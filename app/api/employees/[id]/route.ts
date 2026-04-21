@@ -58,16 +58,32 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    const { data, error } = await supabaseAdmin
+    const { error: updateErr } = await supabaseAdmin
       .from('employees')
       .update({ ...body, updated_at: new Date().toISOString() })
       .eq('id', id)
-      .select()
-      .single()
-    if (error) {
-      console.error('[employees PATCH]', error)
-      return NextResponse.json({ error: error.message ?? error.details ?? 'Update failed' }, { status: 500 })
+    if (updateErr) {
+      console.error('[employees PATCH update]', updateErr)
+      return NextResponse.json({ error: updateErr.message ?? updateErr.details ?? 'Update failed' }, { status: 500 })
     }
+
+    // Re-fetch with joins — try rich query first, fall back to simple select
+    let data: Record<string, unknown> | null = null
+
+    const { data: rich } = await supabaseAdmin
+      .from('employees')
+      .select('*, department:departments(id, name, code), designation:designations(id, title)')
+      .eq('id', id)
+      .single()
+
+    if (rich) {
+      data = rich as Record<string, unknown>
+    } else {
+      // Fallback: plain select
+      const { data: plain } = await supabaseAdmin.from('employees').select('*').eq('id', id).single()
+      data = plain as Record<string, unknown> | null
+    }
+
     return NextResponse.json({ data })
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })

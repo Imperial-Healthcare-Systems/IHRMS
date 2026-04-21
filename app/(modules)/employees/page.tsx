@@ -411,7 +411,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
   emp: ApiEmployee
   departments: Department[]
   onClose: () => void
-  onSaved: () => void
+  onSaved: (updated: ApiEmployee) => void
 }) {
   const [tab, setTab] = useState<'details' | 'salary'>('details')
 
@@ -425,9 +425,18 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
     status:          emp.status ?? 'active',
     role:            emp.role ?? 'employee',
     department_id:   emp.department?.id ?? '',
+    designation_id:  (emp as any).designation?.id ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+  const [designations, setDesignations] = useState<{ id: string; title: string }[]>([])
+
+  useEffect(() => {
+    fetch('/api/designations')
+      .then(r => r.json())
+      .then(j => setDesignations((j.data ?? []).filter((d: any) => d.is_active !== false)))
+      .catch(() => {})
+  }, [])
 
   /* ── Salary state ── */
   const BLANK_SAL = { ctc_annual: '', basic: '', hra: '', conveyance: '', medical: '', special: '', lta: '', pf: '', esic: '', metro: true, effective_from: new Date().toISOString().slice(0, 10) }
@@ -499,15 +508,20 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          first_name: form.first_name.trim(), last_name: form.last_name.trim(),
-          full_name: `${form.first_name.trim()} ${form.last_name.trim()}`,
-          work_location: form.work_location, work_type: form.work_type, employment_type: form.employment_type,
-          status: form.status, role: form.role, department_id: form.department_id || null,
+          first_name:      form.first_name.trim(),
+          last_name:       form.last_name.trim(),
+          work_location:   form.work_location,
+          work_type:       form.work_type,
+          employment_type: form.employment_type,
+          status:          form.status,
+          role:            form.role,
+          department_id:   form.department_id || null,
+          designation_id:  form.designation_id || null,
         }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Failed to save')
-      onSaved()
+      onSaved(json.data as ApiEmployee)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save')
     } finally { setSaving(false) }
@@ -585,6 +599,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
       {tab === 'details' && (
         <>
           <div style={{ overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }} className="sm:!px-6">
+            {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626', flexShrink: 0 }}>{error}</div>}
             <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
               <div>
                 <label style={LS}>First Name *</label>
@@ -595,12 +610,21 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
                 <input style={IS} value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} />
               </div>
             </div>
-            <div>
-              <label style={LS}>Department</label>
-              <select style={IS} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>
-                <option value="">— No Department —</option>
-                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
+              <div>
+                <label style={LS}>Department</label>
+                <select style={IS} value={form.department_id} onChange={e => setForm(f => ({ ...f, department_id: e.target.value }))}>
+                  <option value="">— No Department —</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={LS}>Designation</label>
+                <select style={IS} value={form.designation_id} onChange={e => setForm(f => ({ ...f, designation_id: e.target.value }))}>
+                  <option value="">— No Designation —</option>
+                  {designations.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}
+                </select>
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 12 }}>
               <div>
@@ -634,7 +658,6 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
                 {[['employee','Employee'],['manager','Manager'],['hr','HR'],['admin','Admin']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
-            {error && <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: '0.8125rem', color: '#dc2626' }}>{error}</div>}
           </div>
           <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
             <button onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--color-gray-300)', background: '#fff', cursor: 'pointer', fontSize: '0.875rem' }}>Cancel</button>
@@ -1871,7 +1894,17 @@ export default function EmployeesPage() {
               </div>
               <button onClick={() => setEditEmp(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-gray-400)', padding: 4 }}><X size={18} /></button>
             </div>
-            <EditEmployeeForm emp={editEmp} departments={departments} onClose={() => setEditEmp(null)} onSaved={() => { setEditEmp(null); fetchEmployees() }} />
+            <EditEmployeeForm
+  emp={editEmp}
+  departments={departments}
+  onClose={() => setEditEmp(null)}
+  onSaved={(updated) => {
+    // Immediately update the row in the list so department shows without waiting for full refetch
+    setEmployees(prev => prev.map(e => e.id === updated.id ? { ...e, ...updated } : e))
+    setEditEmp(null)
+    fetchEmployees()
+  }}
+/>
           </div>
         </div>
       )}

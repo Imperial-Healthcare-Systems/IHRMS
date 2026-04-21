@@ -3,6 +3,12 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 
+const ADMIN_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+function isAdmin(session: Awaited<ReturnType<typeof getServerSession>>) {
+  const role = (session?.user as Record<string, unknown>)?.role as string | undefined
+  return ADMIN_ROLES.includes(role ?? '')
+}
+
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
   if (err && typeof err === 'object') {
@@ -56,7 +62,7 @@ export async function PATCH(
     const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // Removed isAdmin guard — all authenticated HR users can edit announcements
+    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const body = await req.json()
     const { title, body: bodyText, content, expires_at, is_pinned, priority, is_urgent, category, type } = body
@@ -111,7 +117,7 @@ export async function DELETE(
     const { id } = await params
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // Removed isAdmin guard — all authenticated HR users can delete announcements
+    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { data: existing, error: fetchError } = await supabaseAdmin
       .from('announcements').select('id, title').eq('id', id).single()

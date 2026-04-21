@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
 import sql, { ensureSchema } from '@/lib/pg'
+import { sendAnnouncementEmails } from '@/lib/mailer'
 
 async function fanOutNotification(
   title: string,
@@ -10,11 +11,12 @@ async function fanOutNotification(
   cat: string,
   dbAudience: string,
   target_audience: string | undefined,
+  publisherName: string,
 ) {
   try {
     let empQuery = supabaseAdmin
       .from('employees')
-      .select('id')
+      .select('id, work_email, first_name, last_name')
       .eq('status', 'active')
 
     // Narrow to department if audience is department-scoped
@@ -32,6 +34,7 @@ async function fanOutNotification(
     const { data: employees } = await empQuery.limit(500)
     if (!employees || employees.length === 0) return
 
+    // In-app notifications
     const notifTitle = cat === 'urgent' ? `Urgent: ${title}` : `Announcement: ${title}`
     const snippet = text.length > 120 ? text.substring(0, 120) + '…' : text
     const notifType = cat === 'urgent' ? 'warning' : cat === 'holiday' ? 'success' : 'info'
@@ -42,8 +45,14 @@ async function fanOutNotification(
       body: snippet,
       type: notifType,
     }))
-
     await supabaseAdmin.from('notifications').insert(notifications)
+
+    // Email notifications (fire-and-forget)
+    const recipients = (employees as Record<string, unknown>[])
+      .filter(e => e.work_email)
+      .map(e => ({ email: e.work_email as string, name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || 'Team Member' }))
+
+    sendAnnouncementEmails({ recipients, title, body: text, announcementType: cat, publisherName })
   } catch (e) {
     console.warn('[announcements] notification fan-out non-fatal:', e)
   }
@@ -137,11 +146,17 @@ export async function GET(req: NextRequest) {
   }
 }
 
+const ADMIN_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+function isAdmin(session: Awaited<ReturnType<typeof getServerSession>>) {
+  const role = (session?.user as Record<string, unknown>)?.role as string | undefined
+  return ADMIN_ROLES.includes(role ?? '')
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // Removed isAdmin guard — all authenticated HR users can post announcements
+    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden — HR Admin role required to post announcements' }, { status: 403 })
 
     const body = await req.json()
     const {
@@ -212,7 +227,14 @@ export async function POST(req: NextRequest) {
       if (!rows.length) return NextResponse.json({ error: 'Insert returned no data' }, { status: 500 })
 
       // Fan out in-app notifications to target employees (non-blocking)
-      fanOutNotification(title, text, cat, dbAudience, target_audience as string | undefined)
+      // Resolve publisher display name for emails
+      const publisherName = await (async () => {
+        try {
+          const { data: pub } = await supabaseAdmin.from('employees').select('first_name, last_name').eq('id', createdBy).single()
+          return pub ? `${pub.first_name} ${pub.last_name}`.trim() : 'HR'
+        } catch { return 'HR' }
+      })()
+      fanOutNotification(title, text, cat, dbAudience, target_audience as string | undefined, publisherName)
 
       return NextResponse.json({ data: rows[0] }, { status: 201 })
     } catch (sqlErr) {
