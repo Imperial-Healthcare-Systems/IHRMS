@@ -205,7 +205,7 @@ export async function sendWelcomeEmail(params: {
           </p>
           <table style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:10px;overflow:hidden;margin-bottom:20px;border:1px solid #e5e7eb">
             <tr style="background:#f1f5f9"><td colspan="2" style="padding:10px 16px;font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.05em">Your Details</td></tr>
-            ${[['Employee ID', empId],['Joining Date', fmt(joiningDate)],designation?['Designation', designation]:null,department?['Department', department]:null].filter(Boolean).map(([k,v])=>`<tr><td style="padding:9px 16px;font-size:12px;color:#6b7280;width:140px;border-top:1px solid #f1f5f9">${k}</td><td style="padding:9px 16px;font-size:12px;font-weight:600;color:#1e293b;border-top:1px solid #f1f5f9">${v}</td></tr>`).join('')}
+            ${([['Employee ID', empId],['Joining Date', fmt(joiningDate)],designation?['Designation', designation]:null,department?['Department', department]:null] as (string[] | null)[]).filter((r): r is string[] => r !== null).map(([k,v])=>`<tr><td style="padding:9px 16px;font-size:12px;color:#6b7280;width:140px;border-top:1px solid #f1f5f9">${k}</td><td style="padding:9px 16px;font-size:12px;font-weight:600;color:#1e293b;border-top:1px solid #f1f5f9">${v}</td></tr>`).join('')}
           </table>
           <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:16px;font-size:13px;color:#1e40af;line-height:1.6;margin-bottom:16px">
             You can log in to the <strong>IHRMS portal</strong> to view your profile, apply for leaves, access payslips and more.
