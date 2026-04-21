@@ -549,7 +549,7 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
         hasSal ? 'Salary updated!' : 'Salary structure saved!',
         { duration: 5000 }
       )
-      onSaved()
+      onSaved(emp)
       // Show a follow-up toast prompting payroll
       setTimeout(() => {
         toast(
