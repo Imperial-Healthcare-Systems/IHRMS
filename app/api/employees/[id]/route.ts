@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { emitEvent } from '@/lib/ecosystem'
+import { logAudit } from '@/lib/audit'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -82,6 +84,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Fallback: plain select
       const { data: plain } = await supabaseAdmin.from('employees').select('*').eq('id', id).single()
       data = plain as Record<string, unknown> | null
+    }
+
+    // Ecosystem event + audit (fire-and-forget)
+    const orgId = (session.user as any)?.orgId as string | undefined
+    if (orgId) {
+      emitEvent({ event_type: 'employee.updated', source_platform: 'ihrms', org_id: orgId, actor_id: sessionUserId, entity_id: id, payload: { employee_id: id, changes: Object.keys(body) } })
+      logAudit({ org_id: orgId, actor_id: sessionUserId ?? 'unknown', action: 'updated', module: 'employees', entity_id: id, summary: 'Employee profile updated' })
     }
 
     return NextResponse.json({ data })

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
-import sql, { ensureSchema } from '@/lib/pg'
 import { sendLeaveStatusEmail } from '@/lib/mailer'
 
 async function sendLeaveNotification(
@@ -19,18 +18,14 @@ async function sendLeaveNotification(
 
   // In-app notification
   try {
-    await ensureSchema()
-    await sql`
-      INSERT INTO notifications (recipient_id, title, body, type)
-      VALUES (
-        ${employeeId}::uuid,
-        ${isApproved ? 'Leave Request Approved ✓' : 'Leave Request Rejected'},
-        ${isApproved
-          ? `Your ${leaveType} leave request starting ${dateLabel} has been approved.`
-          : `Your ${leaveType} leave request starting ${dateLabel} was not approved.${remarks ? ' Reason: ' + remarks : ''}`},
-        ${isApproved ? 'success' : 'warning'}
-      )
-    `
+    await supabaseAdmin.from('notifications').insert({
+      recipient_id: employeeId,
+      title: isApproved ? 'Leave Request Approved ✓' : 'Leave Request Rejected',
+      body: isApproved
+        ? `Your ${leaveType} leave request starting ${dateLabel} has been approved.`
+        : `Your ${leaveType} leave request starting ${dateLabel} was not approved.${remarks ? ' Reason: ' + remarks : ''}`,
+      type: isApproved ? 'success' : 'warning',
+    })
   } catch (e) { console.warn('[leaves notify] in-app non-fatal:', e) }
 
   // Email notification

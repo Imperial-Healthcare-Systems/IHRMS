@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { emitEvent } from '@/lib/ecosystem'
+import { logAudit } from '@/lib/audit'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -109,6 +111,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .single()
 
     if (error) { console.error('[payroll PATCH save]', error); throw error }
+
+    // Ecosystem event + audit for approve/paid (fire-and-forget)
+    const orgId = (session.user as any)?.orgId as string | undefined
+    const actorId = (session.user as any)?.id as string | undefined
+    if (orgId && (action === 'approve' || action === 'mark_paid')) {
+      emitEvent({ event_type: 'payroll.approved', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: id, payload: { payroll_run_id: id, action } })
+      logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: action === 'approve' ? 'approved' : 'updated', module: 'payroll', entity_id: id, summary: `Payroll run ${action}` })
+    }
 
     return NextResponse.json({ data })
   } catch (err: unknown) {

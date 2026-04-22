@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
-import { ensureSchema } from '@/lib/pg'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -21,9 +20,6 @@ export async function GET(req: NextRequest) {
 
     const userId = (session.user as Record<string, unknown>)?.id as string | undefined
     if (!userId) return NextResponse.json({ data: [], unread: 0 })
-
-    // Ensure notifications table exists (no-op after first call)
-    await ensureSchema()
 
     const { searchParams } = new URL(req.url)
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 50)

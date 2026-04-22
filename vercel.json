@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/reports",
+      "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/cron/reports/run-scheduled",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/leave-accrual",
+      "schedule": "0 1 1 * *"
+    }
+  ]
+}

@@ -353,10 +353,14 @@ export default function AttendancePage() {
 
   const myUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
 
-  // Work type drives geofencing rules
-  const [myWorkType, setMyWorkType] = useState<'office' | 'home' | 'hybrid'>('office')
+  // Work type drives geofencing rules — null means still loading from API
+  const [myWorkType, setMyWorkType] = useState<'office' | 'home' | 'hybrid' | null>(null)
   // Hybrid employees toggle this when punching in on a WFH day
   const [isWfhToday, setIsWfhToday] = useState(false)
+  // Live distance from office for geo-fence indicator
+  const [officeDistKm, setOfficeDistKm]     = useState<number | null>(null)
+  const [geoBlocked,   setGeoBlocked]       = useState(false)   // true = denied / unavailable
+  const [geoChecking,  setGeoChecking]      = useState(false)
 
   const [today, setToday] = useState('')
   const todayISO = useMemo(() => {
@@ -403,6 +407,33 @@ export default function AttendancePage() {
       })
       .catch(() => {})
   }, [myUserId])
+
+  // Proactively check distance from office whenever geo-fence applies
+  useEffect(() => {
+    if (myWorkType === null) return // still loading — do nothing until work type is known
+    let cancelled = false
+    const needsCheck = (myWorkType === 'office' || (myWorkType === 'hybrid' && !isWfhToday)) && !hasPunchedIn
+    if (!needsCheck) {
+      setOfficeDistKm(null)
+      setGeoBlocked(false)
+      setGeoChecking(false)
+      return
+    }
+    if (!navigator.geolocation) { setGeoBlocked(true); return }
+    setGeoChecking(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        if (cancelled) return // work type changed before this callback fired — discard
+        const dist = haversineKm(pos.coords.latitude, pos.coords.longitude, OFFICE_LAT, OFFICE_LNG)
+        setOfficeDistKm(dist)
+        setGeoBlocked(false)
+        setGeoChecking(false)
+      },
+      () => { if (!cancelled) { setGeoBlocked(true); setGeoChecking(false) } },
+      { timeout: 8000, maximumAge: 60000 },
+    )
+    return () => { cancelled = true }
+  }, [myWorkType, isWfhToday, hasPunchedIn])
 
   /* Adapt API shape → UI shape */
   const adaptedLogs = useMemo(() => attendanceLogs.map(log => ({
@@ -506,7 +537,7 @@ export default function AttendancePage() {
     setPunchingIn(true)
     try {
       // Determine whether geo-fence check is required for this punch
-      const isWfh = myWorkType === 'home' || (myWorkType === 'hybrid' && isWfhToday)
+      const isWfh = myWorkType === 'home' || myWorkType === null || (myWorkType === 'hybrid' && isWfhToday)
       const needsGeoFence = !isWfh // WFO always; hybrid on office days
 
       const geo = await captureGeolocation()
@@ -632,13 +663,39 @@ export default function AttendancePage() {
               </label>
             )}
 
-            {/* WFO: small geo-fence reminder */}
-            {myWorkType === 'office' && !hasPunchedIn && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
-                <MapPin size={11} />
-                Within 2 km required
-              </span>
-            )}
+            {/* WFO / hybrid-office-day: live distance indicator */}
+            {myWorkType !== null && (myWorkType === 'office' || (myWorkType === 'hybrid' && !isWfhToday)) && !hasPunchedIn && (() => {
+              if (geoChecking) return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+                  <MapPin size={11} />
+                  Checking location…
+                </span>
+              )
+              if (geoBlocked) return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+                  <MapPin size={11} />
+                  Location access denied — cannot punch in
+                </span>
+              )
+              if (officeDistKm !== null && officeDistKm > OFFICE_RADIUS_KM) return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+                  <MapPin size={11} />
+                  {officeDistKm.toFixed(1)} km from office — out of range
+                </span>
+              )
+              if (officeDistKm !== null && officeDistKm <= OFFICE_RADIUS_KM) return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+                  <MapPin size={11} />
+                  {officeDistKm.toFixed(2)} km from office ✓
+                </span>
+              )
+              return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--radius-md)', padding: '4px 8px' }}>
+                  <MapPin size={11} />
+                  Within 2 km required
+                </span>
+              )
+            })()}
 
             <button
               className="btn btn-outline btn-sm"
@@ -652,8 +709,17 @@ export default function AttendancePage() {
             <button
               className="btn btn-primary btn-sm"
               onClick={handlePunchIn}
-              disabled={punchingIn || hasPunchedIn || loadingAttendance}
-              title={hasPunchedIn ? `Already punched in at ${punchInTime} IST` : myWorkType === 'office' ? 'Must be within 2 km of office' : ''}
+              disabled={
+                punchingIn || hasPunchedIn || loadingAttendance ||
+                (myWorkType !== 'home' && myWorkType !== null && geoBlocked) ||
+                (myWorkType !== null && (myWorkType === 'office' || (myWorkType === 'hybrid' && !isWfhToday)) && officeDistKm !== null && officeDistKm > OFFICE_RADIUS_KM)
+              }
+              title={
+                hasPunchedIn ? `Already punched in at ${punchInTime} IST`
+                : geoBlocked && myWorkType !== 'home' ? 'Location access denied — enable GPS to punch in'
+                : officeDistKm !== null && officeDistKm > OFFICE_RADIUS_KM ? `You are ${officeDistKm.toFixed(1)} km from the office — must be within ${OFFICE_RADIUS_KM} km`
+                : ''
+              }
             >
               <Clock size={14} />
               {punchingIn ? 'Punching In…' : hasPunchedIn ? 'Punched In ✓' : 'Punch In'}

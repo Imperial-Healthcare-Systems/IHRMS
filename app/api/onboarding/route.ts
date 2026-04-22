@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { emitEvent } from '@/lib/ecosystem'
+import { logAudit } from '@/lib/audit'
 
 export async function GET(req: NextRequest) {
   try {
@@ -118,6 +120,16 @@ export async function POST(req: NextRequest) {
 
     if (empError) return NextResponse.json({ error: empError.message }, { status: 500 })
     if (!employee) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+
+    // Fire ecosystem event when final onboarding step is completed (fire-and-forget)
+    if (Boolean(completed) && step === 'final') {
+      const orgId  = (session.user as any)?.orgId as string | undefined
+      const actorId = (session.user as any)?.id as string | undefined
+      if (orgId) {
+        emitEvent({ event_type: 'employee.onboarded', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: employee_id, payload: { employee_id, step } })
+        logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: 'updated', module: 'onboarding', entity_id: employee_id, summary: 'Employee onboarding completed' })
+      }
+    }
 
     return NextResponse.json({ data: { employee_id, step, completed: Boolean(completed) }, step, completed: Boolean(completed) })
   } catch (err: unknown) {

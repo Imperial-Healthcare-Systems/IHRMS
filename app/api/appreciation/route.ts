@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { emitEvent } from '@/lib/ecosystem'
+import { logAudit } from '@/lib/audit'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -102,6 +104,13 @@ export async function POST(req: NextRequest) {
     if (error) {
       console.error('[appreciation POST]', error)
       return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    }
+
+    // Ecosystem event + audit (fire-and-forget)
+    const orgId = (session.user as any)?.orgId as string | undefined
+    if (orgId) {
+      emitEvent({ event_type: 'appreciation.issued', source_platform: 'ihrms', org_id: orgId, actor_id: sessionUserId, entity_id: employee_id, payload: { employee_id, category, subject } })
+      logAudit({ org_id: orgId, actor_id: sessionUserId ?? 'unknown', action: 'created', module: 'appreciation', entity_id: employee_id, summary: 'Appreciation issued to employee' })
     }
 
     return NextResponse.json({ data }, { status: 201 })

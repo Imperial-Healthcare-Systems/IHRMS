@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
-import sql, { ensureSchema } from '@/lib/pg'
 
 const ADMIN_ROLES = ['super_admin', 'hr_admin', 'admin', 'hr']
 
@@ -40,11 +39,14 @@ export async function POST(_req: NextRequest) {
     }
 
     // Load saved leave policy (falls back to defaults)
-    await ensureSchema()
     let policy: LeavePolicyRow[] = DEFAULT_POLICY
     try {
-      const rows = await sql`SELECT value FROM app_settings WHERE key = 'leave_policy'`
-      if (rows.length && Array.isArray(rows[0].value)) policy = rows[0].value as LeavePolicyRow[]
+      const { data: setting } = await supabaseAdmin
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'leave_policy')
+        .maybeSingle()
+      if (setting && Array.isArray(setting.value)) policy = setting.value as LeavePolicyRow[]
     } catch { /* use defaults */ }
 
     // Only process monthly-accrual leave types that are active
@@ -73,7 +75,6 @@ export async function POST(_req: NextRequest) {
         if (!rate) continue
 
         try {
-          // Find existing balance row
           const { data: rows } = await supabaseAdmin
             .from('leave_balances')
             .select('id, accrued, closing_balance')
@@ -116,13 +117,11 @@ export async function POST(_req: NextRequest) {
 
     // Persist last-run metadata
     try {
-      await sql`
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES ('leave_accrual_last_run',
-          ${JSON.stringify({ timestamp: new Date().toISOString(), employeeCount: employees?.length ?? 0, updatedCount, month: monthName, year })}::jsonb,
-          NOW())
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-      `
+      await supabaseAdmin.from('app_settings').upsert({
+        key: 'leave_accrual_last_run',
+        value: { timestamp: new Date().toISOString(), employeeCount: employees?.length ?? 0, updatedCount, month: monthName, year },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'key' })
     } catch { /* non-fatal */ }
 
     return NextResponse.json({

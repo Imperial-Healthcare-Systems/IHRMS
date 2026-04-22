@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { emitEvent } from '@/lib/ecosystem'
+import { logAudit } from '@/lib/audit'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -104,6 +106,14 @@ export async function POST(req: NextRequest) {
       .eq('id', employee_id)
 
     if (empError) console.error('[exit POST] employee status update:', empError.message)
+
+    // Ecosystem event + audit (fire-and-forget)
+    const orgId = (session.user as any)?.orgId as string | undefined
+    const actorId = (session.user as any)?.id as string | undefined
+    if (orgId) {
+      emitEvent({ event_type: 'employee.offboarded', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: employee_id, payload: { employee_id, exit_type, last_working_date } })
+      logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: 'created', module: 'exit', entity_id: employee_id, summary: 'Exit initiated for employee' })
+    }
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {

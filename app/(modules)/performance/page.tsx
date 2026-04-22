@@ -9,7 +9,7 @@ import { RefreshCw, Clock, CheckCircle, TrendingUp, X, Plus, Star } from 'lucide
 /* ─────────────────────────────────────────────────────────────
    TYPES
 ───────────────────────────────────────────────────────────── */
-type Tab = 'cycles' | 'teamreviews' | 'ratings' | 'goals'
+type Tab = 'cycles' | 'teamreviews' | 'ratings' | 'goals' | 'feedback360'
 
 interface ReviewCycle {
   id: string
@@ -199,6 +199,30 @@ export default function PerformancePage() {
   const [goalDesc,   setGoalDesc]   = useState('')
   const [savingGoal, setSavingGoal] = useState(false)
 
+  /* ── 360° Feedback state ── */
+  interface Feedback360 {
+    id: string
+    subject_employee_id: string
+    reviewer_id: string | null
+    is_anonymous: boolean
+    rating: number
+    relationship: string
+    comments: string | null
+    created_at: string
+    reviewer?: { first_name: string; last_name: string } | null
+    subject_employee?: { first_name: string; last_name: string; emp_id: string } | null
+  }
+  const [feedback360,    setFeedback360]    = useState<Feedback360[]>([])
+  const [f360Loading,    setF360Loading]    = useState(false)
+  const [f360Employees,  setF360Employees]  = useState<{ id: string; first_name: string; last_name: string; emp_id: string }[]>([])
+  const [f360Target,     setF360Target]     = useState('')
+  const [f360Rating,     setF360Rating]     = useState(0)
+  const [f360Relation,   setF360Relation]   = useState('peer')
+  const [f360Comments,   setF360Comments]   = useState('')
+  const [f360Anonymous,  setF360Anonymous]  = useState(false)
+  const [f360Submitting, setF360Submitting] = useState(false)
+  const [f360View,       setF360View]       = useState<'received' | 'given'>('received')
+
   /* ─── Fetch ─── */
   const fetchAll = useCallback(async () => {
     if (!sessionUserId) return
@@ -217,6 +241,37 @@ export default function PerformancePage() {
   }, [sessionUserId])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  /* ─── Fetch 360° data when tab opens ─── */
+  useEffect(() => {
+    if (activeTab !== 'feedback360' || !sessionUserId) return
+    setF360Loading(true)
+    Promise.all([
+      fetch('/api/feedback-360').then(r => r.json()),
+      fetch('/api/employees?limit=200').then(r => r.json()),
+    ]).then(([fbJson, empJson]) => {
+      setFeedback360(fbJson.data ?? [])
+      setF360Employees(empJson.data ?? [])
+    }).catch(() => {}).finally(() => setF360Loading(false))
+  }, [activeTab, sessionUserId])
+
+  async function handleSubmitFeedback360() {
+    if (!f360Target || f360Rating < 1) { toast.error('Select an employee and rating'); return }
+    setF360Submitting(true)
+    try {
+      const res = await fetch('/api/feedback-360', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_employee_id: f360Target, rating: f360Rating, relationship: f360Relation, comments: f360Comments || null, is_anonymous: f360Anonymous }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      toast.success('Feedback submitted!')
+      setFeedback360(prev => [json.data, ...prev])
+      setF360Target(''); setF360Rating(0); setF360Comments(''); setF360Anonymous(false)
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to submit') }
+    finally { setF360Submitting(false) }
+  }
 
   /* ─── Derived stats ─── */
   const activeCycles         = cycles.filter(c => c.status === 'active').length
@@ -380,6 +435,7 @@ export default function PerformancePage() {
     { key: 'teamreviews', label: 'My Team Reviews' },
     { key: 'ratings',     label: 'Performance Ratings' },
     { key: 'goals',       label: 'Goals & KRAs' },
+    { key: 'feedback360', label: '360° Feedback' },
   ]
 
   /* ─── Goals from my review ─── */
@@ -668,6 +724,116 @@ export default function PerformancePage() {
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ── TAB 5: 360° Feedback ── */}
+            {activeTab === 'feedback360' && (
+              <div>
+                {/* Sub-nav */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+                  {(['received', 'given'] as const).map(v => (
+                    <button key={v} onClick={() => setF360View(v)} style={{ padding: '7px 18px', borderRadius: 8, fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', border: `1px solid ${f360View === v ? '#E8622A' : '#e5e7eb'}`, background: f360View === v ? '#fff7f5' : '#fff', color: f360View === v ? '#E8622A' : '#6b7280' }}>
+                      {v === 'received' ? 'Received' : 'Given'}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24, alignItems: 'flex-start' }}>
+
+                  {/* Feedback list */}
+                  <div>
+                    {f360Loading ? (
+                      <p style={{ color: '#6b7280', textAlign: 'center', padding: 32 }}>Loading feedback…</p>
+                    ) : (() => {
+                      const list = f360View === 'received'
+                        ? feedback360.filter(f => f.subject_employee_id === sessionUserId)
+                        : feedback360.filter(f => f.reviewer_id === sessionUserId)
+                      if (list.length === 0) return (
+                        <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
+                          <Star size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
+                          <p style={{ fontWeight: 500 }}>{f360View === 'received' ? 'No feedback received yet.' : 'You haven\'t given any feedback yet.'}</p>
+                        </div>
+                      )
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                          {list.map(fb => {
+                            const reviewerName = fb.is_anonymous && !isAdmin ? 'Anonymous' : fb.reviewer ? `${fb.reviewer.first_name} ${fb.reviewer.last_name}` : '—'
+                            const subjectName  = fb.subject_employee ? `${fb.subject_employee.first_name} ${fb.subject_employee.last_name}` : '—'
+                            const RELATION_COLORS: Record<string, string> = { peer: '#2563eb', manager: '#7c3aed', reportee: '#16a34a', other: '#6b7280' }
+                            return (
+                              <div key={fb.id} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '18px 22px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                                  <div>
+                                    <p style={{ fontWeight: 700, color: '#111827', margin: 0 }}>
+                                      {f360View === 'received' ? `From: ${reviewerName}` : `To: ${subjectName}`}
+                                    </p>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                      <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: `${RELATION_COLORS[fb.relationship] ?? '#6b7280'}15`, color: RELATION_COLORS[fb.relationship] ?? '#6b7280', border: `1px solid ${RELATION_COLORS[fb.relationship] ?? '#6b7280'}33` }}>
+                                        {fb.relationship.charAt(0).toUpperCase() + fb.relationship.slice(1)}
+                                      </span>
+                                      {fb.is_anonymous && <span style={{ fontSize: '0.72rem', color: '#9ca3af', fontStyle: 'italic' }}>Anonymous</span>}
+                                      <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>{fmtDate(fb.created_at)}</span>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                    {[1,2,3,4,5].map(s => <Star key={s} size={16} fill={s <= fb.rating ? '#f59e0b' : 'none'} color={s <= fb.rating ? '#f59e0b' : '#d1d5db'} />)}
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginLeft: 6 }}>{fb.rating}/5</span>
+                                  </div>
+                                </div>
+                                {fb.comments && (
+                                  <p style={{ fontSize: '0.875rem', color: '#4b5563', margin: 0, lineHeight: 1.6, background: '#f9fafb', borderRadius: 8, padding: '10px 14px' }}>{fb.comments}</p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  {/* Submit feedback form */}
+                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 14, padding: 24, position: 'sticky', top: 80 }}>
+                    <h3 style={{ fontWeight: 700, color: '#111827', margin: '0 0 18px', fontSize: '0.95rem' }}>Submit 360° Feedback</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <FormField label="Employee *">
+                        <select value={f360Target} onChange={e => setF360Target(e.target.value)} style={INP}>
+                          <option value="">Select employee…</option>
+                          {f360Employees.filter(e => e.id !== sessionUserId).map(e => (
+                            <option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.emp_id})</option>
+                          ))}
+                        </select>
+                      </FormField>
+                      <FormField label="Relationship *">
+                        <select value={f360Relation} onChange={e => setF360Relation(e.target.value)} style={INP}>
+                          <option value="peer">Peer</option>
+                          <option value="manager">Manager</option>
+                          <option value="reportee">Reportee</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </FormField>
+                      <FormField label="Rating (1–5) *">
+                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                          {[1,2,3,4,5].map(n => (
+                            <button key={n} onClick={() => setF360Rating(n)} style={{ width: 38, height: 38, borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', background: f360Rating >= n ? '#E8622A' : '#e5e7eb', color: f360Rating >= n ? '#fff' : '#6b7280', transition: 'all 0.15s' }}>
+                              {n}
+                            </button>
+                          ))}
+                        </div>
+                      </FormField>
+                      <FormField label="Comments">
+                        <textarea value={f360Comments} onChange={e => setF360Comments(e.target.value)} rows={4} placeholder="Share your thoughts…" style={{ ...INP, resize: 'vertical' }} />
+                      </FormField>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.875rem', color: '#374151', fontWeight: 500 }}>
+                        <input type="checkbox" checked={f360Anonymous} onChange={e => setF360Anonymous(e.target.checked)} style={{ width: 16, height: 16 }} />
+                        Submit anonymously
+                      </label>
+                      <button onClick={handleSubmitFeedback360} disabled={f360Submitting} style={{ ...BTN_PRIMARY, opacity: f360Submitting ? 0.7 : 1 }}>
+                        {f360Submitting ? 'Submitting…' : 'Submit Feedback'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

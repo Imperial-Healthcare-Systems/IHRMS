@@ -93,8 +93,10 @@ function StatCard({
   return (
     <div style={{
       background: '#FFFFFF', borderRadius: 14, padding: '18px 20px',
-      border: `1px solid rgba(0,0,0,0.06)`,
       borderTop: `3px solid ${color.icon}`,
+      borderRight: '1px solid rgba(0,0,0,0.06)',
+      borderBottom: '1px solid rgba(0,0,0,0.06)',
+      borderLeft: '1px solid rgba(0,0,0,0.06)',
       boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)',
       transition: 'all 0.2s ease', cursor: 'default', position: 'relative', overflow: 'hidden',
     }}
@@ -513,8 +515,10 @@ export default function DashboardPage() {
                   onClick={() => router.push(tile.path)}
                   style={{
                     background: '#FFFFFF', borderRadius: 12, padding: '18px 16px',
-                    border: '1px solid rgba(0,0,0,0.06)',
                     borderTop: `3px solid ${tile.color}`,
+                    borderRight: '1px solid rgba(0,0,0,0.06)',
+                    borderBottom: '1px solid rgba(0,0,0,0.06)',
+                    borderLeft: '1px solid rgba(0,0,0,0.06)',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                     cursor: 'pointer', textAlign: 'left',
                     display: 'flex', flexDirection: 'column', gap: 10,

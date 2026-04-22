@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import sql from '@/lib/pg'
+import { supabaseAdmin } from '@/lib/supabase'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
 
     const userRole = ((session.user as Record<string, unknown>)?.role as string) ?? 'employee'
     const userId   = ((session.user as Record<string, unknown>)?.id as string) ?? null
+    const orgId    = ((session.user as Record<string, unknown>)?.orgId as string) ?? null
     const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
     const isFullAccess = FULL_ACCESS_ROLES.includes(userRole)
 
@@ -40,98 +41,81 @@ export async function GET(req: NextRequest) {
       if (day !== 0 && day !== 6) workingDays++
     }
 
-    // Per-employee aggregated summary — scoped to own record for non-HR roles
-    const summaryRows = isFullAccess
-      ? await sql`
-          SELECT
-            e.id,
-            COALESCE(e.emp_id, e.employee_code, e.id::text) AS emp_id,
-            e.first_name || ' ' || e.last_name AS full_name,
-            COALESCE(d.name, '—') AS department,
-            COUNT(*) FILTER (WHERE a.status IN ('present','late','work_from_home','half_day')) AS present,
-            COUNT(*) FILTER (WHERE a.status = 'absent') AS absent,
-            COUNT(*) FILTER (WHERE a.status = 'work_from_home') AS wfh,
-            COUNT(*) FILTER (WHERE a.status = 'late') AS late,
-            ROUND(
-              COALESCE(SUM(GREATEST(a.total_hours - 9, 0)) FILTER (WHERE a.total_hours IS NOT NULL AND a.total_hours > 9), 0)::numeric, 1
-            ) AS ot_hours
-          FROM attendance_daily a
-          JOIN employees e ON e.id = a.employee_id
-          LEFT JOIN departments d ON d.id = e.department_id
-          WHERE a.date BETWEEN ${dateFrom}::date AND ${dateTo}::date
-          GROUP BY e.id, e.first_name, e.last_name, e.emp_id, e.employee_code, d.name
-          ORDER BY e.first_name, e.last_name
-        `
-      : await sql`
-          SELECT
-            e.id,
-            COALESCE(e.emp_id, e.employee_code, e.id::text) AS emp_id,
-            e.first_name || ' ' || e.last_name AS full_name,
-            COALESCE(d.name, '—') AS department,
-            COUNT(*) FILTER (WHERE a.status IN ('present','late','work_from_home','half_day')) AS present,
-            COUNT(*) FILTER (WHERE a.status = 'absent') AS absent,
-            COUNT(*) FILTER (WHERE a.status = 'work_from_home') AS wfh,
-            COUNT(*) FILTER (WHERE a.status = 'late') AS late,
-            ROUND(
-              COALESCE(SUM(GREATEST(a.total_hours - 9, 0)) FILTER (WHERE a.total_hours IS NOT NULL AND a.total_hours > 9), 0)::numeric, 1
-            ) AS ot_hours
-          FROM attendance_daily a
-          JOIN employees e ON e.id = a.employee_id
-          LEFT JOIN departments d ON d.id = e.department_id
-          WHERE a.date BETWEEN ${dateFrom}::date AND ${dateTo}::date
-            AND a.employee_id = ${userId}::uuid
-          GROUP BY e.id, e.first_name, e.last_name, e.emp_id, e.employee_code, d.name
-          ORDER BY e.first_name, e.last_name
-        `
+    // Fetch attendance records with employee + department info
+    let query = supabaseAdmin
+      .from('attendance_daily')
+      .select(`
+        employee_id, date, status, total_hours,
+        employee:employees!attendance_daily_employee_id_fkey(
+          id, first_name, last_name, emp_id,
+          department:departments!employees_department_id_fkey(name)
+        )
+      `)
+      .gte('date', dateFrom)
+      .lte('date', dateTo)
 
-    // Daily attendance % — company-wide for HR, own-only for employees
-    const dailyRows = isFullAccess
-      ? await sql`
-          SELECT
-            a.date::text AS date_str,
-            COUNT(*) FILTER (WHERE a.status IN ('present','late','work_from_home','half_day')) AS present_count,
-            COUNT(*) AS total_count
-          FROM attendance_daily a
-          WHERE a.date BETWEEN ${dateFrom}::date AND ${dateTo}::date
-          GROUP BY a.date
-          ORDER BY a.date
-        `
-      : await sql`
-          SELECT
-            a.date::text AS date_str,
-            COUNT(*) FILTER (WHERE a.status IN ('present','late','work_from_home','half_day')) AS present_count,
-            COUNT(*) AS total_count
-          FROM attendance_daily a
-          WHERE a.date BETWEEN ${dateFrom}::date AND ${dateTo}::date
-            AND a.employee_id = ${userId}::uuid
-          GROUP BY a.date
-          ORDER BY a.date
-        `
+    if (orgId) query = query.eq('org_id', orgId)
+    if (!isFullAccess && userId) query = query.eq('employee_id', userId)
 
-    const dailyMap = new Map(dailyRows.map(r => [r.date_str as string, r]))
+    const { data: records, error: attErr } = await query
+    if (attErr) throw attErr
+
+    // Aggregate per employee (JS-side)
+    type EmployeeAgg = {
+      empId: string; name: string; department: string
+      present: number; absent: number; wfh: number; late: number; otHours: number
+    }
+    const empMap = new Map<string, EmployeeAgg>()
+    const dailyMap = new Map<string, { present: number; total: number }>()
+
+    for (const r of records ?? []) {
+      const emp = r.employee as { id: string; first_name: string; last_name: string; emp_id?: string; department?: { name: string } | null } | null
+      if (!emp) continue
+
+      const empId = emp.emp_id ?? emp.id
+      const name = `${emp.first_name} ${emp.last_name}`
+      const dept = emp.department?.name ?? '—'
+      const isPresent = ['present', 'late', 'work_from_home', 'half_day'].includes(r.status ?? '')
+
+      if (!empMap.has(r.employee_id)) {
+        empMap.set(r.employee_id, { empId, name, department: dept, present: 0, absent: 0, wfh: 0, late: 0, otHours: 0 })
+      }
+      const agg = empMap.get(r.employee_id)!
+      if (isPresent) agg.present++
+      if (r.status === 'absent') agg.absent++
+      if (r.status === 'work_from_home') agg.wfh++
+      if (r.status === 'late') agg.late++
+      if (r.total_hours && r.total_hours > 9) agg.otHours += r.total_hours - 9
+
+      // Daily aggregation
+      if (!dailyMap.has(r.date)) dailyMap.set(r.date, { present: 0, total: 0 })
+      const d = dailyMap.get(r.date)!
+      d.total++
+      if (isPresent) d.present++
+    }
+
+    const employees = Array.from(empMap.values()).map(agg => ({
+      empId: agg.empId,
+      name: agg.name,
+      department: agg.department,
+      workingDays,
+      present: agg.present,
+      absent: agg.absent,
+      lop: agg.absent,
+      wfh: agg.wfh,
+      late: agg.late,
+      otHours: Math.round(agg.otHours * 10) / 10,
+      attendancePct: workingDays > 0 ? Math.round((agg.present / workingDays) * 100) : 0,
+    }))
 
     const dailyPct = Array.from({ length: daysInMonth }, (_, i) => {
       const day = new Date(year, mon - 1, i + 1).getDay()
-      if (day === 0 || day === 6) return 0 // weekend
+      if (day === 0 || day === 6) return 0
       const dateStr = `${month}-${String(i + 1).padStart(2, '0')}`
-      const row = dailyMap.get(dateStr)
-      if (!row || Number(row.total_count) === 0) return 0
-      return Math.round((Number(row.present_count) / Number(row.total_count)) * 100)
+      const entry = dailyMap.get(dateStr)
+      if (!entry || entry.total === 0) return 0
+      return Math.round((entry.present / entry.total) * 100)
     })
-
-    const employees = summaryRows.map(r => ({
-      empId:         String(r.emp_id ?? ''),
-      name:          String(r.full_name),
-      department:    String(r.department),
-      workingDays,
-      present:       Number(r.present),
-      absent:        Number(r.absent),
-      lop:           Number(r.absent),
-      wfh:           Number(r.wfh),
-      late:          Number(r.late),
-      otHours:       Number(r.ot_hours),
-      attendancePct: workingDays > 0 ? Math.round((Number(r.present) / workingDays) * 100) : 0,
-    }))
 
     return NextResponse.json({ employees, dailyPct, workingDays, month })
   } catch (err: unknown) {

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
+import { emitEvent } from '@/lib/ecosystem'
+import { logAudit } from '@/lib/audit'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -138,6 +140,14 @@ export async function POST(req: NextRequest) {
           { onConflict: 'employee_id', ignoreDuplicates: true }
         )
       if (exitErr) console.error('Failed to auto-create exit process', exitErr)
+    }
+
+    // Ecosystem event + audit (fire-and-forget)
+    const orgId = (session.user as any)?.orgId as string | undefined
+    const actorId = (session.user as any)?.id as string | undefined
+    if (orgId) {
+      emitEvent({ event_type: 'warning.issued', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: employee_id, payload: { employee_id, subject, total_warnings: totalWarnings, auto_termination: autoTermination } })
+      logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: 'created', module: 'warnings', entity_id: employee_id, summary: 'Warning issued to employee' })
     }
 
     return NextResponse.json(

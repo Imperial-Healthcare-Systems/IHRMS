@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { supabaseAdmin } from '@/lib/supabase'
-import sql, { ensureSchema } from '@/lib/pg'
 import { sendAnnouncementEmails } from '@/lib/mailer'
 
 async function fanOutNotification(
@@ -193,54 +192,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Could not identify publisher from session' }, { status: 400 })
     }
 
-    // Use direct PostgreSQL to bypass PostgREST schema cache entirely.
-    await ensureSchema()
+    const now = new Date().toISOString()
+    const { data: inserted, error: insertError } = await supabaseAdmin
+      .from('announcements')
+      .insert({
+        title,
+        content: text,
+        announcement_type: cat,
+        target_audience: dbAudience,
+        published_by: createdBy,
+        is_published: true,
+        published_at: now,
+        publish_at: now,
+        expires_at: expires_at ?? null,
+        priority: dbPriority,
+        is_pinned: is_pinned ?? false,
+        audience: dbAudience,
+        body: text,
+        created_by: createdBy,
+      })
+      .select()
+      .single()
 
-    // Live schema uses: content (NOT NULL), announcement_type, target_audience,
-    // published_by, is_published, published_at — different from the schema file.
-    console.log('[announcements POST] inserting:', { title, dbAudience, dbPriority, createdBy, is_pinned, expires_at })
-    try {
-      const now = new Date().toISOString()
-      const rows = await sql`
-        INSERT INTO announcements (
-          title, content, announcement_type, target_audience,
-          published_by, is_published, published_at, expires_at,
-          priority, is_pinned, audience, body, created_by
-        )
-        VALUES (
-          ${title},
-          ${text},
-          ${cat}::text,
-          ${dbAudience}::text,
-          ${createdBy}::uuid,
-          true,
-          ${now}::timestamptz,
-          ${expires_at ?? null},
-          ${dbPriority}::text,
-          ${is_pinned ?? false},
-          ${dbAudience}::text,
-          ${text},
-          ${createdBy}::uuid
-        )
-        RETURNING *
-      `
-      if (!rows.length) return NextResponse.json({ error: 'Insert returned no data' }, { status: 500 })
-
-      // Fan out in-app notifications to target employees (non-blocking)
-      // Resolve publisher display name for emails
-      const publisherName = await (async () => {
-        try {
-          const { data: pub } = await supabaseAdmin.from('employees').select('first_name, last_name').eq('id', createdBy).single()
-          return pub ? `${pub.first_name} ${pub.last_name}`.trim() : 'HR'
-        } catch { return 'HR' }
-      })()
-      fanOutNotification(title, text, cat, dbAudience, target_audience as string | undefined, publisherName)
-
-      return NextResponse.json({ data: rows[0] }, { status: 201 })
-    } catch (sqlErr) {
-      console.error('[announcements POST] SQL error:', sqlErr)
-      return NextResponse.json({ error: errMsg(sqlErr) }, { status: 500 })
+    if (insertError) {
+      console.error('[announcements POST] insert error:', insertError)
+      return NextResponse.json({ error: errMsg(insertError) }, { status: 500 })
     }
+
+    // Fan out in-app notifications to target employees (non-blocking)
+    const publisherName = await (async () => {
+      try {
+        const { data: pub } = await supabaseAdmin.from('employees').select('first_name, last_name').eq('id', createdBy).single()
+        return pub ? `${pub.first_name} ${pub.last_name}`.trim() : 'HR'
+      } catch { return 'HR' }
+    })()
+    fanOutNotification(title, text, cat, dbAudience, target_audience as string | undefined, publisherName)
+
+    return NextResponse.json({ data: inserted }, { status: 201 })
   } catch (err) {
     console.error('[announcements POST] error:', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })

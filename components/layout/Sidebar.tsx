@@ -11,6 +11,7 @@ import {
   UserPlus,
   Clock,
   Calendar,
+  CalendarClock,
   IndianRupee,
   Receipt,
   Star,
@@ -24,6 +25,11 @@ import {
   Settings,
   ChevronRight,
   X,
+  FileText,
+  Network,
+  GraduationCap,
+  HelpCircle,
+  ClipboardList,
 } from 'lucide-react'
 import { useSidebar } from './SidebarContext'
 
@@ -56,10 +62,12 @@ const navGroupConfigs: NavGroupConfig[] = [
   {
     title: 'Workforce',
     items: [
-      { label: 'Employees',   href: '/employees',  icon: Users,    roles: [...HR_ADMIN, 'operations_head', 'manager'] },
-      { label: 'Recruitment', href: '/recruitment', icon: UserPlus, roles: HR_ADMIN },
-      { label: 'Attendance',  href: '/attendance',  icon: Clock,    roles: ALL_ROLES },
-      { label: 'Leaves',      href: '/leaves',      icon: Calendar, roles: ALL_ROLES },
+      { label: 'Employees',   href: '/employees',  icon: Users,        roles: [...HR_ADMIN, 'operations_head', 'manager'] },
+      { label: 'Recruitment', href: '/recruitment', icon: UserPlus,     roles: HR_ADMIN },
+      { label: 'Attendance',  href: '/attendance',  icon: Clock,        roles: ALL_ROLES },
+      { label: 'Leaves',      href: '/leaves',      icon: Calendar,     roles: ALL_ROLES },
+      { label: 'Shifts',      href: '/shifts',      icon: CalendarClock, roles: [...HR_ADMIN, 'operations_head', 'manager'] },
+      { label: 'Org Chart',   href: '/org-chart',   icon: Network,      roles: ALL_ROLES },
     ],
   },
   {
@@ -72,8 +80,9 @@ const navGroupConfigs: NavGroupConfig[] = [
   {
     title: 'Performance',
     items: [
-      { label: 'Reviews',            href: '/performance', icon: Star,          roles: [...HR_ADMIN, 'operations_head', 'manager'] },
-      { label: 'Warnings & Actions', href: '/warnings',    icon: AlertTriangle, roles: [...HR_ADMIN, 'manager'] },
+      { label: 'Reviews',            href: '/performance', icon: Star,           roles: [...HR_ADMIN, 'operations_head', 'manager'] },
+      { label: 'Warnings & Actions', href: '/warnings',    icon: AlertTriangle,  roles: [...HR_ADMIN, 'manager'] },
+      { label: 'Training',           href: '/training',    icon: GraduationCap,  roles: ALL_ROLES },
     ],
   },
   {
@@ -86,11 +95,14 @@ const navGroupConfigs: NavGroupConfig[] = [
   {
     title: 'Admin',
     items: [
-      { label: 'Reports',       href: '/reports',       icon: BarChart3, roles: [...HR_ADMIN, 'operations_head'] },
-      { label: 'Compliance',    href: '/compliance',    icon: Shield,    roles: HR_ADMIN },
-      { label: 'Assets',        href: '/assets',        icon: Package,   roles: HR_ADMIN },
-      { label: 'Announcements', href: '/announcements', icon: Bell,      roles: ALL_ROLES },
-      { label: 'Settings',      href: '/settings',      icon: Settings,  roles: HR_ADMIN },
+      { label: 'Reports',       href: '/reports',       icon: BarChart3,    roles: [...HR_ADMIN, 'operations_head'] },
+      { label: 'Compliance',    href: '/compliance',    icon: Shield,       roles: HR_ADMIN },
+      { label: 'Assets',        href: '/assets',        icon: Package,      roles: HR_ADMIN },
+      { label: 'Documents',     href: '/documents',     icon: FileText,     roles: ALL_ROLES },
+      { label: 'Announcements', href: '/announcements', icon: Bell,         roles: ALL_ROLES },
+      { label: 'Helpdesk',      href: '/helpdesk',      icon: HelpCircle,   roles: ALL_ROLES },
+      { label: 'Audit Log',     href: '/audit-log',     icon: ClipboardList, roles: HR_ADMIN },
+      { label: 'Settings',      href: '/settings',      icon: Settings,     roles: HR_ADMIN },
     ],
   },
 ]
