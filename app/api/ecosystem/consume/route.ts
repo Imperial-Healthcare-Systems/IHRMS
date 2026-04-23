@@ -25,13 +25,15 @@ export async function POST(req: NextRequest) {
         // Example: notify HR when a deal closes (could trigger commission/bonus flow)
         const { employee_id, deal_value, deal_name } = payload ?? {}
         if (employee_id) {
-          await supabaseAdmin.from('notifications').insert({
-            recipient_id: employee_id,
-            title: 'Deal Closed — Bonus Eligible',
-            body: `Deal "${deal_name ?? 'N/A'}" worth ₹${(deal_value ?? 0).toLocaleString('en-IN')} has been closed. Your commission may be processed in the next payroll.`,
-            type: 'info',
-            created_at: new Date().toISOString(),
-          }).then(() => {}).catch(() => {})
+          void Promise.resolve(
+            supabaseAdmin.from('notifications').insert({
+              recipient_id: employee_id,
+              title: 'Deal Closed — Bonus Eligible',
+              body: `Deal "${deal_name ?? 'N/A'}" worth ₹${(deal_value ?? 0).toLocaleString('en-IN')} has been closed. Your commission may be processed in the next payroll.`,
+              type: 'info',
+              created_at: new Date().toISOString(),
+            })
+          ).catch(() => {})
         }
         break
       }
@@ -48,11 +50,12 @@ export async function POST(req: NextRequest) {
 
     // Mark event as processed in ecosystem_events table (if tracked)
     if (payload?.event_id) {
-      await supabaseAdmin
-        .from('ecosystem_events')
-        .update({ processed: true })
-        .eq('id', payload.event_id)
-        .then(() => {}).catch(() => {})
+      void Promise.resolve(
+        supabaseAdmin
+          .from('ecosystem_events')
+          .update({ processed: true })
+          .eq('id', payload.event_id)
+      ).catch(() => {})
     }
 
     return NextResponse.json({ received: true, event_type })
