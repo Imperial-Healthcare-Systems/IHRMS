@@ -12,9 +12,9 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
+function canManageShifts(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
   const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
+  return ['hr_admin', 'super_admin', 'admin', 'hr', 'manager', 'operations_head'].includes(role ?? '')
 }
 
 export async function GET(req: NextRequest) {
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     const employeeId = searchParams.get('employee_id')
     const orgId = (session.user as any)?.orgId as string | null
     const userId = (session.user as any)?.id as string
-    const isAdminUser = isAdmin(session)
+    const isAdminUser = canManageShifts(session)
 
     let query = supabaseAdmin
       .from('shift_schedules')
@@ -35,7 +35,8 @@ export async function GET(req: NextRequest) {
         employee:employees!employee_id(id, first_name, last_name, emp_id),
         shift:shifts!shift_id(id, name, start_time, end_time, days)
       `)
-      .order('effective_from', { ascending: false })
+      .order('work_date', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (!isAdminUser) query = query.eq('employee_id', userId)
     else if (employeeId) query = query.eq('employee_id', employeeId)
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!canManageShifts(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const body = await req.json()
     const { employee_id, shift_id, effective_from, effective_to } = body
@@ -66,13 +67,33 @@ export async function POST(req: NextRequest) {
 
     const orgId = (session.user as any)?.orgId as string | null
 
+    // Best-effort: remove any existing schedule for same employee+date to avoid duplicates
+    // Wrapped separately so a schema-cache miss on effective_from doesn't block the insert
+    try {
+      await supabaseAdmin
+        .from('shift_schedules')
+        .delete()
+        .eq('employee_id', employee_id)
+        .eq('work_date', effective_from)
+    } catch (_) { /* non-fatal — column may not exist yet in cache */ }
+
     const { data, error } = await supabaseAdmin
       .from('shift_schedules')
-      .insert({ employee_id, shift_id: shift_id ?? null, effective_from, effective_to: effective_to ?? null, org_id: orgId })
+      .insert({
+        employee_id,
+        shift_id:      shift_id ?? null,
+        work_date:     effective_from,        // pre-existing NOT NULL column
+        effective_from,
+        effective_to:  effective_to ?? null,
+        org_id:        orgId ?? null,
+      })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[shifts/schedule POST] insert error:', error)
+      return NextResponse.json({ error: error.message, details: error.details, hint: error.hint }, { status: 500 })
+    }
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })

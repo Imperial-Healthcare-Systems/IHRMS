@@ -430,6 +430,9 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
   const [designations, setDesignations] = useState<{ id: string; title: string }[]>([])
+  const [editShifts, setEditShifts]     = useState<{ id: string; name: string; start_time: string; end_time: string }[]>([])
+  const [shiftId, setShiftId]           = useState<string>('')
+  const [origShiftId, setOrigShiftId]   = useState<string>('')
 
   useEffect(() => {
     fetch('/api/designations')
@@ -437,6 +440,20 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
       .then(j => setDesignations((j.data ?? []).filter((d: any) => d.is_active !== false)))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    fetch('/api/shifts')
+      .then(r => r.json())
+      .then(j => setEditShifts((j.data ?? []).filter((s: any) => s.is_active !== false)))
+      .catch(() => {})
+    fetch(`/api/shifts/schedule?employee_id=${emp.id}`)
+      .then(r => r.json())
+      .then(j => {
+        const current = (j.data ?? [])[0]
+        if (current?.shift_id) { setShiftId(current.shift_id); setOrigShiftId(current.shift_id) }
+      })
+      .catch(() => {})
+  }, [emp.id])
 
   /* ── Salary state ── */
   const BLANK_SAL = { ctc_annual: '', basic: '', hra: '', conveyance: '', medical: '', special: '', lta: '', pf: '', esic: '', metro: true, effective_from: new Date().toISOString().slice(0, 10) }
@@ -521,6 +538,21 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Failed to save')
+
+      // Assign new shift schedule if shift changed
+      if (shiftId !== origShiftId) {
+        const shiftRes = await fetch('/api/shifts/schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employee_id: emp.id, shift_id: shiftId || null, effective_from: new Date().toISOString().slice(0, 10) }),
+        })
+        if (!shiftRes.ok) {
+          const shiftJson = await shiftRes.json().catch(() => ({}))
+          throw new Error(shiftJson.error ?? `Shift save failed (${shiftRes.status})`)
+        }
+        setOrigShiftId(shiftId)
+      }
+
       onSaved(json.data as ApiEmployee)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save')
@@ -657,6 +689,20 @@ function EditEmployeeForm({ emp, departments, onClose, onSaved }: {
               <select style={IS} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
                 {[['employee','Employee'],['manager','Manager'],['hr','HR'],['admin','Admin']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
               </select>
+            </div>
+            <div>
+              <label style={LS}>Shift</label>
+              <select style={IS} value={shiftId} onChange={e => setShiftId(e.target.value)}>
+                <option value="">— No shift assigned —</option>
+                {editShifts.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}{s.start_time && s.end_time ? ` (${s.start_time.slice(0, 5)} – ${s.end_time.slice(0, 5)})` : ''}
+                  </option>
+                ))}
+              </select>
+              {shiftId && shiftId !== origShiftId && (
+                <p style={{ fontSize: '0.75rem', color: '#d97706', marginTop: 4 }}>Shift change will take effect from today on save.</p>
+              )}
             </div>
           </div>
           <div style={{ padding: '16px 24px', borderTop: '1px solid var(--color-gray-100)', display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0 }}>
@@ -952,6 +998,7 @@ export default function EmployeesPage() {
   const [totalCount, setTotalCount]   = useState(0)
   const [loading, setLoading]         = useState(true)
   const [departments, setDepartments] = useState<Department[]>([])
+  const [shifts, setShifts]           = useState<{ id: string; name: string; start_time: string; end_time: string }[]>([])
 
   /* View / Edit modals */
   const [viewEmp, setViewEmp]         = useState<ApiEmployee | null>(null)
@@ -967,7 +1014,7 @@ export default function EmployeesPage() {
   const [form, setForm]               = useState({
     first_name: '', last_name: '', email: '', phone: '',
     department_id: '', designation_id: '', employment_type: 'full_time',
-    hire_date: '', work_location: '', work_type: 'office', role: 'employee',
+    hire_date: '', work_location: '', work_type: 'office', role: 'employee', shift_id: '',
   })
 
   const BLANK_SALARY = { ctc_annual: '', basic: '', hra: '', conveyance: '', medical: '', special: '', lta: '', pf: '', esic: '', metro: true, effective_from: new Date().toISOString().slice(0, 10) }
@@ -975,7 +1022,7 @@ export default function EmployeesPage() {
 
   function closAddModal() {
     setShowAdd(false); setAddStep(1); setNewEmpId(''); setNewEmpName('')
-    setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', work_type: 'office', role: 'employee' })
+    setForm({ first_name: '', last_name: '', email: '', phone: '', department_id: '', designation_id: '', employment_type: 'full_time', hire_date: '', work_location: '', work_type: 'office', role: 'employee', shift_id: '' })
     setSalary(BLANK_SALARY)
   }
 
@@ -1030,6 +1077,9 @@ export default function EmployeesPage() {
   }, [search, statusFilter, typeFilter, deptFilter, currentPage, departments])
 
   useEffect(() => { employeesApi.departments().then(r => setDepartments(r.data)).catch(console.error) }, [])
+  useEffect(() => {
+    fetch('/api/shifts').then(r => r.json()).then(j => setShifts(j.data ?? [])).catch(console.error)
+  }, [])
   useEffect(() => { fetchEmployees() }, [fetchEmployees])
 
   /* Adapt API shape → local shape for existing UI */
@@ -1077,6 +1127,20 @@ export default function EmployeesPage() {
       const empName = `${form.first_name} ${form.last_name}`.trim()
       setNewEmpId(empId)
       setNewEmpName(empName)
+
+      // Assign shift if selected
+      if (form.shift_id && empId) {
+        const shiftRes = await fetch('/api/shifts/schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employee_id: empId, shift_id: form.shift_id, effective_from: form.hire_date }),
+        })
+        if (!shiftRes.ok) {
+          const shiftJson = await shiftRes.json().catch(() => ({}))
+          toast.error(`Employee saved but shift assignment failed: ${shiftJson.error ?? shiftRes.status}`)
+        }
+      }
+
       toast.success('Employee added! Now set up salary.')
       fetchEmployees()
       setAddStep(2)
@@ -1662,6 +1726,20 @@ export default function EmployeesPage() {
                         </select>
                         <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                       </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={LBL}>Shift Assignment *</label>
+                    <div style={{ position: 'relative' }}>
+                      <select required value={form.shift_id} onChange={e => setForm(f => ({ ...f, shift_id: e.target.value }))} style={SEL}>
+                        <option value="">Select a shift…</option>
+                        {shifts.filter(s => (s as any).is_active !== false).map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}{s.start_time && s.end_time ? ` (${s.start_time.slice(0, 5)} – ${s.end_time.slice(0, 5)})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <svg style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#9ca3af' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                     </div>
                   </div>
                 </div>

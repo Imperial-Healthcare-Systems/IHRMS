@@ -200,6 +200,7 @@ export interface CreateEmployeePayload {
   hra?: number; special_allowance?: number; pf_applicable?: boolean; esic_applicable?: boolean
   pt_applicable?: boolean; pan_number?: string; aadhaar_number?: string; tax_regime?: string
   reporting_manager_id?: string; role?: string; gender?: string; date_of_birth?: string
+  shift_id?: string
 }
 
 export const employeesApi = {
