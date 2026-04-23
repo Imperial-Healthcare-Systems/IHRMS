@@ -12,6 +12,28 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
+const FULL_ACCESS_ROLES  = ['hr_admin', 'super_admin', 'admin', 'hr']
+const MANAGER_ROLES      = ['manager', 'operations_head']
+
+/** Returns true if today is past the 15th of the month after `dateStr`. */
+function isPastDeadline(dateStr: string): boolean {
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return false
+  const deadlineMonth = d.getMonth() + 1  // 0-indexed → next month (may wrap to 0)
+  const deadlineYear  = deadlineMonth === 12 ? d.getFullYear() + 1 : d.getFullYear()
+  const normalizedMonth = deadlineMonth % 12
+  const deadline = new Date(deadlineYear, normalizedMonth, 15, 23, 59, 59, 999)
+  return new Date() > deadline
+}
+
+function deadlineLabel(dateStr: string): string {
+  const d = new Date(dateStr)
+  const deadlineMonth = d.getMonth() + 1
+  const deadlineYear  = deadlineMonth === 12 ? d.getFullYear() + 1 : d.getFullYear()
+  const deadline = new Date(deadlineYear, deadlineMonth % 12, 15)
+  return deadline.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -23,21 +45,30 @@ export async function GET(req: NextRequest) {
     const userRole    = (session.user as any)?.role
     const userId      = (session.user as any)?.id
 
-    // Only true HR roles can review all employees' requests
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
-
     let query = supabaseAdmin
       .from('attendance_regularizations')
       .select('*, employee:employees!attendance_regularizations_employee_id_fkey(id, first_name, last_name, emp_id, employee_code)', { count: 'exact' })
       .order('created_at', { ascending: false })
 
-    if (employee_id && FULL_ACCESS_ROLES.includes(userRole)) {
-      // HR filtering by specific employee
-      query = query.eq('employee_id', employee_id)
-    } else if (!FULL_ACCESS_ROLES.includes(userRole)) {
-      // Non-HR roles see only their own requests
+    if (FULL_ACCESS_ROLES.includes(userRole)) {
+      if (employee_id) query = query.eq('employee_id', employee_id)
+      // else no filter — HR sees all
+    } else if (MANAGER_ROLES.includes(userRole)) {
+      // Scope to direct reports only
+      const { data: team } = await supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('reporting_manager_id', userId)
+        .eq('status', 'active')
+      const teamIds = (team ?? []).map((e: any) => e.id as string)
+      if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
+      query = query.in('employee_id', teamIds)
+      if (employee_id && teamIds.includes(employee_id)) query = query.eq('employee_id', employee_id)
+    } else {
+      // Regular employee sees only their own
       query = query.eq('employee_id', userId)
     }
+
     if (status) query = query.eq('status', status)
 
     const { data, error, count } = await query
@@ -60,9 +91,16 @@ export async function POST(req: NextRequest) {
     if (!date)   return NextResponse.json({ error: 'date is required' },   { status: 400 })
     if (!reason) return NextResponse.json({ error: 'reason is required' }, { status: 400 })
 
+    // Enforce 15th-of-next-month deadline
+    if (isPastDeadline(date)) {
+      return NextResponse.json(
+        { error: `Regularization deadline has passed. Requests for ${date} must be submitted by the 15th of the following month (${deadlineLabel(date)}).` },
+        { status: 400 }
+      )
+    }
+
     const targetEmployee = employee_id ?? (session.user as any)?.id
 
-    // requested_in / requested_out are NOT NULL in the schema — use midnight as fallback
     const requestedIn  = requested_punch_in  || '09:00'
     const requestedOut = requested_punch_out || '18:00'
 
@@ -71,11 +109,8 @@ export async function POST(req: NextRequest) {
       date,
       reason,
     }
-    // Only include optional columns if they have values
     if (requestedIn  && requestedIn  !== '09:00') payload.requested_punch_in  = requestedIn
     if (requestedOut && requestedOut !== '18:00') payload.requested_punch_out = requestedOut
-
-    console.log('[regularization POST] payload:', payload)
 
     const { data, error } = await supabaseAdmin
       .from('attendance_regularizations')
@@ -100,7 +135,29 @@ export async function PATCH(req: NextRequest) {
     const { id, status, rejection_reason } = body
     if (!id || !status) return NextResponse.json({ error: 'id and status are required' }, { status: 400 })
 
-    // Build update payload — only include columns that exist in the schema
+    const userRole = (session.user as any)?.role
+    const userId   = (session.user as any)?.id
+
+    // Fetch the request to get the employee_id for authorization
+    const { data: existing, error: fetchErr } = await supabaseAdmin
+      .from('attendance_regularizations')
+      .select('id, employee_id')
+      .eq('id', id)
+      .single()
+    if (fetchErr || !existing) return NextResponse.json({ error: 'Regularization request not found' }, { status: 404 })
+
+    // Authorization: HR/admin can approve anyone; manager can only approve their direct reports
+    if (!FULL_ACCESS_ROLES.includes(userRole)) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees')
+        .select('reporting_manager_id')
+        .eq('id', (existing as any).employee_id)
+        .single()
+      if (!emp || (emp as any).reporting_manager_id !== userId) {
+        return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
+      }
+    }
+
     const updatePayload: Record<string, unknown> = { status }
     if (rejection_reason != null) updatePayload.rejection_reason = rejection_reason
 
@@ -115,7 +172,6 @@ export async function PATCH(req: NextRequest) {
 
     const reg = data as any
 
-    // If approved, update the actual attendance record
     if (status === 'approved') {
       await supabaseAdmin
         .from('attendance_daily')
@@ -128,7 +184,6 @@ export async function PATCH(req: NextRequest) {
         .eq('date', reg.date)
     }
 
-    // Send in-app notification to the employee (Supabase REST — no cold TCP)
     if (reg.employee_id) {
       try {
         const dateLabel = reg.date

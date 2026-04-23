@@ -32,12 +32,35 @@ export async function GET(req: NextRequest) {
     const status    = searchParams.get('status')
     const exit_type = searchParams.get('exit_type')
     const limit     = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
+    const userRole  = (session.user as any)?.role
+    const userId    = (session.user as any)?.id
+
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
+    const MANAGER_ROLES     = ['manager']
+
+    let teamIds: string[] = []
+    if (MANAGER_ROLES.includes(userRole)) {
+      const { data: team } = await supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('reporting_manager_id', userId)
+        .eq('status', 'active')
+      teamIds = (team ?? []).map((e: any) => e.id as string)
+      if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
+    }
 
     let query = supabaseAdmin
       .from('exit_processes')
       .select(EXIT_SELECT, { count: 'exact' })
       .order('created_at', { ascending: false })
       .limit(limit)
+
+    if (MANAGER_ROLES.includes(userRole)) {
+      query = query.in('employee_id', teamIds)
+    } else if (!FULL_ACCESS_ROLES.includes(userRole)) {
+      query = query.eq('employee_id', userId)
+    }
+    // HR/admin: no employee filter — see all
 
     if (status)    query = query.eq('status', status)
     if (exit_type) query = query.eq('exit_type', exit_type)
@@ -118,6 +141,88 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
     console.error('[exit POST catch]', errMsg(err))
+    return NextResponse.json({ error: errMsg(err) }, { status: 500 })
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions)
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const body = await req.json()
+    const { id, action, rejection_reason } = body
+    if (!id || !action) return NextResponse.json({ error: 'id and action are required' }, { status: 400 })
+    if (!['approve', 'reject'].includes(action)) {
+      return NextResponse.json({ error: 'action must be approve or reject' }, { status: 400 })
+    }
+
+    const userRole = (session.user as any)?.role
+    const userId   = (session.user as any)?.id
+    const orgId    = (session.user as any)?.orgId as string | undefined
+
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
+    const MANAGER_ROLES     = ['manager']
+
+    // Fetch exit process to verify authorization
+    const { data: exitRow, error: fetchErr } = await supabaseAdmin
+      .from('exit_processes')
+      .select('id, employee_id, exit_type, status')
+      .eq('id', id)
+      .single()
+    if (fetchErr || !exitRow) return NextResponse.json({ error: 'Exit record not found' }, { status: 404 })
+
+    if (!FULL_ACCESS_ROLES.includes(userRole)) {
+      if (MANAGER_ROLES.includes(userRole)) {
+        const { data: emp } = await supabaseAdmin
+          .from('employees')
+          .select('reporting_manager_id')
+          .eq('id', (exitRow as any).employee_id)
+          .single()
+        if (!emp || (emp as any).reporting_manager_id !== userId) {
+          return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
+        }
+      } else {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
+    const newStatus = action === 'approve' ? 'approved' : 'rejected'
+    const updatePayload: Record<string, unknown> = {
+      status: newStatus,
+      reviewed_by: userId,
+      reviewed_at: new Date().toISOString(),
+    }
+    if (rejection_reason) updatePayload.rejection_reason = rejection_reason
+
+    const { data, error } = await supabaseAdmin
+      .from('exit_processes')
+      .update(updatePayload)
+      .eq('id', id)
+      .select(EXIT_SELECT)
+      .single()
+    if (error) { console.error('[exit PATCH]', error); throw error }
+
+    // Notify the employee
+    try {
+      const isApproved = action === 'approve'
+      await supabaseAdmin.from('notifications').insert({
+        recipient_id: (exitRow as any).employee_id,
+        title: isApproved ? 'Resignation Accepted' : 'Resignation Rejected',
+        body: isApproved
+          ? 'Your resignation has been accepted. Please check your exit details.'
+          : `Your resignation was not approved.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`,
+        type: isApproved ? 'info' : 'warning',
+      })
+    } catch (e) { console.warn('[exit PATCH] notification non-fatal:', e) }
+
+    if (orgId) {
+      logAudit({ org_id: orgId, actor_id: userId ?? 'unknown', action: action === 'approve' ? 'approved' : 'rejected', module: 'exit', entity_id: id, summary: `Exit process ${newStatus}` })
+    }
+
+    return NextResponse.json({ data })
+  } catch (err) {
+    console.error('[exit PATCH catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

@@ -91,7 +91,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const body = await req.json()
     const { action, remarks } = body // action: 'approve' | 'reject' | 'cancel'
     const approverId = (session.user as any)?.id
+    const userRole   = (session.user as any)?.role
     const now = new Date().toISOString()
+
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
+
+    // For approve/reject: verify caller is HR/admin or the employee's reporting manager
+    if (action === 'approve' || action === 'reject') {
+      if (!FULL_ACCESS_ROLES.includes(userRole)) {
+        const { data: leaveRow } = await supabaseAdmin
+          .from('leave_requests')
+          .select('employee_id')
+          .eq('id', id)
+          .single()
+        if (!leaveRow) return NextResponse.json({ error: 'Leave request not found' }, { status: 404 })
+
+        const { data: emp } = await supabaseAdmin
+          .from('employees')
+          .select('reporting_manager_id')
+          .eq('id', (leaveRow as any).employee_id)
+          .single()
+        if (!emp || (emp as any).reporting_manager_id !== approverId) {
+          return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
+        }
+      }
+    }
 
     if (action === 'cancel') {
       const { data, error } = await supabaseAdmin

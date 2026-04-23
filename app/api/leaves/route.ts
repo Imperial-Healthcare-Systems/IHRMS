@@ -33,7 +33,8 @@ export async function GET(req: NextRequest) {
     const date_from = sp2.get('date_from')
     const date_to   = sp2.get('date_to')
 
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head', 'manager']
+    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
+    const MANAGER_ROLES     = ['manager']
 
     let query = supabaseAdmin
       .from('leave_requests')
@@ -47,10 +48,24 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(limit)
 
-    if (employee_id) query = query.eq('employee_id', employee_id)
-    else if (!FULL_ACCESS_ROLES.includes(userRole)) {
+    if (FULL_ACCESS_ROLES.includes(userRole)) {
+      if (employee_id) query = query.eq('employee_id', employee_id)
+      // else no filter — HR sees all
+    } else if (MANAGER_ROLES.includes(userRole)) {
+      // Scope to direct reports only
+      const { data: team } = await supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('reporting_manager_id', userId)
+        .eq('status', 'active')
+      const teamIds = (team ?? []).map((e: any) => e.id as string)
+      if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
+      query = query.in('employee_id', teamIds)
+      if (employee_id && teamIds.includes(employee_id)) query = query.eq('employee_id', employee_id)
+    } else {
       query = query.eq('employee_id', userId)
     }
+
     if (status)     query = query.eq('status', status)
     if (leave_type) query = query.eq('leave_type', leave_type)
     if (year)       query = query.gte('from_date', `${year}-01-01`).lte('from_date', `${year}-12-31`)
