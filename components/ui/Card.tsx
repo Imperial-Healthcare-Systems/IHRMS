@@ -18,7 +18,7 @@ export function Card({ interactive, glass, noPad, className = '', children, ...p
   return <div className={classes} {...props}>{children}</div>
 }
 
-interface CardHeaderProps extends HTMLAttributes<HTMLDivElement> {
+interface CardHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   title: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
