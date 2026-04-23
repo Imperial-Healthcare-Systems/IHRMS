@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
     const dailyMap = new Map<string, { present: number; total: number }>()
 
     for (const r of records ?? []) {
-      const emp = r.employee as { id: string; first_name: string; last_name: string; emp_id?: string; department?: { name: string } | null } | null
+      const emp = r.employee as unknown as { id: string; first_name: string; last_name: string; emp_id?: string; department?: { name: string } | null } | null
       if (!emp) continue
 
       const empId = emp.emp_id ?? emp.id
