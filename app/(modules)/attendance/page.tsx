@@ -397,15 +397,18 @@ export default function AttendancePage() {
   }, [myUserId, todayISO])
 
   // Fetch employee's work type for geofencing
+  // Default to 'home' (no geofencing) when work_type is missing — admins/HR/org-owners
+  // typically have no work_type set and should not be subject to office geofencing.
+  // Only employees explicitly tagged 'office' or 'hybrid' are location-blocked.
   useEffect(() => {
     if (!myUserId) return
     fetch(`/api/employees/${myUserId}`)
       .then(r => r.json())
       .then(j => {
-        const wt = (j.data?.work_type ?? 'office') as string
-        setMyWorkType(wt === 'home' ? 'home' : wt === 'hybrid' ? 'hybrid' : 'office')
+        const wt = (j.data?.work_type ?? 'home') as string
+        setMyWorkType(wt === 'office' ? 'office' : wt === 'hybrid' ? 'hybrid' : 'home')
       })
-      .catch(() => {})
+      .catch(() => setMyWorkType('home'))
   }, [myUserId])
 
   // Proactively check distance from office whenever geo-fence applies

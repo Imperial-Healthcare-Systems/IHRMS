@@ -11,23 +11,37 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const session = await getServerSession(authOptions)
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data, error } = await supabaseAdmin
+    // Try rich query first; fall back to plain select if reporting_manager FK isn't resolvable
+    let { data, error } = await supabaseAdmin
       .from('employees')
       .select(`
         *,
-        department:departments(*),
+        department:departments!employees_department_id_fkey(*),
         designation:designations(*),
-        reporting_manager:employees!manager_id(id, first_name, last_name, emp_id)
+        reporting_manager:employees!reporting_manager_id(id, first_name, last_name, emp_id)
       `)
       .eq('id', id)
       .single()
 
+    if (error && error.code !== 'PGRST116') {
+      console.warn('[employees GET] rich select failed, falling back:', error.message)
+      const fallback = await supabaseAdmin
+        .from('employees')
+        .select('*, department:departments!employees_department_id_fkey(*), designation:designations(*)')
+        .eq('id', id)
+        .single()
+      data = fallback.data
+      error = fallback.error
+    }
+
     if (error) {
       if (error.code === 'PGRST116') return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+      console.error('[employees GET]', error)
       throw error
     }
     return NextResponse.json({ data })
   } catch (err: unknown) {
+    console.error('[employees GET catch]', err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
   }
 }
@@ -74,7 +88,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const { data: rich } = await supabaseAdmin
       .from('employees')
-      .select('*, department:departments(id, name, code), designation:designations(id, title)')
+      .select('*, department:departments!employees_department_id_fkey(id, name, code), designation:designations(id, title)')
       .eq('id', id)
       .single()
 
