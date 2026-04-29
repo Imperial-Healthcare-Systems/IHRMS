@@ -81,7 +81,11 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const isAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    const role    = (session.user as Record<string, unknown>)?.role as string | undefined
+    const HR_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+    if (!isAdmin && !HR_ROLES.includes(role ?? '')) {
+      return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    }
 
     const body = await req.json()
     const { name, cycle_type, period_from, period_to, due_date, description } = body
@@ -96,8 +100,9 @@ export async function POST(req: NextRequest) {
     }
 
     const createdBy = (session.user as Record<string, unknown>)?.id as string | undefined
+    const orgId     = (session.user as Record<string, unknown>)?.orgId as string | undefined
 
-    const { data, error } = await supabaseAdmin
+    const { data: cycle, error } = await supabaseAdmin
       .from('review_cycles')
       .insert({ name, cycle_type, period_from, period_to, due_date: due_date ?? null, description: description ?? null, status: 'active', created_by: createdBy ?? null })
       .select()
@@ -108,7 +113,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
 
-    return NextResponse.json({ data: { ...data, participants: 0, completion: 0 } }, { status: 201 })
+    // Auto-generate draft performance_reviews for every active employee with a reporting manager.
+    // This is what makes a cycle actually have participants — without it the cycle is empty.
+    let participantCount = 0
+    try {
+      let empQuery = supabaseAdmin
+        .from('employees')
+        .select('id, reporting_manager_id')
+        .eq('status', 'active')
+        .not('reporting_manager_id', 'is', null)
+      if (orgId) empQuery = empQuery.eq('org_id', orgId)
+
+      const { data: employees } = await empQuery
+
+      if (employees && employees.length > 0) {
+        const reviewRows = employees.map((e: any) => ({
+          employee_id: e.id,
+          reviewer_id: e.reporting_manager_id,
+          cycle:       cycle_type,
+          cycle_id:    cycle.id,
+          review_period_from: period_from,
+          review_period_to:   period_to,
+          status:      'draft',
+          goals:       [],
+          kra_scores:  {},
+        }))
+
+        const { error: insErr } = await supabaseAdmin
+          .from('performance_reviews')
+          .insert(reviewRows)
+
+        if (insErr) console.warn('[cycles POST] auto-review insert non-fatal:', insErr.message)
+        else participantCount = reviewRows.length
+      }
+    } catch (autoErr) {
+      console.warn('[cycles POST] auto-review generation failed (non-fatal):', autoErr)
+    }
+
+    return NextResponse.json({ data: { ...cycle, participants: participantCount, completion: 0 } }, { status: 201 })
   } catch (err) {
     console.error('[cycles POST catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })

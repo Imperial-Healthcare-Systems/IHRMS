@@ -73,9 +73,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
     const isAdmin       = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+    const role          = (session.user as Record<string, unknown>)?.role as string | undefined
+    const HR_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+    const isHr          = HR_ROLES.includes(role ?? '')
     const isParticipant = current.employee_id === sessionUserId || current.reviewer_id === sessionUserId
 
-    if (!isAdmin && !isParticipant) {
+    if (!isAdmin && !isHr && !isParticipant) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

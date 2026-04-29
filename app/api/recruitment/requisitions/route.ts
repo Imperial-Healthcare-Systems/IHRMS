@@ -24,26 +24,33 @@ export async function GET(req: NextRequest) {
     const limit         = Math.min(parseInt(searchParams.get('limit') ?? '50'), 500)
     const offset        = parseInt(searchParams.get('offset') ?? '0')
 
-    let query = supabaseAdmin
-      .from('job_requisitions')
-      .select(`
-        id, title, employment_type, no_of_positions, filled_positions,
-        location, min_experience_years, max_experience_years,
-        min_ctc, max_ctc, skills_required, job_description,
-        status, priority, target_date,
-        department:departments(id, name, code),
-        designation:designations(id, title),
-        raised_by:employees(id, first_name, last_name, emp_id),
-        created_at, updated_at
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+    const buildQuery = (deptHint: string) => {
+      let q = supabaseAdmin
+        .from('job_requisitions')
+        .select(`
+          id, title, employment_type, no_of_positions, filled_positions,
+          location, min_experience_years, max_experience_years,
+          min_ctc, max_ctc, skills_required, job_description,
+          status, priority, target_date,
+          department:${deptHint}(id, name, code),
+          designation:designations(id, title),
+          created_at, updated_at
+        `, { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1)
+      if (status)        q = q.eq('status', status)
+      if (department_id) q = q.eq('department_id', department_id)
+      if (priority)      q = q.eq('priority', priority)
+      return q
+    }
 
-    if (status)        query = query.eq('status', status)
-    if (department_id) query = query.eq('department_id', department_id)
-    if (priority)      query = query.eq('priority', priority)
-
-    const { data, error, count } = await query
+    // Try plain hint first; if PostgREST throws ambiguity, retry with explicit FK name
+    let { data, error, count } = await buildQuery('departments')
+    if (error && error.code === 'PGRST201') {
+      console.warn('[requisitions GET] departments ambiguous, retrying with explicit FK')
+      const retry = await buildQuery('departments!job_requisitions_department_id_fkey')
+      data = retry.data; error = retry.error; count = retry.count
+    }
     if (error) {
       console.error('[requisitions GET]', error)
       return NextResponse.json({ error: errMsg(error) }, { status: 500 })

@@ -19,7 +19,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const isAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    const role    = (session.user as Record<string, unknown>)?.role as string | undefined
+    const HR_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
+    if (!isAdmin && !HR_ROLES.includes(role ?? '')) {
+      return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    }
 
     const body = await req.json()
     const { status } = body

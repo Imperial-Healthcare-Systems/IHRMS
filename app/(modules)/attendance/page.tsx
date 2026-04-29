@@ -733,6 +733,59 @@ export default function AttendancePage() {
 
       <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
+        {/* ── Mobile-only Punch In/Out (topbar actions are hidden on mobile) ── */}
+        <div className="flex flex-col sm:hidden" style={{ background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 'var(--radius-lg)', padding: '12px', marginBottom: 16, gap: 10 }}>
+          {/* Hybrid WFH toggle */}
+          {myWorkType === 'hybrid' && !hasPunchedIn && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: 'var(--color-gray-700)', cursor: 'pointer', padding: '6px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-gray-300)', background: isWfhToday ? '#eff6ff' : '#fff' }}>
+              <input type="checkbox" checked={isWfhToday} onChange={e => setIsWfhToday(e.target.checked)} style={{ width: 14, height: 14, accentColor: '#1d4ed8', cursor: 'pointer' }} />
+              <Home size={13} style={{ color: isWfhToday ? '#1d4ed8' : 'inherit' }} />
+              Working from home today
+            </label>
+          )}
+
+          {/* Geo status indicator */}
+          {myWorkType !== null && (myWorkType === 'office' || (myWorkType === 'hybrid' && !isWfhToday)) && !hasPunchedIn && (() => {
+            if (geoChecking)  return <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 'var(--radius-md)', padding: '5px 10px' }}><MapPin size={12} />Checking location…</span>
+            if (geoBlocked)   return <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '5px 10px' }}><MapPin size={12} />Location access denied</span>
+            if (officeDistKm !== null && officeDistKm > OFFICE_RADIUS_KM) return <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--radius-md)', padding: '5px 10px' }}><MapPin size={12} />{officeDistKm.toFixed(1)} km — out of range</span>
+            if (officeDistKm !== null && officeDistKm <= OFFICE_RADIUS_KM) return <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', padding: '5px 10px' }}><MapPin size={12} />{officeDistKm.toFixed(2)} km from office ✓</span>
+            return <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 'var(--radius-md)', padding: '5px 10px' }}><MapPin size={12} />Within 2 km required</span>
+          })()}
+
+          {/* Punch buttons row */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn btn-outline btn-sm"
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={handlePunchOut}
+              disabled={punchingOut || !hasPunchedIn || hasPunchedOut || loadingAttendance}
+            >
+              <Clock size={14} />
+              {punchingOut ? 'Punching Out…' : hasPunchedOut ? 'Punched Out ✓' : 'Punch Out'}
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={handlePunchIn}
+              disabled={
+                punchingIn || hasPunchedIn || loadingAttendance ||
+                (myWorkType !== 'home' && myWorkType !== null && geoBlocked) ||
+                (myWorkType !== null && (myWorkType === 'office' || (myWorkType === 'hybrid' && !isWfhToday)) && officeDistKm !== null && officeDistKm > OFFICE_RADIUS_KM)
+              }
+            >
+              <Clock size={14} />
+              {punchingIn ? 'Punching In…' : hasPunchedIn ? 'Punched In ✓' : 'Punch In'}
+            </button>
+          </div>
+
+          {/* Download report — full width below */}
+          <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={downloadReport}>
+            <Download size={14} />
+            Download Report
+          </button>
+        </div>
+
         {/* ── Summary Cards ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ gap: 12, marginBottom: 28 }}>
           {SUMMARY_CARDS.map((s) => (
@@ -763,7 +816,9 @@ export default function AttendancePage() {
                 fontSize: '0.875rem',
                 fontWeight: 600,
                 background: 'none',
-                border: 'none',
+                borderTop: 0,
+                borderLeft: 0,
+                borderRight: 0,
                 borderBottom: activeTab === t.key ? '2px solid var(--color-imperial-blue)' : '2px solid transparent',
                 marginBottom: '-2px',
                 color: activeTab === t.key ? 'var(--color-imperial-blue)' : 'var(--color-gray-500)',

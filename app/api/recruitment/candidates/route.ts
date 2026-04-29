@@ -49,6 +49,11 @@ export async function GET(req: NextRequest) {
     const { data, error, count } = await query
     if (error) {
       console.error('[candidates GET]', error)
+      // Schema-mismatch (missing column / table) → return empty rather than 500
+      // so the UI can keep rendering. Run the SQL migration to fix root cause.
+      if (error.code === '42703' || error.code === '42P01' || error.code === 'PGRST200') {
+        return NextResponse.json({ data: [], count: 0, limit, offset, schema_warning: error.message })
+      }
       return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
 

@@ -19,20 +19,28 @@ export async function GET(_req: NextRequest) {
 
     const orgId = (_req as any).orgId ?? (session.user as any)?.orgId as string | null
 
-    let query = supabaseAdmin
-      .from('employees')
-      .select(`
-        id, first_name, last_name, emp_id, role, avatar_url, status,
-        manager_id,
-        department:departments!department_id(id, name),
-        designation:designations!designation_id(id, title)
-      `)
-      .eq('status', 'active')
-      .order('first_name')
+    const buildQuery = (deptHint: string) => {
+      let q = supabaseAdmin
+        .from('employees')
+        .select(`
+          id, first_name, last_name, emp_id, role, avatar_url, status,
+          manager_id:reporting_manager_id,
+          department:${deptHint}(id, name),
+          designation:designations!designation_id(id, title)
+        `)
+        .eq('status', 'active')
+        .order('first_name')
+      if (orgId) q = (q as any).eq('org_id', orgId)
+      return q
+    }
 
-    if (orgId) query = (query as any).eq('org_id', orgId)
-
-    const { data, error } = await query
+    // Try plain hint first; if PostgREST throws ambiguity, retry with explicit FK
+    let { data, error } = await buildQuery('departments!department_id')
+    if (error && (error.code === 'PGRST201' || error.code === 'PGRST200')) {
+      console.warn('[org-chart] departments hint failed, retrying with explicit FK')
+      const retry = await buildQuery('departments!employees_department_id_fkey')
+      data = retry.data; error = retry.error
+    }
     if (error) throw error
 
     const employees = (data ?? []) as Record<string, unknown>[]

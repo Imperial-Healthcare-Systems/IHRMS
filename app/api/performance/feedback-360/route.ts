@@ -29,27 +29,33 @@ export async function GET(req: NextRequest) {
     const userId = (session.user as any)?.id as string
     const isAdminUser = isAdmin(session)
 
-    let query = supabaseAdmin
-      .from('feedback_360')
-      .select(`
-        id, rating, comments, relationship, is_anonymous, created_at,
-        subject:employees!subject_id(id, first_name, last_name, emp_id),
-        reviewer:employees!reviewer_id(id, first_name, last_name)
-      `)
-      .order('created_at', { ascending: false })
+    const buildQuery = (withJoins: boolean) => {
+      const select = withJoins
+        ? `id, rating, comments, relationship, is_anonymous, created_at,
+           subject:employees!subject_id(id, first_name, last_name, emp_id),
+           reviewer:employees!reviewer_id(id, first_name, last_name)`
+        : 'id, rating, comments, relationship, is_anonymous, created_at, subject_id, reviewer_id'
 
-    if (orgId) query = query.eq('org_id', orgId)
+      let q = supabaseAdmin
+        .from('feedback_360')
+        .select(select)
+        .order('created_at', { ascending: false })
 
-    if (subjectId) {
-      query = query.eq('subject_id', subjectId)
-    } else if (!isAdminUser) {
-      query = query.or(`subject_id.eq.${userId},reviewer_id.eq.${userId}`)
+      if (orgId) q = q.eq('org_id', orgId)
+      if (subjectId)        q = q.eq('subject_id', subjectId)
+      else if (!isAdminUser) q = q.or(`subject_id.eq.${userId},reviewer_id.eq.${userId}`)
+      if (reviewerId)       q = q.eq('reviewer_id', reviewerId)
+      return q
     }
 
-    if (reviewerId) query = query.eq('reviewer_id', reviewerId)
-
-    const { data, error } = await query
+    let { data, error } = await buildQuery(true)
+    if (error && (error.code === 'PGRST200' || error.code === 'PGRST201')) {
+      console.warn('[feedback-360 GET] FK hints failed, retrying without joins:', error.message)
+      const retry = await buildQuery(false)
+      data = retry.data; error = retry.error
+    }
     if (error) {
+      console.error('[feedback-360 GET]', error)
       if (error.code === '42P01') return NextResponse.json({ data: [] })
       throw error
     }
@@ -63,6 +69,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ data: result })
   } catch (err) {
+    console.error('[feedback-360 GET catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
@@ -73,9 +80,11 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
-    const { subject_id, rating, comments, relationship, is_anonymous } = body
+    // Accept both subject_id and subject_employee_id for backward compatibility
+    const { subject_id, subject_employee_id, rating, comments, relationship, is_anonymous } = body
+    const subjectId = subject_id ?? subject_employee_id
 
-    if (!subject_id || rating === undefined) {
+    if (!subjectId || rating === undefined) {
       return NextResponse.json({ error: 'subject_id and rating are required' }, { status: 400 })
     }
     if (rating < 1 || rating > 5) {
@@ -83,29 +92,40 @@ export async function POST(req: NextRequest) {
     }
 
     const reviewerId = (session.user as any)?.id as string
-    if (reviewerId === subject_id) {
+    if (reviewerId === subjectId) {
       return NextResponse.json({ error: 'Cannot submit feedback for yourself' }, { status: 400 })
     }
 
     const orgId = (session.user as any)?.orgId as string | null
 
+    // review_period is NOT NULL on the pre-existing schema — derive a sensible default
+    // (current quarter, e.g. "2026-Q2") if not supplied by the client.
+    const now = new Date()
+    const quarter = Math.ceil((now.getMonth() + 1) / 3)
+    const reviewPeriod = body.review_period ?? `${now.getFullYear()}-Q${quarter}`
+
     const { data, error } = await supabaseAdmin
       .from('feedback_360')
       .insert({
-        subject_id,
+        subject_id: subjectId,
         reviewer_id: reviewerId,
         rating,
-        comments: comments ?? null,
-        relationship: relationship ?? 'peer',
-        is_anonymous: is_anonymous ?? false,
-        org_id: orgId,
+        comments:      comments ?? null,
+        relationship:  relationship ?? 'peer',
+        is_anonymous:  is_anonymous ?? false,
+        review_period: reviewPeriod,
+        org_id:        orgId,
       })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[feedback-360 POST]', error)
+      return NextResponse.json({ error: errMsg(error), code: error.code, details: error.details }, { status: 500 })
+    }
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
+    console.error('[feedback-360 POST catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

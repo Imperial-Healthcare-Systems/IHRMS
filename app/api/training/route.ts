@@ -27,24 +27,51 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status')
     const orgId = (session.user as any)?.orgId as string | null
 
-    let query = supabaseAdmin
-      .from('training_courses')
-      .select(`
-        id, title, description, trainer, start_date, end_date, status, org_id, created_at,
-        enrollments:training_enrollments(id, employee_id, status, completed_at)
-      `)
-      .order('start_date', { ascending: false })
+    const buildQuery = (withEnrollments: boolean) => {
+      const select = withEnrollments
+        ? `id, title, description, trainer, start_date, end_date, status, org_id, created_at,
+           enrollments:training_enrollments(id, employee_id, status, completed_at)`
+        : 'id, title, description, trainer, start_date, end_date, status, org_id, created_at'
+      let q = supabaseAdmin
+        .from('training_courses')
+        .select(select)
+        .order('start_date', { ascending: false })
+      if (orgId)  q = q.eq('org_id', orgId)
+      if (status) q = q.eq('status', status)
+      return q
+    }
 
-    if (orgId) query = query.eq('org_id', orgId)
-    if (status) query = query.eq('status', status)
-
-    const { data, error } = await query
+    // Try with enrollments join first; fall back to plain query if FK hint can't be resolved
+    let { data, error } = await buildQuery(true)
+    if (error && (error.code === 'PGRST200' || error.code === 'PGRST201')) {
+      console.warn('[training GET] enrollments join failed, retrying without it:', error.message)
+      const retry = await buildQuery(false)
+      data = retry.data; error = retry.error
+      // Manually attach enrollments per course on the fallback path
+      if (!error && data && data.length > 0) {
+        const courseIds = data.map((c: any) => c.id)
+        const { data: enrolls } = await supabaseAdmin
+          .from('training_enrollments')
+          .select('id, employee_id, status, completed_at, course_id')
+          .in('course_id', courseIds)
+        const byCourse: Record<string, any[]> = {}
+        for (const e of enrolls ?? []) {
+          const cid = (e as any).course_id as string
+          if (!byCourse[cid]) byCourse[cid] = []
+          byCourse[cid].push(e)
+        }
+        data = data.map((c: any) => ({ ...c, enrollments: byCourse[c.id] ?? [] }))
+      }
+    }
     if (error) {
+      console.error('[training GET]', error)
       if (error.code === '42P01') return NextResponse.json({ data: [] })
+      if (error.code === '42703') return NextResponse.json({ data: [], schema_warning: error.message })
       throw error
     }
     return NextResponse.json({ data: data ?? [] })
   } catch (err) {
+    console.error('[training GET catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
@@ -64,16 +91,29 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from('training_courses')
-      .insert({ title, description: description ?? null, trainer: trainer ?? null, start_date: start_date ?? null, end_date: end_date ?? null, status: 'upcoming', org_id: orgId })
+      .insert({
+        title,
+        description: description ?? null,
+        trainer:     trainer     ?? null,
+        start_date:  start_date  ?? null,
+        end_date:    end_date    ?? null,
+        status:      'upcoming',
+        org_id:      orgId,
+        created_by:  actorId,   // pre-existing NOT NULL column
+      })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[training POST]', error)
+      return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
+    }
 
     if (orgId) logAudit({ org_id: orgId, actor_id: actorId, action: 'created', module: 'training', entity_id: data.id, summary: 'Training course created' })
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
+    console.error('[training POST catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }
@@ -91,24 +131,57 @@ export async function PATCH(req: NextRequest) {
       if (!course_id || !employee_id) {
         return NextResponse.json({ error: 'course_id and employee_id required for enroll' }, { status: 400 })
       }
-      const { data, error } = await supabaseAdmin
+      const enrollOrgId = (session.user as any)?.orgId as string | null
+
+      // Try `course_id` first (most common); fall back to `programme_id` legacy schema
+      let { data, error } = await supabaseAdmin
         .from('training_enrollments')
-        .upsert({ programme_id: course_id, employee_id, status: 'enrolled' }, { onConflict: 'programme_id,employee_id' })
+        .upsert(
+          { course_id, employee_id, status: 'pending', org_id: enrollOrgId },
+          { onConflict: 'course_id,employee_id' },
+        )
         .select()
         .single()
-      if (error) throw error
+      if (error && error.code === '42703') {
+        const retry = await supabaseAdmin
+          .from('training_enrollments')
+          .upsert(
+            { programme_id: course_id, employee_id, status: 'pending', org_id: enrollOrgId },
+            { onConflict: 'programme_id,employee_id' },
+          )
+          .select()
+          .single()
+        data = retry.data; error = retry.error
+      }
+      if (error) {
+        console.error('[training PATCH enroll]', error)
+        return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
+      }
       return NextResponse.json({ data })
     }
 
     if (action === 'complete' && course_id && employee_id) {
-      const { data, error } = await supabaseAdmin
+      let { data, error } = await supabaseAdmin
         .from('training_enrollments')
         .update({ status: 'completed', completed_at: new Date().toISOString() })
-        .eq('programme_id', course_id)
+        .eq('course_id', course_id)
         .eq('employee_id', employee_id)
         .select()
         .single()
-      if (error) throw error
+      if (error && error.code === '42703') {
+        const retry = await supabaseAdmin
+          .from('training_enrollments')
+          .update({ status: 'completed', completed_at: new Date().toISOString() })
+          .eq('programme_id', course_id)
+          .eq('employee_id', employee_id)
+          .select()
+          .single()
+        data = retry.data; error = retry.error
+      }
+      if (error) {
+        console.error('[training PATCH complete]', error)
+        return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
+      }
       return NextResponse.json({ data })
     }
 

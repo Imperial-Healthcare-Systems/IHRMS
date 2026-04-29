@@ -160,7 +160,9 @@ const BTN_OUTLINE: React.CSSProperties = { background: '#fff', color: '#374151',
 export default function PerformancePage() {
   const { data: session } = useSession()
   const sessionUserId = (session?.user as Record<string, unknown>)?.id as string | undefined
+  const sessionRole   = (session?.user as Record<string, unknown>)?.role as string | undefined
   const isAdmin       = (session?.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+                         || ['hr_admin', 'super_admin', 'admin', 'hr'].includes(sessionRole ?? '')
 
   const [activeTab, setActiveTab] = useState<Tab>('cycles')
 
@@ -222,6 +224,7 @@ export default function PerformancePage() {
   const [f360Anonymous,  setF360Anonymous]  = useState(false)
   const [f360Submitting, setF360Submitting] = useState(false)
   const [f360View,       setF360View]       = useState<'received' | 'given'>('received')
+  const [cycleFilterId,  setCycleFilterId]  = useState<string>('')
 
   /* ─── Fetch ─── */
   const fetchAll = useCallback(async () => {
@@ -247,7 +250,7 @@ export default function PerformancePage() {
     if (activeTab !== 'feedback360' || !sessionUserId) return
     setF360Loading(true)
     Promise.all([
-      fetch('/api/feedback-360').then(r => r.json()),
+      fetch('/api/performance/feedback-360').then(r => r.json()),
       fetch('/api/employees?limit=200').then(r => r.json()),
     ]).then(([fbJson, empJson]) => {
       setFeedback360(fbJson.data ?? [])
@@ -259,15 +262,20 @@ export default function PerformancePage() {
     if (!f360Target || f360Rating < 1) { toast.error('Select an employee and rating'); return }
     setF360Submitting(true)
     try {
-      const res = await fetch('/api/feedback-360', {
+      const res = await fetch('/api/performance/feedback-360', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_employee_id: f360Target, rating: f360Rating, relationship: f360Relation, comments: f360Comments || null, is_anonymous: f360Anonymous }),
+        body: JSON.stringify({ subject_id: f360Target, rating: f360Rating, relationship: f360Relation, comments: f360Comments || null, is_anonymous: f360Anonymous }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
       toast.success('Feedback submitted!')
-      setFeedback360(prev => [json.data, ...prev])
+      // Refetch so the new entry has joined subject/reviewer data for the list display
+      try {
+        const refRes  = await fetch('/api/performance/feedback-360')
+        const refJson = await refRes.json()
+        if (refRes.ok) setFeedback360(refJson.data ?? [])
+      } catch { /* non-fatal — already toasted success */ }
       setF360Target(''); setF360Rating(0); setF360Comments(''); setF360Anonymous(false)
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to submit') }
     finally { setF360Submitting(false) }
@@ -280,7 +288,9 @@ export default function PerformancePage() {
   const promotionsRecommended = reviews.filter(r => r.promotion_recommended).length
 
   // Team reviews = reviews where current user is reviewer
-  const teamReviews = reviews.filter(r => r.reviewer?.id === sessionUserId || isAdmin)
+  const teamReviews = reviews
+    .filter(r => r.reviewer?.id === sessionUserId || isAdmin)
+    .filter(r => !cycleFilterId || r.cycle_id === cycleFilterId)
 
   // My reviews = reviews where I am the employee
   const myReviews = reviews.filter(r => r.employee?.id === sessionUserId)
@@ -327,8 +337,17 @@ export default function PerformancePage() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
-      toast.success('Review cycle started!')
+      const participants = json.data?.participants ?? 0
+      toast.success(participants > 0
+        ? `Cycle started! ${participants} reviews auto-generated for active employees.`
+        : 'Review cycle started!')
       setCycles(prev => [{ ...json.data }, ...prev])
+      // Refetch reviews so the newly auto-generated ones appear in My Team Reviews tab
+      try {
+        const rRes  = await fetch('/api/performance/reviews?limit=200')
+        const rJson = await rRes.json()
+        if (rRes.ok) setReviews(rJson.data ?? [])
+      } catch { /* non-fatal */ }
       setShowCycleModal(false)
       setCycleName(''); setCycleFrom(''); setCycleTo(''); setCycleDue(''); setCycleDesc('')
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed to start cycle') }
@@ -522,7 +541,7 @@ export default function PerformancePage() {
                                   >Close</button>
                                 )}
                                 <button
-                                  onClick={() => { setActiveTab('teamreviews') }}
+                                  onClick={() => { setCycleFilterId(cycle.id); setActiveTab('teamreviews') }}
                                   style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', cursor: 'pointer' }}
                                 >View</button>
                               </div>
@@ -539,10 +558,19 @@ export default function PerformancePage() {
             {/* ── TAB 2: My Team Reviews ── */}
             {activeTab === 'teamreviews' && (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                   <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                    {isAdmin ? `All reviews — ${reviews.length} total` : `Your direct reports — ${teamReviews.length} reviews`}
+                    {isAdmin ? `All reviews — ${teamReviews.length} of ${reviews.length}` : `Your direct reports — ${teamReviews.length} reviews`}
                   </p>
+                  {cycleFilterId && (() => {
+                    const c = cycles.find(c => c.id === cycleFilterId)
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, padding: '4px 10px' }}>
+                        Filtered by cycle: <strong>{c?.name ?? '—'}</strong>
+                        <button onClick={() => setCycleFilterId('')} style={{ marginLeft: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#1d4ed8', fontSize: '1rem', lineHeight: 1, padding: 0 }} title="Clear filter">×</button>
+                      </div>
+                    )
+                  })()}
                 </div>
                 {loading ? <p style={{ color: '#6b7280', textAlign: 'center', padding: 32 }}>Loading…</p>
                 : teamReviews.length === 0 ? (
@@ -747,8 +775,8 @@ export default function PerformancePage() {
                       <p style={{ color: '#6b7280', textAlign: 'center', padding: 32 }}>Loading feedback…</p>
                     ) : (() => {
                       const list = f360View === 'received'
-                        ? feedback360.filter(f => f.subject_employee_id === sessionUserId)
-                        : feedback360.filter(f => f.reviewer_id === sessionUserId)
+                        ? feedback360.filter(f => (f.subject_id ?? f.subject?.id) === sessionUserId)
+                        : feedback360.filter(f => (f.reviewer_id ?? f.reviewer?.id) === sessionUserId)
                       if (list.length === 0) return (
                         <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
                           <Star size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
@@ -759,7 +787,7 @@ export default function PerformancePage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                           {list.map(fb => {
                             const reviewerName = fb.is_anonymous && !isAdmin ? 'Anonymous' : fb.reviewer ? `${fb.reviewer.first_name} ${fb.reviewer.last_name}` : '—'
-                            const subjectName  = fb.subject_employee ? `${fb.subject_employee.first_name} ${fb.subject_employee.last_name}` : '—'
+                            const subjectName  = fb.subject ? `${fb.subject.first_name} ${fb.subject.last_name}` : '—'
                             const RELATION_COLORS: Record<string, string> = { peer: '#2563eb', manager: '#7c3aed', reportee: '#16a34a', other: '#6b7280' }
                             return (
                               <div key={fb.id} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '18px 22px' }}>

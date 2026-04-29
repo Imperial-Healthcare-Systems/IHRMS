@@ -479,15 +479,22 @@ export default function RecruitmentPage() {
 
       <div style={{ padding: '16px 16px 56px' }} className="sm:!px-7">
 
-        {/* ── Summary Cards — exact same structure as Employee page ── */}
+        {/* ── Summary Cards — computed from live data ── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ gap: 12, marginBottom: 24 }}>
-          {[
-            { label: 'Open Positions',   value: '8',  color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
-            { label: 'Total Applicants', value: '47', color: '#374151', bg: '#f9fafb', border: '#e5e7eb' },
-            { label: 'Interviews Today', value: '2',  color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
-            { label: 'Offers Pending',   value: '1',  color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
-            { label: 'Hired This Month', value: '3',  color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
-          ].map((s) => (
+          {(() => {
+            const todayLabel = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+            const openCount    = apiJR.filter(j => j.status === 'Open').length
+            const ivToday      = apiInterviews.filter(iv => iv.date === todayLabel && iv.status === 'Scheduled').length
+            const offerPending = apiCandidates.filter(c => c.stage === 'Offer').length
+            const hiredCount   = apiCandidates.filter(c => c.stage === 'Selected').length
+            return [
+              { label: 'Open Positions',   value: String(openCount),             color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+              { label: 'Total Applicants', value: String(apiCandidates.length),   color: '#374151', bg: '#f9fafb', border: '#e5e7eb' },
+              { label: 'Interviews Today', value: String(ivToday),                color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
+              { label: 'Offers Pending',   value: String(offerPending),           color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+              { label: 'Hired This Month', value: String(hiredCount),             color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+            ]
+          })().map((s) => (
             <div key={s.label} className="card card-interactive" style={{ padding: '16px 18px', borderColor: s.border, textAlign: 'center' }}>
               <p style={{ fontFamily: 'var(--font-heading)', fontSize: '1.75rem', fontWeight: 700, color: s.color, lineHeight: 1.1 }}>
                 {s.value}

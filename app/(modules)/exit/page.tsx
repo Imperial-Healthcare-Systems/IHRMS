@@ -719,8 +719,11 @@ export default function ExitPage() {
                 {INFO_ROWS.map(([label, value, accent]) => (
                   <div key={label} style={{
                     padding: '10px 13px', borderRadius: 10,
-                    background: '#fff', border: '1.5px solid #e5e7eb',
+                    background: '#fff',
                     borderTop: `3px solid ${accent}`,
+                    borderRight: '1.5px solid #e5e7eb',
+                    borderBottom: '1.5px solid #e5e7eb',
+                    borderLeft: '1.5px solid #e5e7eb',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                   }}>
                     <p style={{ fontSize: '0.67rem', color: '#9ca3af', margin: '0 0 5px', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>{label}</p>
@@ -926,8 +929,11 @@ export default function ExitPage() {
                 ] as [string, string, string][]).map(([label, value, color]) => (
                   <div key={label} style={{
                     padding: '10px 12px', borderRadius: 9,
-                    background: '#f8fafc', border: '1px solid #f1f5f9',
+                    background: '#f8fafc',
                     borderTop: `3px solid ${color}22`,
+                    borderRight: '1px solid #f1f5f9',
+                    borderBottom: '1px solid #f1f5f9',
+                    borderLeft: '1px solid #f1f5f9',
                   }}>
                     <p style={{ fontSize: '0.67rem', color: '#9ca3af', margin: '0 0 4px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</p>
                     <p style={{ fontSize: '0.8375rem', fontWeight: 700, color: '#111827', margin: 0 }}>{value}</p>

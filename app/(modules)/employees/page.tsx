@@ -388,7 +388,7 @@ function MoreMenu({ empId, empName, onExitSuccess }: { empId: string; empName: s
                 Manage Documents
               </button>
               <button
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', fontSize: '0.8125rem', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', borderTop: '1px solid var(--color-gray-100)' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', fontSize: '0.8125rem', color: '#dc2626', background: 'none', borderTop: '1px solid var(--color-gray-100)', borderRight: 0, borderBottom: 0, borderLeft: 0, cursor: 'pointer', width: '100%', textAlign: 'left' }}
                 onClick={() => { setOpen(false); setShowExit(true) }}
               >
                 <LogOut size={14} style={{ color: '#dc2626' }} />
