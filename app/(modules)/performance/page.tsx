@@ -204,15 +204,15 @@ export default function PerformancePage() {
   /* ── 360° Feedback state ── */
   interface Feedback360 {
     id: string
-    subject_employee_id: string
-    reviewer_id: string | null
+    subject_id?: string
+    reviewer_id?: string | null
     is_anonymous: boolean
     rating: number
     relationship: string
     comments: string | null
     created_at: string
-    reviewer?: { first_name: string; last_name: string } | null
-    subject_employee?: { first_name: string; last_name: string; emp_id: string } | null
+    reviewer?: { id?: string; first_name: string; last_name: string } | null
+    subject?:  { id?: string; first_name: string; last_name: string; emp_id?: string } | null
   }
   const [feedback360,    setFeedback360]    = useState<Feedback360[]>([])
   const [f360Loading,    setF360Loading]    = useState(false)
