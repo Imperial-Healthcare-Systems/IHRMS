@@ -29,23 +29,44 @@ export async function GET(req: NextRequest) {
     const userId = (session.user as any)?.id as string
     const isAdminUser = isAdmin(session)
 
-    let query = supabaseAdmin
-      .from('org_documents')
-      .select(`
-        id, name, type, storage_path, size_bytes, created_at,
-        employee:employees!employee_id(id, first_name, last_name, emp_id),
-        uploader:employees!uploaded_by(id, first_name, last_name)
-      `)
-      .order('created_at', { ascending: false })
+    // Schema uses title/category/file_url/file_name; alias them to the
+    // page-friendly names (name/type/storage_path/size_bytes) at select time
+    // so the existing client-side rendering keeps working.
+    const buildQuery = (withEmployeeFilter: boolean) => {
+      let q = supabaseAdmin
+        .from('org_documents')
+        .select(`
+          id,
+          name:title,
+          type:category,
+          storage_path:file_url,
+          file_name,
+          size_bytes:file_size,
+          mime_type,
+          created_at,
+          uploader:employees!uploaded_by(id, first_name, last_name)
+        `)
+        .order('created_at', { ascending: false })
 
-    if (!isAdminUser) query = query.eq('employee_id', userId)
-    else if (employeeId) query = query.eq('employee_id', employeeId)
-    if (orgId) query = query.eq('org_id', orgId)
+      if (orgId) q = q.eq('org_id', orgId)
+      if (withEmployeeFilter) {
+        if (!isAdminUser)    q = q.eq('employee_id', userId)
+        else if (employeeId) q = q.eq('employee_id', employeeId)
+      }
+      return q
+    }
 
-    const { data, error } = await query
+    let { data, error } = await buildQuery(true)
+    // employee_id column may not exist on org_documents — retry without that filter
+    if (error && error.code === '42703') {
+      console.warn('[documents GET] employee_id column missing, returning all org documents:', error.message)
+      const retry = await buildQuery(false)
+      data = retry.data; error = retry.error
+    }
     if (error) {
+      console.error('[documents GET]', error)
       if (error.code === '42P01') return NextResponse.json({ data: [] })
-      throw error
+      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
     return NextResponse.json({ data: data ?? [] })
   } catch (err) {
@@ -67,18 +88,49 @@ export async function POST(req: NextRequest) {
     const orgId = (session.user as any)?.orgId as string | null
     const actorId = (session.user as any)?.id as string
 
-    const { data, error } = await supabaseAdmin
+    // Map page-friendly field names → actual org_documents schema:
+    //   name           → title       (NOT NULL)
+    //   type           → category    (NOT NULL — defaults to 'Other')
+    //   storage_path   → file_url    (NOT NULL)
+    //   <derived>      → file_name   (NOT NULL — extracted from storage path basename)
+    //   size_bytes     → file_size
+    const fileName = storage_path.split('/').pop() ?? name
+    const insertPayload: Record<string, unknown> = {
+      title:       name,
+      category:    type ?? 'Other',
+      file_url:    storage_path,
+      file_name:   fileName,
+      file_size:   size_bytes ?? null,
+      uploaded_by: actorId,
+      org_id:      orgId,
+    }
+    // Include employee_id if the column exists; if it doesn't, retry below
+    if (employee_id) insertPayload.employee_id = employee_id
+
+    let { data, error } = await supabaseAdmin
       .from('org_documents')
-      .insert({ employee_id, name, type: type ?? null, storage_path, size_bytes: size_bytes ?? null, uploaded_by: actorId, org_id: orgId })
+      .insert(insertPayload)
       .select()
       .single()
 
-    if (error) throw error
+    // Column doesn't exist → drop employee_id and retry (org_documents may be org-wide only)
+    if (error && error.code === '42703' && 'employee_id' in insertPayload) {
+      console.warn('[documents POST] employee_id column missing on org_documents, retrying without it')
+      delete insertPayload.employee_id
+      const retry = await supabaseAdmin.from('org_documents').insert(insertPayload).select().single()
+      data = retry.data; error = retry.error
+    }
+
+    if (error) {
+      console.error('[documents POST]', error)
+      return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
+    }
 
     if (orgId) logAudit({ org_id: orgId, actor_id: actorId, action: 'created', module: 'documents', entity_id: data.id, summary: 'Document uploaded' })
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
+    console.error('[documents POST catch]', errMsg(err))
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
   }
 }

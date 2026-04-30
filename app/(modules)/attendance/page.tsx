@@ -543,9 +543,9 @@ export default function AttendancePage() {
       const isWfh = myWorkType === 'home' || myWorkType === null || (myWorkType === 'hybrid' && isWfhToday)
       const needsGeoFence = !isWfh // WFO always; hybrid on office days
 
-      // Only capture location when geofence applies — WFH users never get prompted
-      // and never wait for the geolocation timeout.
-      const geo = needsGeoFence ? await captureGeolocation() : {}
+      // Always attempt to capture location for audit/tracking — even WFH users.
+      // The difference is whether we ENFORCE the office geofence below.
+      const geo = await captureGeolocation()
 
       if (needsGeoFence) {
         if (geo.geo_lat == null || geo.geo_lng == null) {
@@ -561,6 +561,8 @@ export default function AttendancePage() {
           return
         }
       }
+      // For WFH users: if location was granted, geo will have lat/lng/location and gets stored;
+      // if denied, geo is {} and the punch still goes through with no location recorded.
 
       const res = await attendanceApi.punchIn({ punch_method: 'Manual', ...geo, is_wfh: isWfh })
       setHasPunchedIn(true)

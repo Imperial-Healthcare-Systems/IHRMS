@@ -182,6 +182,26 @@ export async function PATCH(req: NextRequest) {
         console.error('[training PATCH complete]', error)
         return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
       }
+
+      // Also mark every content item as watched, so the Learner Dashboard
+      // shows progress 100% in sync with the enrolment status.
+      try {
+        const { data: contents } = await supabaseAdmin
+          .from('course_content')
+          .select('id')
+          .eq('course_id', course_id)
+        const rows = (contents ?? []).map((c: any) => ({
+          course_id, content_id: c.id, employee_id,
+        }))
+        if (rows.length > 0) {
+          await supabaseAdmin
+            .from('course_content_progress')
+            .upsert(rows, { onConflict: 'content_id,employee_id', ignoreDuplicates: true })
+        }
+      } catch (progressErr) {
+        console.warn('[training PATCH complete] content progress backfill non-fatal:', progressErr)
+      }
+
       return NextResponse.json({ data })
     }
 
