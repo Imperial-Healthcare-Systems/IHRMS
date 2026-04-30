@@ -543,7 +543,9 @@ export default function AttendancePage() {
       const isWfh = myWorkType === 'home' || myWorkType === null || (myWorkType === 'hybrid' && isWfhToday)
       const needsGeoFence = !isWfh // WFO always; hybrid on office days
 
-      const geo = await captureGeolocation()
+      // Only capture location when geofence applies — WFH users never get prompted
+      // and never wait for the geolocation timeout.
+      const geo = needsGeoFence ? await captureGeolocation() : {}
 
       if (needsGeoFence) {
         if (geo.geo_lat == null || geo.geo_lng == null) {
@@ -569,6 +571,7 @@ export default function AttendancePage() {
         .then(r => setAttendanceLogs(r.data))
         .catch(() => {})
     } catch (e: unknown) {
+      console.error('[handlePunchIn]', e)
       toast.error(e instanceof Error ? e.message : 'Punch in failed')
     } finally { setPunchingIn(false) }
   }

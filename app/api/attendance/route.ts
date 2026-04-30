@@ -204,7 +204,26 @@ export async function POST(req: NextRequest) {
           .single())
       }
 
-      if (error) { console.error('[punch_in save]', error); throw error }
+      if (error) {
+        console.error('[punch_in save]', error)
+        // Status CHECK constraint failure → fall back to 'present' (some DBs don't have 'work_from_home' in the allow-list)
+        if (error.code === '23514' && is_wfh) {
+          console.warn('[punch_in] status constraint rejected work_from_home; retrying as present with is_wfh flag in remarks')
+          const fallbackPayload = bareRecord
+            ? { check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
+            : { employee_id: targetEmployee, date: today, check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
+
+          const retryQ = bareRecord
+            ? supabaseAdmin.from('attendance_daily').update(fallbackPayload).eq('id', bareRecord.id).select().single()
+            : supabaseAdmin.from('attendance_daily').insert(fallbackPayload).select().single()
+          const retry = await retryQ
+          if (retry.error) {
+            return NextResponse.json({ error: retry.error.message, code: retry.error.code, details: retry.error.details }, { status: 500 })
+          }
+          return NextResponse.json({ data: mapRow({ ...retry.data, status: 'work_from_home' }), message: 'Punched in (WFH)' }, { status: bareRecord ? 200 : 201 })
+        }
+        return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
+      }
 
       return NextResponse.json(
         { data: mapRow(data), message: 'Punched in successfully' },
