@@ -47,7 +47,10 @@ export async function GET(_req: NextRequest) {
 
     if (orgId) enrollQuery = enrollQuery.eq('org_id', orgId)
 
-    let { data: enrollments, error: enrollErr } = await enrollQuery
+    const initial = await enrollQuery
+    let enrollments: any[] | null = initial.data as any
+    let enrollErr   = initial.error
+
     // Fall back without joins if FK hints aren't resolvable
     if (enrollErr && (enrollErr.code === 'PGRST200' || enrollErr.code === 'PGRST201')) {
       console.warn('[training admin] enrollments join failed, retrying without:', enrollErr.message)
@@ -57,7 +60,7 @@ export async function GET(_req: NextRequest) {
         .order('enrolled_at', { ascending: false })
       if (orgId) retryQ = retryQ.eq('org_id', orgId)
       const retry = await retryQ
-      enrollments = retry.data
+      enrollments = retry.data as any
       enrollErr   = retry.error
     }
     if (enrollErr) {
