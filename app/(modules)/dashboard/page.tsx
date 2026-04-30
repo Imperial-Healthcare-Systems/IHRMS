@@ -507,7 +507,7 @@ export default function DashboardPage() {
               {[
                 { icon: Clock,     label: 'My Attendance', sub: 'View your records',    color: '#2563EB', bg: '#EFF6FF', path: '/attendance' },
                 { icon: Calendar,  label: 'Apply Leave',   sub: 'Submit leave request', color: '#16A34A', bg: '#F0FDF4', path: '/leaves' },
-                { icon: IndianRupee, label: 'My Payslips', sub: 'View salary slips',    color: '#7C3AED', bg: '#F5F3FF', path: '/payroll' },
+                { icon: IndianRupee, label: 'My Payslips', sub: 'View salary slips',    color: '#7C3AED', bg: '#F5F3FF', path: '/payslips' },
                 { icon: AlertCircle, label: 'Announcements', sub: 'Company updates',    color: '#EA580C', bg: '#FFF7ED', path: '/announcements' },
               ].map(tile => (
                 <button

@@ -74,6 +74,7 @@ const navGroupConfigs: NavGroupConfig[] = [
     title: 'Finance',
     items: [
       { label: 'Payroll',        href: '/payroll',        icon: IndianRupee, roles: [...HR_ADMIN, 'payroll_admin'] },
+      { label: 'My Payslips',    href: '/payslips',       icon: IndianRupee, roles: ALL_ROLES },
       { label: 'Reimbursements', href: '/reimbursements', icon: Receipt,     roles: [...HR_ADMIN, 'finance_admin'] },
     ],
   },
