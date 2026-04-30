@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest) {
     }
     if (error) throw error
 
-    const employees = (data ?? []) as Record<string, unknown>[]
+    const employees = (data ?? []) as unknown as Record<string, unknown>[]
 
     // Build tree: map id → node, then attach children
     const nodeMap = new Map<string, Record<string, unknown>>()
