@@ -332,7 +332,7 @@ function RejectModal({ name, onClose, onReject }: { name: string; onClose: () =>
         </div>
         <div style={{ padding: '20px 22px' }}>
           <p style={{ fontSize: '0.875rem', color: 'var(--color-gray-600)', marginBottom: 14 }}>
-            Provide a reason for rejecting <strong>{name}</strong>'s leave request.
+            Provide a reason for rejecting <strong>{name}</strong>&rsquo;s leave request.
           </p>
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Enter rejection reason…" rows={3} style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-gray-300)', fontSize: '0.875rem', fontFamily: 'var(--font-body)', resize: 'vertical', marginBottom: 16 }} />
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -883,7 +883,7 @@ export default function LeavesPage() {
               <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-gray-400)' }}>
                 <Calendar size={32} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
                 <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>No leave requests yet</p>
-                <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Click "Apply Leave" to submit your first request.</p>
+                <p style={{ fontSize: '0.8rem', marginTop: 4 }}>Click &ldquo;Apply Leave&rdquo; to submit your first request.</p>
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>

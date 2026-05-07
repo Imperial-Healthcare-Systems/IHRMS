@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,16 +13,14 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json() as { role?: string; is_admin?: boolean; status?: string }
+    delete (body as Record<string, unknown>).org_id
 
     const newRole    = body.role     ?? (body.is_admin === false ? 'employee' : undefined)
     const newIsAdmin = body.is_admin ?? (body.role ? body.role !== 'employee' : undefined)
@@ -30,24 +29,22 @@ export async function PATCH(
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
 
-    // Build update payload
     const update: Record<string, unknown> = {}
     if (newRole    !== undefined) update.role     = newRole
     if (newIsAdmin !== undefined) update.is_admin = newIsAdmin
     if (body.status !== undefined) update.status  = body.status
 
-    // Use Supabase REST — fast HTTP, no cold TCP connection.
-    // supabaseAdmin bypasses RLS and has schema-cache access.
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('employees')
       .update(update)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select('id, first_name, last_name, emp_id, employee_code, role, is_admin, status')
       .single()
 
-    if (error) {
-      console.error('[admin-users PATCH]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[admin-users PATCH]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     const e = data as Record<string, unknown>

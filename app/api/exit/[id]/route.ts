@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -22,25 +23,23 @@ const EXIT_SELECT = `
   )
 `
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('exit_processes')
       .select(EXIT_SELECT)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Exit process not found' }, { status: 404 })
-      console.error('[exit GET id]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Exit process not found' }, { status: 404 })
+      console.error('[exit GET id]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data })
@@ -49,24 +48,21 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { all_clearance_done, fnf_approved, employee_id_to_terminate } = body as {
       all_clearance_done?: boolean
       fnf_approved?: boolean
       employee_id_to_terminate?: string
     }
 
-    // Only update the `status` column which is guaranteed to exist.
-    // Clearance details and FnF amounts are persisted client-side via localStorage.
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     }
@@ -77,25 +73,26 @@ export async function PATCH(
       updates.status = 'cleared'
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('exit_processes')
       .update(updates)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select(EXIT_SELECT)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Exit process not found' }, { status: 404 })
-      console.error('[exit PATCH]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Exit process not found' }, { status: 404 })
+      console.error('[exit PATCH]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
-    // If FnF approved, mark employee as terminated
     if (fnf_approved && employee_id_to_terminate) {
       const { error: empErr } = await supabaseAdmin
         .from('employees')
         .update({ status: 'terminated', updated_at: new Date().toISOString() })
         .eq('id', employee_id_to_terminate)
+        .eq('org_id', ctx.orgId)
       if (empErr) console.error('[exit PATCH] employee termination update:', empErr.message)
     }
 

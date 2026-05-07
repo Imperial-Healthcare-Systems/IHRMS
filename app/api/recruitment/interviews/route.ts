@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,12 +13,12 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const candidate_id = searchParams.get('candidate_id')
-    const status       = searchParams.get('status')    // maps to result field in schema
+    const status       = searchParams.get('status')
     const date_from    = searchParams.get('date_from')
     const date_to      = searchParams.get('date_to')
     const limit        = Math.min(parseInt(searchParams.get('limit') ?? '50'), 500)
@@ -34,6 +33,7 @@ export async function GET(req: NextRequest) {
         requisition:job_requisitions!requisition_id(id, title),
         created_at, updated_at
       `, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('scheduled_at', { ascending: true })
       .range(offset, offset + limit - 1)
 
@@ -42,13 +42,13 @@ export async function GET(req: NextRequest) {
     if (date_from)    query = query.gte('scheduled_at', date_from)
     if (date_to)      query = query.lte('scheduled_at', date_to)
 
-    const { data, error, count } = await query
-    if (error) {
-      console.error('[interviews GET]', error)
-      if (error.code === '42703' || error.code === '42P01' || error.code === 'PGRST200') {
-        return NextResponse.json({ data: [], count: 0, limit, offset, schema_warning: error.message })
+    const { data, error: dbErr, count } = await query
+    if (dbErr) {
+      console.error('[interviews GET]', dbErr)
+      if (dbErr.code === '42703' || dbErr.code === '42P01' || dbErr.code === 'PGRST200') {
+        return NextResponse.json({ data: [], count: 0, limit, offset, schema_warning: dbErr.message })
       }
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data: data ?? [], count, limit, offset })
@@ -60,21 +60,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const {
-      candidate_id,
-      round_number,
-      round_type,
-      scheduled_at,
-      duration_minutes,
-      mode,
-      interviewers,
-      location,
-      meeting_link,
-      requisition_id,
+      candidate_id, round_number, round_type, scheduled_at,
+      duration_minutes, mode, interviewers, location, meeting_link, requisition_id,
     } = body
 
     if (!candidate_id || !round_number || !round_type || !scheduled_at || !duration_minutes || !mode || !interviewers) {
@@ -88,9 +82,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'interviewers must be a non-empty array of employee IDs' }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    // Cross-tenant guard
+    const { data: cand } = await supabaseAdmin
+      .from('candidates')
+      .select('id')
+      .eq('id', candidate_id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle()
+    if (!cand) return NextResponse.json({ error: 'Candidate not found in your organisation' }, { status: 404 })
+
+    const { data, error: dbErr } = await supabaseAdmin
       .from('interview_schedules')
       .insert({
+        org_id: ctx.orgId,
         candidate_id,
         requisition_id: requisition_id ?? null,
         round_number: parseInt(round_number),
@@ -107,9 +111,9 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) {
-      console.error('[interviews POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[interviews POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data, status: 'scheduled' }, { status: 201 })
@@ -121,12 +125,13 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
-    const { id, status, scheduled_at, meeting_link, location, remarks } = body
+    delete (body as Record<string, unknown>).org_id
 
+    const { id, status, scheduled_at, meeting_link, location, remarks } = body
     if (!id) {
       return NextResponse.json({ error: 'Missing required field: id' }, { status: 400 })
     }
@@ -134,24 +139,24 @@ export async function PATCH(req: NextRequest) {
     const updatePayload: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     }
-
     if (status !== undefined)       updatePayload.result       = status
     if (scheduled_at !== undefined) updatePayload.scheduled_at = scheduled_at
     if (meeting_link !== undefined) updatePayload.meeting_link = meeting_link
     if (location !== undefined)     updatePayload.location     = location
     if (remarks !== undefined)      updatePayload.remarks      = remarks
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('interview_schedules')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Interview not found' }, { status: 404 })
-      console.error('[interviews PATCH]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Interview not found' }, { status: 404 })
+      console.error('[interviews PATCH]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data })

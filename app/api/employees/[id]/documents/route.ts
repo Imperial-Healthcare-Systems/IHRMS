@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,22 +11,26 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    // Verify employee is in caller's org
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+
+    const { data, error: dbErr } = await supabaseAdmin
       .from('employee_documents')
       .select('id, document_name, category, file_url, created_at')
+      .eq('org_id', ctx.orgId)
       .eq('employee_id', id)
       .order('created_at', { ascending: false })
 
-    if (error) return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
 
     const mapped = (data ?? []).map((d: Record<string, unknown>) => ({
       id:          d.id,
@@ -43,14 +46,16 @@ export async function GET(
   }
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
+
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
 
     const formData = await req.formData()
     const file     = formData.get('file') as File | null
@@ -59,8 +64,8 @@ export async function POST(
 
     if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
-    // Upload to Supabase Storage
-    const path     = `employee-docs/${id}/${Date.now()}-${file.name}`
+    // Org-prefixed path
+    const path     = `${ctx.orgId}/employee-docs/${id}/${Date.now()}-${file.name}`
     const buffer   = Buffer.from(await file.arrayBuffer())
 
     const { error: uploadError } = await supabaseAdmin.storage
@@ -73,9 +78,10 @@ export async function POST(
       .from('hrms-documents')
       .getPublicUrl(path)
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('employee_documents')
       .insert({
+        org_id:        ctx.orgId,
         employee_id:   id,
         document_name: name ?? file.name,
         category,
@@ -85,7 +91,7 @@ export async function POST(
       .select()
       .single()
 
-    if (error) return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { logAudit } from '@/lib/audit'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -13,26 +14,18 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const orgId = (session.user as any)?.orgId as string | null
-
-    let query = supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('shifts')
       .select('id, name, start_time, end_time, days, is_active, created_at')
+      .eq('org_id', ctx.orgId)
       .order('name')
 
-    if (orgId) query = query.eq('org_id', orgId)
-
-    const { data, error } = await query
     if (error) {
       if (error.code === '42P01') return NextResponse.json({ data: [] })
       throw error
@@ -45,28 +38,26 @@ export async function GET(_req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { name, start_time, end_time, days } = body
     if (!name || !start_time || !end_time) {
       return NextResponse.json({ error: 'name, start_time, end_time are required' }, { status: 400 })
     }
 
-    const orgId = (session.user as any)?.orgId as string | null
-    const actorId = (session.user as any)?.id as string
-
     const { data, error } = await supabaseAdmin
       .from('shifts')
-      .insert({ name, start_time, end_time, days: days ?? [], org_id: orgId, is_active: true })
+      .insert({ name, start_time, end_time, days: days ?? [], org_id: ctx.orgId, is_active: true })
       .select()
       .single()
 
     if (error) throw error
 
-    if (orgId) logAudit({ org_id: orgId, actor_id: actorId, action: 'created', module: 'shifts', entity_id: data.id, summary: 'Shift template created' })
+    logAudit({ org_id: ctx.orgId, actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId, action: 'created', module: 'shifts', entity_id: data.id, summary: 'Shift template created' })
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {

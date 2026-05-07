@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function getAssets(filters: {
   status?: string

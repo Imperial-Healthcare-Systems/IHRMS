@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase'
+import { supabaseAdmin } from './supabase-admin'
 
 type LookupColumn = 'work_email' | 'email'
 

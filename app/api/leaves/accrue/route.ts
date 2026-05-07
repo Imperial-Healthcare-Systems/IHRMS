@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-const ADMIN_ROLES = ['super_admin', 'hr_admin', 'admin', 'hr']
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 interface LeavePolicyRow {
   code: string
@@ -30,35 +29,31 @@ const DEFAULT_POLICY: LeavePolicyRow[] = [
 
 export async function POST(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
-    const userRole = ((session.user as Record<string, unknown>)?.role as string) ?? 'employee'
-    if (!ADMIN_ROLES.includes(userRole)) {
-      return NextResponse.json({ error: 'Forbidden — only HR Admin or Super Admin can run accrual' }, { status: 403 })
-    }
-
-    // Load saved leave policy (falls back to defaults)
+    // Load saved leave policy for this org (falls back to defaults)
     let policy: LeavePolicyRow[] = DEFAULT_POLICY
     try {
       const { data: setting } = await supabaseAdmin
         .from('app_settings')
         .select('value')
+        .eq('org_id', ctx.orgId)
         .eq('key', 'leave_policy')
         .maybeSingle()
       if (setting && Array.isArray(setting.value)) policy = setting.value as LeavePolicyRow[]
     } catch { /* use defaults */ }
 
-    // Only process monthly-accrual leave types that are active
     const monthlyTypes = policy.filter(lt => lt.accrualType === 'monthly' && lt.active)
     if (!monthlyTypes.length) {
       return NextResponse.json({ success: true, message: 'No monthly-accrual leave types configured', updatedCount: 0 })
     }
 
-    // Get all active employees
+    // Active employees IN THIS ORG only
     const { data: employees, error: empErr } = await supabaseAdmin
       .from('employees')
       .select('id')
+      .eq('org_id', ctx.orgId)
       .eq('status', 'active')
     if (empErr) throw empErr
 
@@ -78,6 +73,7 @@ export async function POST(_req: NextRequest) {
           const { data: rows } = await supabaseAdmin
             .from('leave_balances')
             .select('id, accrued, closing_balance')
+            .eq('org_id', ctx.orgId)
             .eq('employee_id', emp.id)
             .eq('leave_type', lt.code)
             .eq('year', year)
@@ -98,6 +94,7 @@ export async function POST(_req: NextRequest) {
             await supabaseAdmin
               .from('leave_balances')
               .insert({
+                org_id:          ctx.orgId,
                 employee_id:     emp.id,
                 leave_type:      lt.code,
                 year,
@@ -115,13 +112,14 @@ export async function POST(_req: NextRequest) {
       }
     }
 
-    // Persist last-run metadata
+    // Persist last-run metadata for this org
     try {
       await supabaseAdmin.from('app_settings').upsert({
+        org_id: ctx.orgId,
         key: 'leave_accrual_last_run',
         value: { timestamp: new Date().toISOString(), employeeCount: employees?.length ?? 0, updatedCount, month: monthName, year },
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'key' })
+      }, { onConflict: 'org_id,key' })
     } catch { /* non-fatal */ }
 
     return NextResponse.json({

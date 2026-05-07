@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
+
+const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'operations_head']
+const MANAGER_ROLES     = ['manager']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -25,25 +27,21 @@ const EXIT_SELECT = `
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const status    = searchParams.get('status')
     const exit_type = searchParams.get('exit_type')
     const limit     = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
-    const userRole  = (session.user as any)?.role
-    const userId    = (session.user as any)?.id
-
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
-    const MANAGER_ROLES     = ['manager']
 
     let teamIds: string[] = []
-    if (MANAGER_ROLES.includes(userRole)) {
+    if (MANAGER_ROLES.includes(ctx.role)) {
       const { data: team } = await supabaseAdmin
         .from('employees')
         .select('id')
-        .eq('reporting_manager_id', userId)
+        .eq('org_id', ctx.orgId)
+        .eq('reporting_manager_id', ctx.identityId)
         .eq('status', 'active')
       teamIds = (team ?? []).map((e: any) => e.id as string)
       if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
@@ -52,27 +50,27 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('exit_processes')
       .select(EXIT_SELECT, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
-    if (MANAGER_ROLES.includes(userRole)) {
+    if (MANAGER_ROLES.includes(ctx.role)) {
       query = query.in('employee_id', teamIds)
-    } else if (!FULL_ACCESS_ROLES.includes(userRole)) {
-      query = query.eq('employee_id', userId)
+    } else if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
+      query = query.eq('employee_id', ctx.identityId)
     }
-    // HR/admin: no employee filter — see all
 
     if (status)    query = query.eq('status', status)
     if (exit_type) query = query.eq('exit_type', exit_type)
 
-    const { data, error, count } = await query
+    const { data, error: dbErr, count } = await query
 
-    if (error) {
-      const msg = errMsg(error)
+    if (dbErr) {
+      const msg = errMsg(dbErr)
       if (msg.includes('does not exist') || msg.includes('PGRST') || msg.includes('Could not find')) {
         return NextResponse.json({ data: [], count: 0 })
       }
-      console.error('[exit GET]', error)
+      console.error('[exit GET]', dbErr)
       return NextResponse.json({ error: msg }, { status: 500 })
     }
 
@@ -85,10 +83,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { employee_id, exit_type, last_working_date, reason, resignation_date, notice_period_days } = body
 
     if (!employee_id || !exit_type || !last_working_date || !reason) {
@@ -103,9 +103,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `exit_type must be one of: ${validExitTypes.join(', ')}` }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    // Cross-tenant guard
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+
+    const { data, error: dbErr } = await supabaseAdmin
       .from('exit_processes')
       .insert({
+        org_id: ctx.orgId,
         employee_id,
         exit_type,
         reason,
@@ -117,9 +124,9 @@ export async function POST(req: NextRequest) {
       .select(EXIT_SELECT)
       .single()
 
-    if (error) {
-      console.error('[exit POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[exit POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     // Update employee status to notice_period (best-effort)
@@ -127,16 +134,26 @@ export async function POST(req: NextRequest) {
       .from('employees')
       .update({ status: 'notice_period', updated_at: new Date().toISOString() })
       .eq('id', employee_id)
+      .eq('org_id', ctx.orgId)
 
     if (empError) console.error('[exit POST] employee status update:', empError.message)
 
-    // Ecosystem event + audit (fire-and-forget)
-    const orgId = (session.user as any)?.orgId as string | undefined
-    const actorId = (session.user as any)?.id as string | undefined
-    if (orgId) {
-      emitEvent({ event_type: 'employee.offboarded', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: employee_id, payload: { employee_id, exit_type, last_working_date } })
-      logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: 'created', module: 'exit', entity_id: employee_id, summary: 'Exit initiated for employee' })
-    }
+    emitEvent({
+      event_type: 'employee.offboarded',
+      source_platform: 'ihrms',
+      org_id: ctx.orgId,
+      actor_id: ctx.identityId,
+      entity_id: employee_id,
+      payload: { employee_id, exit_type, last_working_date },
+    })
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: 'created',
+      module: 'exit',
+      entity_id: employee_id,
+      summary: 'Exit initiated for employee',
+    })
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
@@ -147,39 +164,35 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { id, action, rejection_reason } = body
     if (!id || !action) return NextResponse.json({ error: 'id and action are required' }, { status: 400 })
     if (!['approve', 'reject'].includes(action)) {
       return NextResponse.json({ error: 'action must be approve or reject' }, { status: 400 })
     }
 
-    const userRole = (session.user as any)?.role
-    const userId   = (session.user as any)?.id
-    const orgId    = (session.user as any)?.orgId as string | undefined
-
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
-    const MANAGER_ROLES     = ['manager']
-
-    // Fetch exit process to verify authorization
     const { data: exitRow, error: fetchErr } = await supabaseAdmin
       .from('exit_processes')
       .select('id, employee_id, exit_type, status')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
     if (fetchErr || !exitRow) return NextResponse.json({ error: 'Exit record not found' }, { status: 404 })
 
-    if (!FULL_ACCESS_ROLES.includes(userRole)) {
-      if (MANAGER_ROLES.includes(userRole)) {
+    if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
+      if (MANAGER_ROLES.includes(ctx.role)) {
         const { data: emp } = await supabaseAdmin
           .from('employees')
           .select('reporting_manager_id')
           .eq('id', (exitRow as any).employee_id)
+          .eq('org_id', ctx.orgId)
           .single()
-        if (!emp || (emp as any).reporting_manager_id !== userId) {
+        if (!emp || (emp as any).reporting_manager_id !== ctx.identityId) {
           return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
         }
       } else {
@@ -190,23 +203,24 @@ export async function PATCH(req: NextRequest) {
     const newStatus = action === 'approve' ? 'approved' : 'rejected'
     const updatePayload: Record<string, unknown> = {
       status: newStatus,
-      reviewed_by: userId,
+      reviewed_by: ctx.identityId,
       reviewed_at: new Date().toISOString(),
     }
     if (rejection_reason) updatePayload.rejection_reason = rejection_reason
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('exit_processes')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select(EXIT_SELECT)
       .single()
-    if (error) { console.error('[exit PATCH]', error); throw error }
+    if (dbErr) { console.error('[exit PATCH]', dbErr); throw dbErr }
 
-    // Notify the employee
     try {
       const isApproved = action === 'approve'
       await supabaseAdmin.from('notifications').insert({
+        org_id: ctx.orgId,
         recipient_id: (exitRow as any).employee_id,
         title: isApproved ? 'Resignation Accepted' : 'Resignation Rejected',
         body: isApproved
@@ -216,9 +230,14 @@ export async function PATCH(req: NextRequest) {
       })
     } catch (e) { console.warn('[exit PATCH] notification non-fatal:', e) }
 
-    if (orgId) {
-      logAudit({ org_id: orgId, actor_id: userId ?? 'unknown', action: action === 'approve' ? 'approved' : 'rejected', module: 'exit', entity_id: id, summary: `Exit process ${newStatus}` })
-    }
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: action === 'approve' ? 'approved' : 'rejected',
+      module: 'exit',
+      entity_id: id,
+      summary: `Exit process ${newStatus}`,
+    })
 
     return NextResponse.json({ data })
   } catch (err) {

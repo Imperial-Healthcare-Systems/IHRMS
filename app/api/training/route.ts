@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { logAudit } from '@/lib/audit'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -13,19 +14,14 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
-    const orgId = (session.user as any)?.orgId as string | null
 
     const buildQuery = (withEnrollments: boolean) => {
       const select = withEnrollments
@@ -35,8 +31,8 @@ export async function GET(req: NextRequest) {
       let q = supabaseAdmin
         .from('training_courses')
         .select(select)
+        .eq('org_id', ctx.orgId)
         .order('start_date', { ascending: false })
-      if (orgId)  q = q.eq('org_id', orgId)
       if (status) q = q.eq('status', status)
       return q
     }
@@ -53,6 +49,7 @@ export async function GET(req: NextRequest) {
         const { data: enrolls } = await supabaseAdmin
           .from('training_enrollments')
           .select('id, employee_id, status, completed_at, course_id')
+          .eq('org_id', ctx.orgId)
           .in('course_id', courseIds)
         const byCourse: Record<string, any[]> = {}
         for (const e of enrolls ?? []) {
@@ -78,16 +75,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { title, description, trainer, start_date, end_date } = body
     if (!title) return NextResponse.json({ error: 'title is required' }, { status: 400 })
-
-    const orgId = (session.user as any)?.orgId as string | null
-    const actorId = (session.user as any)?.id as string
 
     const { data, error } = await supabaseAdmin
       .from('training_courses')
@@ -98,8 +93,8 @@ export async function POST(req: NextRequest) {
         start_date:  start_date  ?? null,
         end_date:    end_date    ?? null,
         status:      'upcoming',
-        org_id:      orgId,
-        created_by:  actorId,   // pre-existing NOT NULL column
+        org_id:      ctx.orgId,
+        created_by:  ctx.identityId,   // pre-existing NOT NULL column
       })
       .select()
       .single()
@@ -109,7 +104,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
     }
 
-    if (orgId) logAudit({ org_id: orgId, actor_id: actorId, action: 'created', module: 'training', entity_id: data.id, summary: 'Training course created' })
+    logAudit({ org_id: ctx.orgId, actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId, action: 'created', module: 'training', entity_id: data.id, summary: 'Training course created' })
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
@@ -121,23 +116,38 @@ export async function POST(req: NextRequest) {
 // PATCH — enroll employee or update course status
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { action, course_id, employee_id, status } = body
+
+    // Cross-tenant guards
+    if (course_id) {
+      const { data: course } = await supabaseAdmin
+        .from('training_courses').select('id')
+        .eq('id', course_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
+    }
+    if (employee_id && employee_id !== ctx.identityId) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('id')
+        .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
 
     if (action === 'enroll') {
       if (!course_id || !employee_id) {
         return NextResponse.json({ error: 'course_id and employee_id required for enroll' }, { status: 400 })
       }
-      const enrollOrgId = (session.user as any)?.orgId as string | null
 
       // Try `course_id` first (most common); fall back to `programme_id` legacy schema
       let { data, error } = await supabaseAdmin
         .from('training_enrollments')
         .upsert(
-          { course_id, employee_id, status: 'pending', org_id: enrollOrgId },
+          { course_id, employee_id, status: 'pending', org_id: ctx.orgId },
           { onConflict: 'course_id,employee_id' },
         )
         .select()
@@ -146,7 +156,7 @@ export async function PATCH(req: NextRequest) {
         const retry = await supabaseAdmin
           .from('training_enrollments')
           .upsert(
-            { programme_id: course_id, employee_id, status: 'pending', org_id: enrollOrgId },
+            { programme_id: course_id, employee_id, status: 'pending', org_id: ctx.orgId },
             { onConflict: 'programme_id,employee_id' },
           )
           .select()
@@ -164,6 +174,7 @@ export async function PATCH(req: NextRequest) {
       let { data, error } = await supabaseAdmin
         .from('training_enrollments')
         .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('org_id', ctx.orgId)
         .eq('course_id', course_id)
         .eq('employee_id', employee_id)
         .select()
@@ -172,6 +183,7 @@ export async function PATCH(req: NextRequest) {
         const retry = await supabaseAdmin
           .from('training_enrollments')
           .update({ status: 'completed', completed_at: new Date().toISOString() })
+          .eq('org_id', ctx.orgId)
           .eq('programme_id', course_id)
           .eq('employee_id', employee_id)
           .select()
@@ -189,9 +201,10 @@ export async function PATCH(req: NextRequest) {
         const { data: contents } = await supabaseAdmin
           .from('course_content')
           .select('id')
+          .eq('org_id', ctx.orgId)
           .eq('course_id', course_id)
         const rows = (contents ?? []).map((c: any) => ({
-          course_id, content_id: c.id, employee_id,
+          course_id, content_id: c.id, employee_id, org_id: ctx.orgId,
         }))
         if (rows.length > 0) {
           await supabaseAdmin
@@ -206,11 +219,12 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (action === 'update_status' && course_id && status) {
-      if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!HR_ROLES.includes(ctx.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const { data, error } = await supabaseAdmin
         .from('training_courses')
         .update({ status })
         .eq('id', course_id)
+        .eq('org_id', ctx.orgId)
         .select()
         .single()
       if (error) throw error

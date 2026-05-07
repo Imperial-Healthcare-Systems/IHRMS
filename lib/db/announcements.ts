@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function getAnnouncements(filters: {
   is_published?: boolean

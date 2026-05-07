@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,15 +13,11 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
@@ -28,9 +25,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset = parseInt(searchParams.get('offset') ?? '0')
 
-    const userId = (session.user as any)?.id as string
-    const orgId = (session.user as any)?.orgId as string | null
-    const isAdminUser = isAdmin(session)
+    const isAdminUser = HR_ROLES.includes(ctx.role)
 
     // Schema uses `title`, but page expects `subject`. Alias on read so the
     // existing client code (which destructures `subject`) keeps working.
@@ -44,11 +39,11 @@ export async function GET(req: NextRequest) {
       let q = supabaseAdmin
         .from('helpdesk_tickets')
         .select(select, { count: 'exact' })
+        .eq('org_id', ctx.orgId)
         .order('created_at', { ascending: false })
         .limit(limit)
         .range(offset, offset + limit - 1)
-      if (!isAdminUser) q = q.eq('raised_by', userId)
-      if (orgId)        q = q.eq('org_id', orgId)
+      if (!isAdminUser) q = q.eq('raised_by', ctx.identityId)
       if (status)       q = q.eq('status', status)
       if (priority)     q = q.eq('priority', priority)
       return q
@@ -76,19 +71,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     // Accept either `title` or `subject` from the client (page legacy)
     const title = body.title ?? body.subject
     const { description, category, priority } = body
     if (!title)       return NextResponse.json({ error: 'title (or subject) is required' }, { status: 400 })
     if (!description) return NextResponse.json({ error: 'description is required' }, { status: 400 })
     if (!category)    return NextResponse.json({ error: 'category is required' }, { status: 400 })
-
-    const raisedBy = (session.user as any)?.id as string
-    const orgId = (session.user as any)?.orgId as string | null
 
     // ticket_number is NOT NULL with no default — generate a short, sortable code
     const ticketNumber = `HD-${Date.now().toString(36).toUpperCase()}`
@@ -106,8 +100,8 @@ export async function POST(req: NextRequest) {
         category,
         priority: finalPriority,
         status:   'open',
-        raised_by: raisedBy,
-        org_id:    orgId,
+        raised_by: ctx.identityId,
+        org_id:    ctx.orgId,
       })
       .select()
       .single()

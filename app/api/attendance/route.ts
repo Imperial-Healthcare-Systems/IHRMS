@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,7 +13,6 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-// IST = UTC + 05:30
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
 
 function nowIST(): Date {
@@ -23,7 +23,6 @@ function todayIST(): string {
   return nowIST().toISOString().split('T')[0]
 }
 
-// Extract HH:MM in IST from a TIMESTAMPTZ string (or return as-is if already HH:MM)
 function toTimeStr(ts: string | null | undefined): string | null {
   if (!ts) return null
   if (/^\d{2}:\d{2}/.test(ts)) return ts.slice(0, 5)
@@ -34,7 +33,6 @@ function toTimeStr(ts: string | null | undefined): string | null {
   } catch { return null }
 }
 
-// Safely map a DB row → AttendanceLog shape for the frontend
 function mapRow(r: any) {
   return {
     id:             r.id,
@@ -58,8 +56,8 @@ function mapRow(r: any) {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const employee_id = searchParams.get('employee_id')
@@ -69,9 +67,6 @@ export async function GET(req: NextRequest) {
     const status      = searchParams.get('status')
     const limit       = Math.min(parseInt(searchParams.get('limit') ?? '100'), 500)
 
-    const userRole = (session.user as any)?.role
-    const userId   = (session.user as any)?.id
-
     let query = supabaseAdmin
       .from('attendance_daily')
       .select(`
@@ -80,15 +75,14 @@ export async function GET(req: NextRequest) {
         geo_lat, geo_lng, geo_location,
         employee:employees(id, first_name, last_name, emp_id, department_id)
       `, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('date', { ascending: false })
       .limit(limit)
 
-    // Only true HR roles can view all employees' attendance
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
     if (employee_id) {
       query = query.eq('employee_id', employee_id)
-    } else if (!FULL_ACCESS_ROLES.includes(userRole)) {
-      query = query.eq('employee_id', userId)
+    } else if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
+      query = query.eq('employee_id', ctx.identityId)
     }
 
     if (date)      query = query.eq('date', date)
@@ -96,10 +90,10 @@ export async function GET(req: NextRequest) {
     if (date_to)   query = query.lte('date', date_to)
     if (status)    query = query.eq('status', status)
 
-    const { data, error, count } = await query
-    if (error) {
-      console.error('[attendance GET]', error)
-      throw error
+    const { data, error: dbErr, count } = await query
+    if (dbErr) {
+      console.error('[attendance GET]', dbErr)
+      throw dbErr
     }
 
     return NextResponse.json({ data: (data as any[]).map(mapRow), count })
@@ -111,19 +105,32 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { action, employee_id, is_wfh, notes, geo_lat, geo_lng, geo_location } = body
 
-    const targetEmployee = employee_id ?? (session.user as any)?.id
+    const targetEmployee = employee_id ?? ctx.identityId
     if (!targetEmployee) return NextResponse.json({ error: 'Employee ID required' }, { status: 400 })
 
-    const today  = todayIST()             // date in IST — correct for India
-    const now    = new Date()             // UTC timestamp stored in DB (correct for TIMESTAMPTZ)
+    // Cross-tenant guard: if targetEmployee differs from session user, verify same org
+    if (employee_id && employee_id !== ctx.identityId) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('id', employee_id)
+        .eq('org_id', ctx.orgId)
+        .maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
+
+    const today  = todayIST()
+    const now    = new Date()
     const istNow = nowIST()
-    const h      = istNow.getUTCHours()  // IST hour for late/half-day logic
+    const h      = istNow.getUTCHours()
     const m      = istNow.getUTCMinutes()
 
     // ── PUNCH IN ──────────────────────────────────────────────
@@ -131,10 +138,10 @@ export async function POST(req: NextRequest) {
       const istDayStart = new Date(`${today}T00:00:00+05:30`).toISOString()
       const istDayEnd   = new Date(`${today}T23:59:59+05:30`).toISOString()
 
-      // Duplicate check: only trust the check_in TIMESTAMPTZ — date column may be stale
       const { data: alreadyPunched, error: chkErr } = await supabaseAdmin
         .from('attendance_daily')
         .select('id, check_in, check_out')
+        .eq('org_id', ctx.orgId)
         .eq('employee_id', targetEmployee)
         .gte('check_in', istDayStart)
         .lte('check_in', istDayEnd)
@@ -165,16 +172,16 @@ export async function POST(req: NextRequest) {
       const isLate = h > 9 || (h === 9 && m > 15)
       const status = is_wfh ? 'work_from_home' : isLate ? 'late' : 'present'
 
-      // Look for a bare date-only record (no check_in yet) to update instead of insert
       const { data: bareRecord } = await supabaseAdmin
         .from('attendance_daily')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .eq('employee_id', targetEmployee)
         .eq('date', today)
         .is('check_in', null)
         .maybeSingle()
 
-      let data: any, error: any
+      let data: any, dbErr: any
 
       const geoFields = {
         ...(geo_lat  != null ? { geo_lat }      : {}),
@@ -183,16 +190,18 @@ export async function POST(req: NextRequest) {
       }
 
       if (bareRecord) {
-        ;({ data, error } = await supabaseAdmin
+        ;({ data, error: dbErr } = await supabaseAdmin
           .from('attendance_daily')
           .update({ check_in: now.toISOString(), status, remarks: notes ?? null, ...geoFields })
           .eq('id', bareRecord.id)
+          .eq('org_id', ctx.orgId)
           .select()
           .single())
       } else {
-        ;({ data, error } = await supabaseAdmin
+        ;({ data, error: dbErr } = await supabaseAdmin
           .from('attendance_daily')
           .insert({
+            org_id:      ctx.orgId,
             employee_id: targetEmployee,
             date:        today,
             check_in:    now.toISOString(),
@@ -204,17 +213,17 @@ export async function POST(req: NextRequest) {
           .single())
       }
 
-      if (error) {
-        console.error('[punch_in save]', error)
-        // Status CHECK constraint failure → fall back to 'present' (some DBs don't have 'work_from_home' in the allow-list)
-        if (error.code === '23514' && is_wfh) {
-          console.warn('[punch_in] status constraint rejected work_from_home; retrying as present with is_wfh flag in remarks')
+      if (dbErr) {
+        console.error('[punch_in save]', dbErr)
+        // Status CHECK constraint failure → fall back to 'present' tagged with [WFH] in remarks
+        if (dbErr.code === '23514' && is_wfh) {
+          console.warn('[punch_in] status constraint rejected work_from_home; retrying as present with [WFH] tag')
           const fallbackPayload = bareRecord
             ? { check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
-            : { employee_id: targetEmployee, date: today, check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
+            : { org_id: ctx.orgId, employee_id: targetEmployee, date: today, check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
 
           const retryQ = bareRecord
-            ? supabaseAdmin.from('attendance_daily').update(fallbackPayload).eq('id', bareRecord.id).select().single()
+            ? supabaseAdmin.from('attendance_daily').update(fallbackPayload).eq('id', bareRecord.id).eq('org_id', ctx.orgId).select().single()
             : supabaseAdmin.from('attendance_daily').insert(fallbackPayload).select().single()
           const retry = await retryQ
           if (retry.error) {
@@ -222,7 +231,7 @@ export async function POST(req: NextRequest) {
           }
           return NextResponse.json({ data: mapRow({ ...retry.data, status: 'work_from_home' }), message: 'Punched in (WFH)' }, { status: bareRecord ? 200 : 201 })
         }
-        return NextResponse.json({ error: error.message, code: error.code, details: error.details, hint: error.hint }, { status: 500 })
+        return NextResponse.json({ error: dbErr.message, code: dbErr.code, details: dbErr.details, hint: dbErr.hint }, { status: 500 })
       }
 
       return NextResponse.json(
@@ -236,6 +245,7 @@ export async function POST(req: NextRequest) {
       const { data: log, error: logErr } = await supabaseAdmin
         .from('attendance_daily')
         .select('id, check_in, status')
+        .eq('org_id', ctx.orgId)
         .eq('employee_id', targetEmployee)
         .eq('date', today)
         .maybeSingle()
@@ -252,7 +262,7 @@ export async function POST(req: NextRequest) {
       const isHalfDay  = totalHours < 4
       const finalStatus = isHalfDay ? 'half_day' : (log.status ?? 'present')
 
-      const { data, error } = await supabaseAdmin
+      const { data, error: dbErr } = await supabaseAdmin
         .from('attendance_daily')
         .update({
           check_out:   now.toISOString(),
@@ -261,10 +271,11 @@ export async function POST(req: NextRequest) {
           remarks:     notes ?? null,
         })
         .eq('id', log.id)
+        .eq('org_id', ctx.orgId)
         .select()
         .single()
 
-      if (error) { console.error('[punch_out save]', error); throw error }
+      if (dbErr) { console.error('[punch_out save]', dbErr); throw dbErr }
 
       return NextResponse.json({ data: mapRow(data), message: 'Punched out successfully' })
     }

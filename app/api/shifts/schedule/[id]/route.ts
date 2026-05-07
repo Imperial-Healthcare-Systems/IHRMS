@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,20 +13,24 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { shift_id, effective_from, effective_to } = body
+
+    // Cross-tenant guard for shift_id
+    if (shift_id) {
+      const { data: shift } = await supabaseAdmin
+        .from('shifts').select('id')
+        .eq('id', shift_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!shift) return NextResponse.json({ error: 'Shift not found in your organisation' }, { status: 404 })
+    }
 
     const updates: Record<string, unknown> = {}
     if (shift_id !== undefined) updates.shift_id = shift_id
@@ -36,6 +41,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('shift_schedules')
       .update(updates)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
@@ -49,11 +55,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const { error } = await supabaseAdmin.from('shift_schedules').delete().eq('id', id)
+    const { error } = await supabaseAdmin
+      .from('shift_schedules')
+      .delete()
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
     if (error) throw error
     return NextResponse.json({ message: 'Schedule entry deleted' })
   } catch (err) {

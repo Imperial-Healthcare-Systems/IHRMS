@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown) {
   if (err instanceof Error) return err.message
@@ -12,26 +13,24 @@ function errMsg(err: unknown) {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>) {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    // Note: spec Section 11 lists `designations` as tenant-scoped in 102.3,
+    // so org_id is NOT NULL — every read must filter.
+    const { data, error: dbErr } = await supabaseAdmin
       .from('designations')
       .select('id, title, grade, is_active, created_at')
+      .eq('org_id', ctx.orgId)
       .order('title')
 
-    if (error) {
-      if (error.message?.includes('does not exist') || error.code === '42P01') {
+    if (dbErr) {
+      if (dbErr.message?.includes('does not exist') || dbErr.code === '42P01') {
         return NextResponse.json({ data: [] })
       }
-      throw error
+      throw dbErr
     }
     return NextResponse.json({ data: data ?? [] })
   } catch (err) {
@@ -41,21 +40,26 @@ export async function GET(_req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { title, grade } = body
     if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('designations')
-      .insert({ title: title.trim(), grade: grade?.trim() ?? null })
+      .insert({
+        org_id: ctx.orgId,
+        title: title.trim(),
+        grade: grade?.trim() ?? null,
+      })
       .select('id, title, grade, is_active, created_at')
       .single()
 
-    if (error) throw error
+    if (dbErr) throw dbErr
     return NextResponse.json({ data }, { status: 201 })
   } catch (err) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_OR_MANAGER_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'manager', 'operations_head']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,11 +15,10 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const userId = (session.user as any)?.id as string
-    const orgId = (session.user as any)?.orgId as string | null
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
 
@@ -29,10 +29,10 @@ export async function GET(req: NextRequest) {
         requester:employees!requester_id(id, first_name, last_name, emp_id),
         target:employees!target_id(id, first_name, last_name, emp_id)
       `)
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
-      .or(`requester_id.eq.${userId},target_id.eq.${userId}`)
+      .or(`requester_id.eq.${ctx.identityId},target_id.eq.${ctx.identityId}`)
 
-    if (orgId) query = query.eq('org_id', orgId)
     if (status) query = query.eq('status', status)
 
     const { data, error } = await query
@@ -48,21 +48,28 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { target_id, swap_date, reason } = body
     if (!target_id || !swap_date) {
       return NextResponse.json({ error: 'target_id and swap_date are required' }, { status: 400 })
     }
 
-    const requesterId = (session.user as any)?.id as string
-    const orgId = (session.user as any)?.orgId as string | null
+    // Cross-tenant guard: target must belong to same org
+    {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('id')
+        .eq('id', target_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
 
     const { data, error } = await supabaseAdmin
       .from('shift_swaps')
-      .insert({ requester_id: requesterId, target_id, swap_date, reason: reason ?? null, status: 'pending', org_id: orgId })
+      .insert({ requester_id: ctx.identityId, target_id, swap_date, reason: reason ?? null, status: 'pending', org_id: ctx.orgId })
       .select()
       .single()
 
@@ -75,10 +82,15 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
+    if (!HR_OR_MANAGER_ROLES.includes(ctx.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { id, status } = body
     if (!id || !['approved', 'rejected'].includes(status)) {
       return NextResponse.json({ error: 'id and status (approved|rejected) required' }, { status: 400 })
@@ -88,6 +100,7 @@ export async function PATCH(req: NextRequest) {
       .from('shift_swaps')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 

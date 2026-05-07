@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,8 +13,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const requisition_id = searchParams.get('requisition_id')
@@ -35,6 +34,7 @@ export async function GET(req: NextRequest) {
         referred_by:employees!referred_by(id, first_name, last_name, emp_id),
         created_at, updated_at
       `, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -46,15 +46,13 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const { data, error, count } = await query
-    if (error) {
-      console.error('[candidates GET]', error)
-      // Schema-mismatch (missing column / table) → return empty rather than 500
-      // so the UI can keep rendering. Run the SQL migration to fix root cause.
-      if (error.code === '42703' || error.code === '42P01' || error.code === 'PGRST200') {
-        return NextResponse.json({ data: [], count: 0, limit, offset, schema_warning: error.message })
+    const { data, error: dbErr, count } = await query
+    if (dbErr) {
+      console.error('[candidates GET]', dbErr)
+      if (dbErr.code === '42703' || dbErr.code === '42P01' || dbErr.code === 'PGRST200') {
+        return NextResponse.json({ data: [], count: 0, limit, offset, schema_warning: dbErr.message })
       }
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data: data ?? [], count, limit, offset })
@@ -66,28 +64,19 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const {
       requisition_id,
-      name,
-      email,
-      phone,
-      // Optional fields
-      resume_url,
-      current_company,
-      current_designation,
-      current_ctc,
-      expected_ctc,
-      notice_period_days,
-      total_experience_years,
-      skills,
-      source,
-      referral_by,
-      linkedin_url,
-      notes,
+      name, email, phone,
+      resume_url, current_company, current_designation,
+      current_ctc, expected_ctc, notice_period_days,
+      total_experience_years, skills, source, referral_by,
+      linkedin_url, notes,
     } = body
 
     if (!requisition_id || !name || !email || !phone) {
@@ -97,19 +86,25 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Split name into first/last
+    // Cross-tenant guard: requisition must belong to caller's org
+    const { data: req_row } = await supabaseAdmin
+      .from('job_requisitions')
+      .select('id')
+      .eq('id', requisition_id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle()
+    if (!req_row) return NextResponse.json({ error: 'Requisition not found in your organisation' }, { status: 404 })
+
     const nameParts  = (name as string).trim().split(' ')
     const first_name = nameParts[0]
     const last_name  = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '-'
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('candidates')
       .insert({
+        org_id: ctx.orgId,
         requisition_id,
-        first_name,
-        last_name,
-        email,
-        phone,
+        first_name, last_name, email, phone,
         resume_url: resume_url ?? null,
         current_company: current_company ?? null,
         current_designation: current_designation ?? null,
@@ -127,9 +122,9 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) {
-      console.error('[candidates POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[candidates POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data }, { status: 201 })

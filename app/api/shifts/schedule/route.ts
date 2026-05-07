@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const SHIFT_MANAGER_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'manager', 'operations_head']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,21 +13,15 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function canManageShifts(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr', 'manager', 'operations_head'].includes(role ?? '')
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { searchParams } = new URL(req.url)
     const employeeId = searchParams.get('employee_id')
-    const orgId = (session.user as any)?.orgId as string | null
-    const userId = (session.user as any)?.id as string
-    const isAdminUser = canManageShifts(session)
+    const isAdminUser = SHIFT_MANAGER_ROLES.includes(ctx.role)
 
     let query = supabaseAdmin
       .from('shift_schedules')
@@ -35,12 +30,12 @@ export async function GET(req: NextRequest) {
         employee:employees!employee_id(id, first_name, last_name, emp_id),
         shift:shifts!shift_id(id, name, start_time, end_time, days)
       `)
+      .eq('org_id', ctx.orgId)
       .order('work_date', { ascending: false })
       .order('created_at', { ascending: false })
 
-    if (!isAdminUser) query = query.eq('employee_id', userId)
+    if (!isAdminUser) query = query.eq('employee_id', ctx.identityId)
     else if (employeeId) query = query.eq('employee_id', employeeId)
-    if (orgId) query = query.eq('org_id', orgId)
 
     const { data, error } = await query
     if (error) {
@@ -55,17 +50,35 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!canManageShifts(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
+    if (!SHIFT_MANAGER_ROLES.includes(ctx.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { employee_id, shift_id, effective_from, effective_to } = body
     if (!employee_id || !effective_from) {
       return NextResponse.json({ error: 'employee_id and effective_from are required' }, { status: 400 })
     }
 
-    const orgId = (session.user as any)?.orgId as string | null
+    // Cross-tenant guard: employee_id must belong to this org
+    {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('id')
+        .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
+
+    // Cross-tenant guard for shift_id
+    if (shift_id) {
+      const { data: shift } = await supabaseAdmin
+        .from('shifts').select('id')
+        .eq('id', shift_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!shift) return NextResponse.json({ error: 'Shift not found in your organisation' }, { status: 404 })
+    }
 
     // Best-effort: remove any existing schedule for same employee+date to avoid duplicates
     // Wrapped separately so a schema-cache miss on effective_from doesn't block the insert
@@ -73,6 +86,7 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin
         .from('shift_schedules')
         .delete()
+        .eq('org_id', ctx.orgId)
         .eq('employee_id', employee_id)
         .eq('work_date', effective_from)
     } catch (_) { /* non-fatal — column may not exist yet in cache */ }
@@ -85,7 +99,7 @@ export async function POST(req: NextRequest) {
         work_date:     effective_from,        // pre-existing NOT NULL column
         effective_from,
         effective_to:  effective_to ?? null,
-        org_id:        orgId ?? null,
+        org_id:        ctx.orgId,
       })
       .select()
       .single()

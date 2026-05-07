@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
 
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
+
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { searchParams } = new URL(req.url)
     const limit = parseInt(searchParams.get('limit') ?? '50')
@@ -23,6 +25,7 @@ export async function GET(req: NextRequest) {
         department:departments!employees_department_id_fkey(id, name),
         designation:designations(id, title)
       `)
+      .eq('org_id', ctx.orgId)
       .eq('status', 'probation')
       .order('date_of_joining', { ascending: false })
       .limit(limit)
@@ -47,10 +50,12 @@ export async function GET(req: NextRequest) {
       supabaseAdmin
         .from('probation_reviews')
         .select('id, employee_id, due_date, outcome')
+        .eq('org_id', ctx.orgId)
         .in('employee_id', employeeIds),
       supabaseAdmin
         .from('employee_documents')
         .select('employee_id')
+        .eq('org_id', ctx.orgId)
         .in('employee_id', employeeIds),
     ])
 
@@ -97,10 +102,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { employee_id, step, completed } = body
 
     if (!employee_id || !step || completed === undefined) {
@@ -116,6 +123,7 @@ export async function POST(req: NextRequest) {
       .from('employees')
       .select('id')
       .eq('id', employee_id)
+      .eq('org_id', ctx.orgId)
       .maybeSingle()
 
     if (empError) return NextResponse.json({ error: empError.message }, { status: 500 })
@@ -123,12 +131,8 @@ export async function POST(req: NextRequest) {
 
     // Fire ecosystem event when final onboarding step is completed (fire-and-forget)
     if (Boolean(completed) && step === 'final') {
-      const orgId  = (session.user as any)?.orgId as string | undefined
-      const actorId = (session.user as any)?.id as string | undefined
-      if (orgId) {
-        emitEvent({ event_type: 'employee.onboarded', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: employee_id, payload: { employee_id, step } })
-        logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: 'updated', module: 'onboarding', entity_id: employee_id, summary: 'Employee onboarding completed' })
-      }
+      emitEvent({ event_type: 'employee.onboarded', source_platform: 'ihrms', org_id: ctx.orgId, actor_id: ctx.identityId, entity_id: employee_id, payload: { employee_id, step } })
+      logAudit({ org_id: ctx.orgId, actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId, action: 'updated', module: 'onboarding', entity_id: employee_id, summary: 'Employee onboarding completed' })
     }
 
     return NextResponse.json({ data: { employee_id, step, completed: Boolean(completed) }, step, completed: Boolean(completed) })

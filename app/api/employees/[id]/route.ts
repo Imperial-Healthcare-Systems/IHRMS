@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     // Try rich query first; fall back to plain select if reporting_manager FK isn't resolvable
-    let { data, error } = await supabaseAdmin
+    let { data, error: dbErr } = await supabaseAdmin
       .from('employees')
       .select(`
         *,
@@ -21,27 +22,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         reporting_manager:employees!reporting_manager_id(id, first_name, last_name, emp_id)
       `)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error && error.code !== 'PGRST116') {
-      console.warn('[employees GET] rich select failed, falling back:', error.message)
+    if (dbErr && dbErr.code !== 'PGRST116') {
+      console.warn('[employees GET id] rich select failed, falling back:', dbErr.message)
       const fallback = await supabaseAdmin
         .from('employees')
         .select('*, department:departments!employees_department_id_fkey(*), designation:designations(*)')
         .eq('id', id)
+        .eq('org_id', ctx.orgId)
         .single()
       data = fallback.data
-      error = fallback.error
+      dbErr = fallback.error
     }
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
-      console.error('[employees GET]', error)
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+      console.error('[employees GET id]', dbErr)
+      throw dbErr
     }
     return NextResponse.json({ data })
   } catch (err: unknown) {
-    console.error('[employees GET catch]', err)
+    console.error('[employees GET id catch]', err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })
   }
 }
@@ -49,25 +52,37 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const sessionUserId = (session.user as any)?.id as string | undefined
-    const sessionRole   = (session.user as any)?.role as string | undefined
-    const FULL_ACCESS   = ['hr_admin', 'super_admin', 'admin', 'hr']
+    const isHrAdmin = HR_ROLES.includes(ctx.role)
 
-    if (!FULL_ACCESS.includes(sessionRole ?? '') && id !== sessionUserId) {
+    // Self-edit check — needs to match the employee row's identity_id OR fall back
+    // to id-equality for legacy sessions where ctx.identityId is the employee.id.
+    let isSelfEdit = id === ctx.identityId
+    if (!isSelfEdit && !isHrAdmin) {
+      const { data: targetEmp } = await supabaseAdmin
+        .from('employees')
+        .select('identity_id')
+        .eq('id', id)
+        .eq('org_id', ctx.orgId)
+        .maybeSingle()
+      isSelfEdit = !!targetEmp && (targetEmp as any).identity_id === ctx.identityId
+    }
+
+    if (!isHrAdmin && !isSelfEdit) {
       return NextResponse.json({ error: 'Forbidden — you can only update your own record' }, { status: 403 })
     }
 
     const body = await req.json()
-    // Remove protected fields
+    // Strip protected + tenant fields
     delete body.emp_id
     delete body.id
     delete body.created_at
+    delete body.org_id
 
-    // Employees can only update personal fields — prevent role/salary escalation
-    if (!FULL_ACCESS.includes(sessionRole ?? '')) {
+    // Non-HR users can only update personal fields
+    if (!isHrAdmin) {
       const allowedFields = ['first_name', 'last_name', 'personal_phone', 'work_location', 'date_of_birth', 'gender', 'avatar_url', 'updated_at']
       for (const key of Object.keys(body)) {
         if (!allowedFields.includes(key)) delete body[key]
@@ -78,6 +93,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('employees')
       .update({ ...body, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
     if (updateErr) {
       console.error('[employees PATCH update]', updateErr)
       return NextResponse.json({ error: updateErr.message ?? updateErr.details ?? 'Update failed' }, { status: 500 })
@@ -90,22 +106,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('employees')
       .select('*, department:departments!employees_department_id_fkey(id, name, code), designation:designations(id, title)')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (rich) {
       data = rich as Record<string, unknown>
     } else {
-      // Fallback: plain select
-      const { data: plain } = await supabaseAdmin.from('employees').select('*').eq('id', id).single()
+      const { data: plain } = await supabaseAdmin
+        .from('employees')
+        .select('*')
+        .eq('id', id)
+        .eq('org_id', ctx.orgId)
+        .single()
       data = plain as Record<string, unknown> | null
     }
 
     // Ecosystem event + audit (fire-and-forget)
-    const orgId = (session.user as any)?.orgId as string | undefined
-    if (orgId) {
-      emitEvent({ event_type: 'employee.updated', source_platform: 'ihrms', org_id: orgId, actor_id: sessionUserId, entity_id: id, payload: { employee_id: id, changes: Object.keys(body) } })
-      logAudit({ org_id: orgId, actor_id: sessionUserId ?? 'unknown', action: 'updated', module: 'employees', entity_id: id, summary: 'Employee profile updated' })
-    }
+    emitEvent({
+      event_type: 'employee.updated',
+      source_platform: 'ihrms',
+      org_id: ctx.orgId,
+      actor_id: ctx.identityId,
+      entity_id: id,
+      payload: { employee_id: id, changes: Object.keys(body) },
+    })
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: 'updated',
+      module: 'employees',
+      entity_id: id,
+      summary: 'Employee profile updated',
+    })
 
     return NextResponse.json({ data })
   } catch (err: unknown) {
@@ -113,22 +145,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as any)?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
-    // Soft delete
-    const { data, error } = await supabaseAdmin
+    // Soft delete — terminate
+    const { data, error: dbErr } = await supabaseAdmin
       .from('employees')
       .update({ status: 'terminated', updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select('id, emp_id, status')
       .single()
-    if (error) throw error
+    if (dbErr) throw dbErr
+
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: 'deleted',
+      module: 'employees',
+      entity_id: id,
+      summary: 'Employee terminated',
+    })
+
     return NextResponse.json({ data, message: 'Employee terminated successfully' })
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })

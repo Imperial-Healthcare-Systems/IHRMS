@@ -429,7 +429,7 @@ export default function WarningsPage() {
                   <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
                     <Award size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
                     <p style={{ fontWeight: 500 }}>No appreciations yet.</p>
-                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Use "Give Appreciation" to recognise a colleague.</p>
+                    <p style={{ fontSize: '0.875rem', marginTop: 8 }}>Use &ldquo;Give Appreciation&rdquo; to recognise a colleague.</p>
                     <button onClick={() => setShowApprecModal(true)} style={{ ...BTN_PRIMARY, background: '#16a34a', marginTop: 16 }}>Give First Appreciation</button>
                   </div>
                 ) : (
@@ -495,7 +495,7 @@ export default function WarningsPage() {
                                   </div>
                                   <div style={{ marginLeft: 'auto' }}><ApprecCategoryBadge category={a.category} /></div>
                                 </div>
-                                <p style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500, marginBottom: 10, lineHeight: 1.5 }}>"{a.subject}"</p>
+                                <p style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500, marginBottom: 10, lineHeight: 1.5 }}>&ldquo;{a.subject}&rdquo;</p>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                   <p style={{ fontSize: '0.78rem', color: '#9ca3af', margin: 0 }}>{giverName}</p>
                                   <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>{fmtDate(a.created_at)}</p>

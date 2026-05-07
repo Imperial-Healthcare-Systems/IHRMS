@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,8 +15,9 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { searchParams } = new URL(req.url)
     const employee_id = searchParams.get('employee_id')
@@ -26,8 +28,7 @@ export async function GET(req: NextRequest) {
     const limit       = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset      = parseInt(searchParams.get('offset') ?? '0')
 
-    const sessionUserId  = (session.user as Record<string, unknown>)?.id as string | undefined
-    const sessionIsAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+    const sessionIsAdmin = HR_ROLES.includes(ctx.role)
 
     // Plain SELECT * + simple employee join without explicit FK names
     let query = supabaseAdmin
@@ -39,16 +40,18 @@ export async function GET(req: NextRequest) {
           department:departments!employees_department_id_fkey(id, name)
         )
       `, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
       .range(offset, offset + limit - 1)
 
     // Scope: HR admin sees all; managers see team; employees see own
     if (!sessionIsAdmin) {
-      if (manager_id && manager_id === sessionUserId) {
+      if (manager_id && manager_id === ctx.identityId) {
         const { data: teamMembers } = await supabaseAdmin
           .from('employees')
           .select('id')
+          .eq('org_id', ctx.orgId)
           .eq('manager_id', manager_id)
         const teamIds = (teamMembers ?? []).map((e: { id: string }) => e.id)
         if (teamIds.length > 0) {
@@ -57,7 +60,7 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ data: [], count: 0 })
         }
       } else {
-        query = query.eq('employee_id', sessionUserId ?? '')
+        query = query.eq('employee_id', ctx.identityId)
       }
     }
 
@@ -96,10 +99,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { category: rawCategory, description, amount, month, year, receipt_url } = body
 
     if (!rawCategory || !description || !amount || !month || !year) {
@@ -120,18 +125,14 @@ export async function POST(req: NextRequest) {
     }
     const category = CATEGORY_MAP[String(rawCategory).toLowerCase()] ?? 'other'
 
-    const employeeId = (session.user as Record<string, unknown>)?.id as string | undefined
-    if (!employeeId) {
-      return NextResponse.json({ error: 'Could not resolve employee from session' }, { status: 401 })
-    }
-
     const yearNum  = parseInt(year)
     const monthNum = parseInt(month)
 
-    // Auto-generate claim number: CLM/YEAR/SEQ
+    // Auto-generate claim number: CLM/YEAR/SEQ (org-scoped sequence)
     const { count: existingCount } = await supabaseAdmin
       .from('expense_claims')
       .select('*', { count: 'exact', head: true })
+      .eq('org_id', ctx.orgId)
       .gte('created_at', `${yearNum}-01-01`)
       .lte('created_at', `${yearNum}-12-31`)
 
@@ -140,7 +141,8 @@ export async function POST(req: NextRequest) {
     const claim_date   = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`
 
     const insertPayload: Record<string, unknown> = {
-      employee_id: employeeId,
+      employee_id: ctx.identityId,
+      org_id:      ctx.orgId,
       claim_date,
       category,
       expense_type: category,

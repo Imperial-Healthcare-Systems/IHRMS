@@ -9,6 +9,8 @@ type OtpPayload = {
   email: string
   otpHash: string
   exp: number
+  /** Optional caller payload (e.g. signup / invite_accept metadata). Not secret — signed only. */
+  data?: Record<string, unknown>
 }
 
 type OtpVerificationInput = {
@@ -20,6 +22,8 @@ type OtpVerificationInput = {
 type OtpVerificationResult = {
   valid: boolean
   error?: string
+  /** Caller payload, returned when valid === true and a payload was supplied at create time. */
+  payload?: Record<string, unknown>
 }
 
 type AttemptState = {
@@ -112,7 +116,15 @@ export function maskEmail(email: string) {
   return `${visibleStart}${maskedPart}@${domain}`
 }
 
-export function createOtpChallenge(email: string) {
+/**
+ * Create an OTP challenge. Accepts either:
+ *   - `email: string` (legacy login flow)
+ *   - `{ email, payload }` (signup / invite_accept — payload is signed and returned by verify())
+ */
+export function createOtpChallenge(input: string | { email: string; payload?: Record<string, unknown> }) {
+  const email = typeof input === 'string' ? input : input.email
+  const data  = typeof input === 'string' ? undefined : input.payload
+
   const normalizedEmail = email.trim().toLowerCase()
   const otp = crypto.randomInt(0, 10 ** OTP_LENGTH).toString().padStart(OTP_LENGTH, '0')
   const exp = Date.now() + OTP_TTL_MINUTES * 60 * 1000
@@ -121,6 +133,7 @@ export function createOtpChallenge(email: string) {
     email: normalizedEmail,
     otpHash: hashOtp(normalizedEmail, otp, exp),
     exp,
+    ...(data ? { data } : {}),
   }
 
   const encodedPayload = toBase64Url(JSON.stringify(payload))
@@ -184,7 +197,7 @@ export function verifyOtpChallenge({ email, otp, challengeToken }: OtpVerificati
     }
 
     clearAttempt(challengeToken)
-    return { valid: true }
+    return { valid: true, payload: payload.data }
   } catch {
     return { valid: false, error: 'Unable to verify OTP. Request a new code.' }
   }

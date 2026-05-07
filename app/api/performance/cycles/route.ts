@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,8 +15,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
@@ -24,28 +25,30 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('review_cycles')
       .select('*', { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
     if (status) query = query.eq('status', status)
 
-    const { data: cycles, error, count } = await query
-    if (error) {
-      const msg = errMsg(error)
+    const { data: cycles, error: dbErr, count } = await query
+    if (dbErr) {
+      const msg = errMsg(dbErr)
       if (msg.includes('does not exist') || msg.includes('PGRST')) {
         return NextResponse.json({ data: [], count: 0 })
       }
       return NextResponse.json({ error: msg }, { status: 500 })
     }
 
-    // For each cycle, compute participant count and completion % from performance_reviews
+    // Per-cycle review stats — also org-scoped
     const cycleIds = (cycles ?? []).map((c: Record<string, unknown>) => c.id as string)
-    let reviewStats: Record<string, { total: number; done: number }> = {}
+    const reviewStats: Record<string, { total: number; done: number }> = {}
 
     if (cycleIds.length > 0) {
       const { data: reviews } = await supabaseAdmin
         .from('performance_reviews')
         .select('cycle_id, status')
+        .eq('org_id', ctx.orgId)
         .in('cycle_id', cycleIds)
 
       for (const r of reviews ?? []) {
@@ -77,17 +80,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const isAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
-    const role    = (session.user as Record<string, unknown>)?.role as string | undefined
-    const HR_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
-    if (!isAdmin && !HR_ROLES.includes(role ?? '')) {
-      return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
-    }
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { name, cycle_type, period_from, period_to, due_date, description } = body
 
     if (!name || !cycle_type || !period_from || !period_to) {
@@ -99,35 +97,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `cycle_type must be one of: ${VALID_TYPES.join(', ')}` }, { status: 400 })
     }
 
-    const createdBy = (session.user as Record<string, unknown>)?.id as string | undefined
-    const orgId     = (session.user as Record<string, unknown>)?.orgId as string | undefined
-
-    const { data: cycle, error } = await supabaseAdmin
+    const { data: cycle, error: dbErr } = await supabaseAdmin
       .from('review_cycles')
-      .insert({ name, cycle_type, period_from, period_to, due_date: due_date ?? null, description: description ?? null, status: 'active', created_by: createdBy ?? null })
+      .insert({
+        org_id: ctx.orgId,
+        name, cycle_type, period_from, period_to,
+        due_date: due_date ?? null,
+        description: description ?? null,
+        status: 'active',
+        created_by: ctx.identityId,
+      })
       .select()
       .single()
 
-    if (error) {
-      console.error('[cycles POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[cycles POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
-    // Auto-generate draft performance_reviews for every active employee with a reporting manager.
-    // This is what makes a cycle actually have participants — without it the cycle is empty.
+    // Auto-generate draft performance_reviews for active employees with reporting managers IN THIS ORG
     let participantCount = 0
     try {
-      let empQuery = supabaseAdmin
+      const { data: employees } = await supabaseAdmin
         .from('employees')
         .select('id, reporting_manager_id')
+        .eq('org_id', ctx.orgId)
         .eq('status', 'active')
         .not('reporting_manager_id', 'is', null)
-      if (orgId) empQuery = empQuery.eq('org_id', orgId)
-
-      const { data: employees } = await empQuery
 
       if (employees && employees.length > 0) {
         const reviewRows = employees.map((e: any) => ({
+          org_id: ctx.orgId,
           employee_id: e.id,
           reviewer_id: e.reporting_manager_id,
           cycle:       cycle_type,

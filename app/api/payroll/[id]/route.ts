@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
+
+const PAYROLL_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin', 'finance_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -17,26 +18,28 @@ function errMsg(err: unknown): string {
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data: run, error } = await supabaseAdmin
+    const { data: run, error: dbErr } = await supabaseAdmin
       .from('payroll_runs')
       .select('*')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      console.error('[payroll GET id]', error)
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Payroll run not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      console.error('[payroll GET id]', dbErr)
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Payroll run not found' }, { status: 404 })
+      throw dbErr
     }
 
-    // Summary stats from payslips (use * to avoid column-name mismatches)
+    // Summary stats from payslips — scope to org as defense-in-depth
     const { data: payslipStats } = await supabaseAdmin
       .from('payslips')
       .select('*')
       .eq('payroll_run_id', id)
+      .eq('org_id', ctx.orgId)
 
     const stats = {
       payslip_count:    payslipStats?.length ?? 0,
@@ -57,12 +60,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(PAYROLL_ROLES)
+    if (error) return error
 
     const body = await req.json()
-    const { action, notes } = body as { action?: 'approve' | 'mark_paid'; notes?: string }
+    delete (body as Record<string, unknown>).org_id
 
+    const { action, notes } = body as { action?: 'approve' | 'mark_paid'; notes?: string }
     if (!action) {
       return NextResponse.json({ error: 'Missing required field: action' }, { status: 400 })
     }
@@ -71,6 +75,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('payroll_runs')
       .select('id, status')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (fetchError) {
@@ -103,22 +108,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: `Unknown action '${action}'` }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('payroll_runs')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
-    if (error) { console.error('[payroll PATCH save]', error); throw error }
+    if (dbErr) { console.error('[payroll PATCH save]', dbErr); throw dbErr }
 
-    // Ecosystem event + audit for approve/paid (fire-and-forget)
-    const orgId = (session.user as any)?.orgId as string | undefined
-    const actorId = (session.user as any)?.id as string | undefined
-    if (orgId && (action === 'approve' || action === 'mark_paid')) {
-      emitEvent({ event_type: 'payroll.approved', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: id, payload: { payroll_run_id: id, action } })
-      logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: action === 'approve' ? 'approved' : 'updated', module: 'payroll', entity_id: id, summary: `Payroll run ${action}` })
-    }
+    // Ecosystem event + audit (fire-and-forget)
+    emitEvent({
+      event_type: 'payroll.approved',
+      source_platform: 'ihrms',
+      org_id: ctx.orgId,
+      actor_id: ctx.identityId,
+      entity_id: id,
+      payload: { payroll_run_id: id, action },
+    })
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: action === 'approve' ? 'approved' : 'updated',
+      module: 'payroll',
+      entity_id: id,
+      summary: `Payroll run ${action}`,
+    })
 
     return NextResponse.json({ data })
   } catch (err: unknown) {

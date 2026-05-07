@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -15,10 +16,10 @@ function errMsg(err: unknown): string {
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('performance_reviews')
       .select(`
         id, cycle, cycle_id, review_period_from, review_period_to,
@@ -37,12 +38,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         created_at, updated_at
       `)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Review not found' }, { status: 404 })
-      console.error('[reviews GET id]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Review not found' }, { status: 404 })
+      console.error('[reviews GET id]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data })
@@ -54,16 +56,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { status, ...rest } = body
 
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('performance_reviews')
       .select('id, status, self_rating, manager_rating, final_rating, employee_id, reviewer_id')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (fetchError) {
@@ -71,14 +76,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       throw fetchError
     }
 
-    const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
-    const isAdmin       = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
-    const role          = (session.user as Record<string, unknown>)?.role as string | undefined
-    const HR_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
-    const isHr          = HR_ROLES.includes(role ?? '')
-    const isParticipant = current.employee_id === sessionUserId || current.reviewer_id === sessionUserId
+    const isHr          = HR_ROLES.includes(ctx.role)
+    const isParticipant = current.employee_id === ctx.identityId || current.reviewer_id === ctx.identityId
 
-    if (!isAdmin && !isHr && !isParticipant) {
+    if (!isHr && !isParticipant) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -101,16 +102,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updatePayload.status = status
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('performance_reviews')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
-    if (error) {
-      console.error('[reviews PATCH]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[reviews PATCH]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data })

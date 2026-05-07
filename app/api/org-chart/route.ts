@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,13 +13,11 @@ function errMsg(err: unknown): string {
 
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const orgId = (_req as any).orgId ?? (session.user as any)?.orgId as string | null
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const buildQuery = (deptHint: string) => {
-      let q = supabaseAdmin
+      return supabaseAdmin
         .from('employees')
         .select(`
           id, first_name, last_name, emp_id, role, avatar_url, status,
@@ -28,24 +25,21 @@ export async function GET(_req: NextRequest) {
           department:${deptHint}(id, name),
           designation:designations!designation_id(id, title)
         `)
+        .eq('org_id', ctx.orgId)
         .eq('status', 'active')
         .order('first_name')
-      if (orgId) q = (q as any).eq('org_id', orgId)
-      return q
     }
 
-    // Try plain hint first; if PostgREST throws ambiguity, retry with explicit FK
-    let { data, error } = await buildQuery('departments!department_id')
-    if (error && (error.code === 'PGRST201' || error.code === 'PGRST200')) {
+    let { data, error: dbErr } = await buildQuery('departments!department_id')
+    if (dbErr && (dbErr.code === 'PGRST201' || dbErr.code === 'PGRST200')) {
       console.warn('[org-chart] departments hint failed, retrying with explicit FK')
       const retry = await buildQuery('departments!employees_department_id_fkey')
-      data = retry.data; error = retry.error
+      data = retry.data; dbErr = retry.error
     }
-    if (error) throw error
+    if (dbErr) throw dbErr
 
     const employees = (data ?? []) as unknown as Record<string, unknown>[]
 
-    // Build tree: map id → node, then attach children
     const nodeMap = new Map<string, Record<string, unknown>>()
     for (const emp of employees) {
       nodeMap.set(emp.id as string, { ...emp, children: [] })

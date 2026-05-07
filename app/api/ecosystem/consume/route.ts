@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 // Shared secret for ICRM → IHRMS calls (set ECOSYSTEM_SECRET in env)
 const ECOSYSTEM_SECRET = process.env.ECOSYSTEM_SECRET ?? ''

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendAnnouncementEmails } from '@/lib/mailer'
 
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
+
 async function fanOutNotification(
+  orgId: string,
   title: string,
   text: string,
   cat: string,
@@ -16,13 +18,14 @@ async function fanOutNotification(
     let empQuery = supabaseAdmin
       .from('employees')
       .select('id, work_email, first_name, last_name')
+      .eq('org_id', orgId)
       .eq('status', 'active')
 
-    // Narrow to department if audience is department-scoped
     if (dbAudience === 'department' && target_audience) {
       const { data: depts } = await supabaseAdmin
         .from('departments')
         .select('id')
+        .eq('org_id', orgId)
         .ilike('name', `%${target_audience}%`)
         .limit(10)
       if (depts && depts.length > 0) {
@@ -33,12 +36,12 @@ async function fanOutNotification(
     const { data: employees } = await empQuery.limit(500)
     if (!employees || employees.length === 0) return
 
-    // In-app notifications
     const notifTitle = cat === 'urgent' ? `Urgent: ${title}` : `Announcement: ${title}`
     const snippet = text.length > 120 ? text.substring(0, 120) + '…' : text
     const notifType = cat === 'urgent' ? 'warning' : cat === 'holiday' ? 'success' : 'info'
 
     const notifications = (employees as Record<string, unknown>[]).map(emp => ({
+      org_id: orgId,
       recipient_id: emp.id as string,
       title: notifTitle,
       body: snippet,
@@ -46,12 +49,11 @@ async function fanOutNotification(
     }))
     await supabaseAdmin.from('notifications').insert(notifications)
 
-    // Email notifications (fire-and-forget)
     const recipients = (employees as Record<string, unknown>[])
       .filter(e => e.work_email)
       .map(e => ({ email: e.work_email as string, name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || 'Team Member' }))
 
-    sendAnnouncementEmails({ recipients, title, body: text, announcementType: cat, publisherName })
+    sendAnnouncementEmails({ recipients, title, body: text, announcementType: cat, publisherName, orgId })
   } catch (e) {
     console.warn('[announcements] notification fan-out non-fatal:', e)
   }
@@ -66,13 +68,11 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-// Map UI category → DB priority (DB has no category column)
 const CATEGORY_TO_PRIORITY: Record<string, string> = {
   urgent: 'urgent', holiday: 'low', event: 'normal',
   policy: 'high',   general: 'normal',
 }
 
-// Map DB audience string → valid enum value
 function mapAudience(raw: string | null): string {
   if (!raw) return 'all'
   const s = raw.toLowerCase()
@@ -86,7 +86,6 @@ function mapAudience(raw: string | null): string {
   return 'all'
 }
 
-// Use live column names — the actual DB uses content/published_by/announcement_type
 const SELECT = `
   id, title, content, announcement_type, target_audience,
   published_by, is_published, published_at, expires_at,
@@ -95,8 +94,8 @@ const SELECT = `
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const audience   = searchParams.get('audience')
@@ -108,6 +107,7 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('announcements')
       .select(SELECT, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .lte('publish_at', new Date().toISOString())
       .order('is_pinned', { ascending: false })
       .order('publish_at', { ascending: false })
@@ -121,14 +121,14 @@ export async function GET(req: NextRequest) {
       query = query.or(`expires_at.is.null,expires_at.gt.${now}`)
     }
 
-    const { data, error, count } = await query
+    const { data, error: dbErr, count } = await query
 
-    // Fallback: join might fail if employees table relation stales
-    if (error) {
-      console.warn('[announcements GET] join failed, retrying basic:', errMsg(error))
+    if (dbErr) {
+      console.warn('[announcements GET] join failed, retrying basic:', errMsg(dbErr))
       const { data: d2, error: e2, count: c2 } = await supabaseAdmin
         .from('announcements')
         .select('*', { count: 'exact' })
+        .eq('org_id', ctx.orgId)
         .lte('publish_at', new Date().toISOString())
         .order('is_pinned', { ascending: false })
         .order('publish_at', { ascending: false })
@@ -145,30 +145,25 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ADMIN_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>) {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ADMIN_ROLES.includes(role ?? '')
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden — HR Admin role required to post announcements' }, { status: 403 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const {
       title,
-      body: bodyText,     // DB column name
-      content,            // alternative field name from UI
-      category,           // UI type field (holiday/policy/event/urgent/general)
-      type,               // alias for category
-      target_audience,    // UI targeting string
-      audience,           // direct DB value
+      body: bodyText,
+      content,
+      category,
+      type,
+      target_audience,
+      audience,
       is_pinned,
-      priority,           // direct priority override
-      is_urgent,          // boolean flag
+      priority,
+      is_urgent,
       expires_at,
     } = body
 
@@ -177,30 +172,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: title and body/content' }, { status: 400 })
     }
 
-    // Resolve category → priority
     const cat = (category ?? type ?? 'general') as string
     const dbPriority = priority
       ?? (is_urgent ? 'urgent' : null)
       ?? CATEGORY_TO_PRIORITY[cat.toLowerCase()]
       ?? 'normal'
 
-    // Resolve audience
     const dbAudience = audience ?? mapAudience(target_audience)
-
-    const createdBy = (session.user as Record<string, unknown>)?.id as string
-    if (!createdBy) {
-      return NextResponse.json({ error: 'Could not identify publisher from session' }, { status: 400 })
-    }
 
     const now = new Date().toISOString()
     const { data: inserted, error: insertError } = await supabaseAdmin
       .from('announcements')
       .insert({
+        org_id: ctx.orgId,
         title,
         content: text,
         announcement_type: cat,
         target_audience: dbAudience,
-        published_by: createdBy,
+        published_by: ctx.identityId,
         is_published: true,
         published_at: now,
         publish_at: now,
@@ -209,7 +198,7 @@ export async function POST(req: NextRequest) {
         is_pinned: is_pinned ?? false,
         audience: dbAudience,
         body: text,
-        created_by: createdBy,
+        created_by: ctx.identityId,
       })
       .select()
       .single()
@@ -219,14 +208,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: errMsg(insertError) }, { status: 500 })
     }
 
-    // Fan out in-app notifications to target employees (non-blocking)
     const publisherName = await (async () => {
       try {
-        const { data: pub } = await supabaseAdmin.from('employees').select('first_name, last_name').eq('id', createdBy).single()
+        const { data: pub } = await supabaseAdmin.from('employees').select('first_name, last_name').eq('id', ctx.identityId).eq('org_id', ctx.orgId).single()
         return pub ? `${pub.first_name} ${pub.last_name}`.trim() : 'HR'
       } catch { return 'HR' }
     })()
-    fanOutNotification(title, text, cat, dbAudience, target_audience as string | undefined, publisherName)
+    fanOutNotification(ctx.orgId, title, text, cat, dbAudience, target_audience as string | undefined, publisherName)
 
     return NextResponse.json({ data: inserted }, { status: 201 })
   } catch (err) {

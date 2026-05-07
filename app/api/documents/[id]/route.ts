@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { logAudit } from '@/lib/audit'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -13,32 +14,27 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const userId = (session.user as any)?.id as string
-    const isAdminUser = isAdmin(session)
+    const isAdminUser = HR_ROLES.includes(ctx.role)
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('org_documents')
       .select('*')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+      throw dbErr
     }
 
-    if (!isAdminUser && data.employee_id !== userId) {
+    if (!isAdminUser && data.employee_id && data.employee_id !== ctx.identityId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -51,26 +47,35 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const { data: doc } = await supabaseAdmin
       .from('org_documents')
-      .select('storage_path')
+      .select('file_url')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    const { error } = await supabaseAdmin.from('org_documents').delete().eq('id', id)
-    if (error) throw error
+    const { error: dbErr } = await supabaseAdmin
+      .from('org_documents')
+      .delete()
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
+    if (dbErr) throw dbErr
 
-    if (doc?.storage_path) {
-      await supabaseAdmin.storage.from('org-documents').remove([doc.storage_path])
+    if (doc?.file_url) {
+      await supabaseAdmin.storage.from('org-documents').remove([doc.file_url])
     }
 
-    const orgId = (session.user as any)?.orgId as string | null
-    const actorId = (session.user as any)?.id as string
-    if (orgId) logAudit({ org_id: orgId, actor_id: actorId, action: 'deleted', module: 'documents', entity_id: id, summary: 'Document deleted' })
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: 'deleted',
+      module: 'documents',
+      entity_id: id,
+      summary: 'Document deleted',
+    })
 
     return NextResponse.json({ message: 'Document deleted' })
   } catch (err) {

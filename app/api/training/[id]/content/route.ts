@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,24 +13,27 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isHrAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 const VALID_TYPES = ['video', 'document', 'link', 'youtube', 'vimeo']
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: courseId } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const userId = (session.user as any)?.id as string
+    // Verify course belongs to this org
+    {
+      const { data: course } = await supabaseAdmin
+        .from('training_courses').select('id')
+        .eq('id', courseId).eq('org_id', ctx.orgId).maybeSingle()
+      if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
+    }
 
     const { data, error } = await supabaseAdmin
       .from('course_content')
       .select('id, course_id, title, description, content_type, storage_path, external_url, duration_seconds, display_order, created_at')
+      .eq('org_id', ctx.orgId)
       .eq('course_id', courseId)
       .order('display_order', { ascending: true })
       .order('created_at', { ascending: true })
@@ -44,12 +48,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     // Fetch the current user's completion records for this course
     let completedSet = new Set<string>()
-    if (userId && items.length > 0) {
+    if (items.length > 0) {
       const { data: progress } = await supabaseAdmin
         .from('course_content_progress')
         .select('content_id')
+        .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', userId)
+        .eq('employee_id', ctx.identityId)
       for (const row of progress ?? []) completedSet.add((row as any).content_id as string)
     }
 
@@ -68,11 +73,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: courseId } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isHrAdmin(session)) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
+
+    // Verify course belongs to this org
+    {
+      const { data: course } = await supabaseAdmin
+        .from('training_courses').select('id')
+        .eq('id', courseId).eq('org_id', ctx.orgId).maybeSingle()
+      if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
+    }
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { title, description, content_type, storage_path, external_url, duration_seconds, display_order } = body
 
     if (!title)        return NextResponse.json({ error: 'title is required' }, { status: 400 })
@@ -82,9 +96,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!storage_path && !external_url) {
       return NextResponse.json({ error: 'Either storage_path or external_url is required' }, { status: 400 })
     }
-
-    const orgId   = (session.user as any)?.orgId   as string | null
-    const actorId = (session.user as any)?.id      as string
 
     const { data, error } = await supabaseAdmin
       .from('course_content')
@@ -97,8 +108,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         external_url:     external_url ?? null,
         duration_seconds: duration_seconds ?? null,
         display_order:    display_order   ?? 0,
-        org_id:           orgId,
-        created_by:       actorId,
+        org_id:           ctx.orgId,
+        created_by:       ctx.identityId,
       })
       .select()
       .single()

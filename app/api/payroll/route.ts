@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const PAYROLL_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin', 'finance_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -19,8 +20,8 @@ const MONTH_NAMES = [
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const year   = searchParams.get('year')
@@ -30,6 +31,7 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('payroll_runs')
       .select('*', { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('year', { ascending: false })
       .order('month', { ascending: false })
       .limit(limit)
@@ -37,8 +39,8 @@ export async function GET(req: NextRequest) {
     if (year)   query = query.eq('year', parseInt(year))
     if (status) query = query.eq('status', status)
 
-    const { data, error, count } = await query
-    if (error) { console.error('[payroll GET]', error); throw error }
+    const { data, error: dbErr, count } = await query
+    if (dbErr) { console.error('[payroll GET]', dbErr); throw dbErr }
 
     return NextResponse.json({ data, count })
   } catch (err: unknown) {
@@ -49,18 +51,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const userRole = (session.user as any)?.role as string | undefined
-    const PAYROLL_ROLES = ['payroll_admin', 'finance_admin', 'super_admin', 'hr_admin', 'admin']
-    if (!PAYROLL_ROLES.includes(userRole ?? '')) {
-      return NextResponse.json({ error: 'Forbidden — Payroll Admin role required' }, { status: 403 })
-    }
+    const { ctx, error } = await requireRole(PAYROLL_ROLES)
+    if (error) return error
 
     const body = await req.json()
-    const { month, year } = body
+    delete (body as Record<string, unknown>).org_id
 
+    const { month, year } = body
     if (!month || !year) {
       return NextResponse.json({ error: 'Missing required fields: month, year' }, { status: 400 })
     }
@@ -72,10 +69,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'month must be between 1 and 12' }, { status: 400 })
     }
 
-    // Check if payroll run already exists for this month/year
+    // Check if payroll run already exists for this month/year IN THIS ORG
     const { data: existing } = await supabaseAdmin
       .from('payroll_runs')
       .select('id, status')
+      .eq('org_id', ctx.orgId)
       .eq('month', monthNum)
       .eq('year', yearNum)
       .maybeSingle()
@@ -87,17 +85,19 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Get active employee count
+    // Active employee count — scoped to this org
     const { count: employeeCount } = await supabaseAdmin
       .from('employees')
       .select('*', { count: 'exact', head: true })
+      .eq('org_id', ctx.orgId)
       .in('status', ['active', 'probation', 'on_leave', 'notice_period'])
 
     const period_label = `${MONTH_NAMES[monthNum]} ${yearNum}`
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: insErr } = await supabaseAdmin
       .from('payroll_runs')
       .insert({
+        org_id: ctx.orgId,
         month: monthNum,
         year:  yearNum,
         status: 'draft',
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) { console.error('[payroll POST]', error); throw error }
+    if (insErr) { console.error('[payroll POST]', insErr); throw insErr }
 
     return NextResponse.json({ data, period_label }, { status: 201 })
   } catch (err: unknown) {

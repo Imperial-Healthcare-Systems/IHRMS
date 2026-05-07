@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -25,31 +24,25 @@ const ASSET_SELECT = `
   )
 `
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('assets')
       .select(ASSET_SELECT)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
-      const msg = errMsg(error)
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
+      const msg = errMsg(dbErr)
       if (isPgrstErr(msg)) {
-        // Retry without join
         const { data: basic, error: e2 } = await supabaseAdmin
-          .from('assets')
-          .select('*')
-          .eq('id', id)
-          .single()
+          .from('assets').select('*').eq('id', id).eq('org_id', ctx.orgId).single()
         if (e2) return NextResponse.json({ error: errMsg(e2) }, { status: 500 })
         return NextResponse.json({ data: basic })
       }
@@ -62,24 +55,22 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // Removed isAdmin guard — asset management available to all authenticated HR users
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json() as Record<string, unknown>
+    delete body.org_id
+
     const { action, assigned_to, name, brand, model, serial_number, condition, location, notes, purchase_value, purchase_date } = body
 
-    // Fetch the current asset
     const { data: asset, error: fetchError } = await supabaseAdmin
       .from('assets')
       .select('id, status, name')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (fetchError) {
@@ -87,40 +78,37 @@ export async function PATCH(
       return NextResponse.json({ error: errMsg(fetchError) }, { status: 500 })
     }
 
-    // Do NOT include updated_at — managed by Supabase trigger
     const updates: Record<string, unknown> = {}
 
     if (action === 'assign') {
       if (!assigned_to) return NextResponse.json({ error: 'assigned_to (employee ID) is required for assign action' }, { status: 400 })
       if (asset.status !== 'available') return NextResponse.json({ error: `Asset is not available for assignment (current status: ${asset.status})` }, { status: 409 })
+      // Cross-tenant guard
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('id')
+        .eq('id', assigned_to).eq('org_id', ctx.orgId).maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+
       updates.status      = 'assigned'
       updates.assigned_to = assigned_to
-      // assigned_at is stale in schema cache — add it but retry loop will drop it if rejected
       updates.assigned_at = new Date().toISOString()
 
     } else if (action === 'unassign') {
       updates.status      = 'available'
       updates.assigned_to = null
-      // Do NOT include assigned_at — it's stale in schema cache on free tier
 
     } else if (action === 'maintenance') {
       updates.status      = 'under_repair'
       updates.assigned_to = null
-      // Do NOT include assigned_at — stale in schema cache
 
     } else if (action === 'restore') {
       updates.status = 'available'
 
     } else if (action === 'dispose') {
-      // Try 'disposed' first (matches most live DB check constraints).
-      // The retry loop will NOT catch a check-constraint violation (not a schema-cache error),
-      // so we use a two-attempt approach: first 'disposed', fall back to 'retired'.
       updates.status      = 'disposed'
       updates.assigned_to = null
-      // Do NOT include assigned_at — stale in schema cache
 
     } else {
-      // General field updates
       if (name          !== undefined) updates.name          = name
       if (brand         !== undefined) updates.brand         = brand
       if (model         !== undefined) updates.model         = model
@@ -135,9 +123,6 @@ export async function PATCH(
       if (purchase_date  !== undefined) updates.purchase_date  = purchase_date
     }
 
-    // Helper: extract offending column name from any schema-cache error format:
-    //   PostgREST: "Could not find the 'col' column of 'table' in the schema cache"
-    //   PostgreSQL: "column table.col does not exist" | "column \"col\" does not exist"
     function extractBadColumn(msg: string): string | null {
       return (
         msg.match(/Could not find the '(\w+)' column/)?.[1] ??
@@ -147,7 +132,6 @@ export async function PATCH(
       )
     }
 
-    // General field edits (no action) — Supabase REST with schema-cache retry loop
     if (!action) {
       const setCols = Object.fromEntries(
         Object.entries(updates).filter(([, v]) => v !== undefined)
@@ -159,7 +143,7 @@ export async function PATCH(
       let currentEdit = { ...setCols }
       for (let attempt = 0; attempt < 6; attempt++) {
         const { data: d, error: e } = await supabaseAdmin
-          .from('assets').update(currentEdit).eq('id', id).select().single()
+          .from('assets').update(currentEdit).eq('id', id).eq('org_id', ctx.orgId).select().single()
         if (!e) { editData = d; break }
         const msg = errMsg(e)
         const badCol = extractBadColumn(msg)
@@ -175,15 +159,12 @@ export async function PATCH(
       return NextResponse.json({ data: editData })
     }
 
-    // Action-based updates (assign / unassign / maintenance / restore / dispose) —
-    // these only touch status + assigned_to which are core columns always in the schema cache.
-    // Retry loop — drops any stale-cache column and retries, up to 6 times.
     let data: unknown = null
     let currentUpdates = { ...updates }
 
     for (let attempt = 0; attempt < 6; attempt++) {
       const { data: d, error: e } = await supabaseAdmin
-        .from('assets').update(currentUpdates).eq('id', id).select().single()
+        .from('assets').update(currentUpdates).eq('id', id).eq('org_id', ctx.orgId).select().single()
 
       if (!e) { data = d; break }
 
@@ -196,7 +177,6 @@ export async function PATCH(
         continue
       }
 
-      // Check-constraint on status? Try alternate retire value (disposed ↔ retired)
       if (msg.includes('assets_status_check') && 'status' in currentUpdates) {
         const cur = currentUpdates.status as string
         const alt = cur === 'disposed' ? 'retired' : 'disposed'
@@ -205,7 +185,6 @@ export async function PATCH(
         continue
       }
 
-      // Not a column-cache error — real DB error, fail immediately
       console.error('[assets PATCH] non-schema error:', msg)
       return NextResponse.json({ error: msg }, { status: 500 })
     }
@@ -220,19 +199,17 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { data: asset, error: fetchError } = await supabaseAdmin
       .from('assets')
       .select('id, status, name')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (fetchError) {
@@ -244,8 +221,9 @@ export async function DELETE(
       return NextResponse.json({ error: `Only available assets can be deleted (current status: ${asset.status})` }, { status: 409 })
     }
 
-    const { error } = await supabaseAdmin.from('assets').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    const { error: dbErr } = await supabaseAdmin
+      .from('assets').delete().eq('id', id).eq('org_id', ctx.orgId)
+    if (dbErr) return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
 
     return NextResponse.json({ message: `Asset '${asset.name}' deleted successfully` })
   } catch (err) {

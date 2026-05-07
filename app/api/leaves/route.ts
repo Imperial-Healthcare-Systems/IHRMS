@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendLeaveSubmittedEmail } from '@/lib/mailer'
+
+const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'operations_head']
+const MANAGER_ROLES     = ['manager']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -15,8 +17,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const employee_id = searchParams.get('employee_id')
@@ -25,16 +27,8 @@ export async function GET(req: NextRequest) {
     const year        = searchParams.get('year')
     const manager_id  = searchParams.get('manager_id')
     const limit       = parseInt(searchParams.get('limit') ?? '50')
-
-    const userRole = (session.user as any)?.role
-    const userId   = (session.user as any)?.id
-
-    const { searchParams: sp2 } = new URL(req.url)
-    const date_from = sp2.get('date_from')
-    const date_to   = sp2.get('date_to')
-
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr', 'operations_head']
-    const MANAGER_ROLES     = ['manager']
+    const date_from   = searchParams.get('date_from')
+    const date_to     = searchParams.get('date_to')
 
     let query = supabaseAdmin
       .from('leave_requests')
@@ -45,25 +39,26 @@ export async function GET(req: NextRequest) {
           department:departments!employees_department_id_fkey(name)
         )
       `, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
-    if (FULL_ACCESS_ROLES.includes(userRole)) {
+    if (FULL_ACCESS_ROLES.includes(ctx.role)) {
       if (employee_id) query = query.eq('employee_id', employee_id)
-      // else no filter — HR sees all
-    } else if (MANAGER_ROLES.includes(userRole)) {
-      // Scope to direct reports only
+    } else if (MANAGER_ROLES.includes(ctx.role)) {
+      // Direct reports only — also org-scoped
       const { data: team } = await supabaseAdmin
         .from('employees')
         .select('id')
-        .eq('reporting_manager_id', userId)
+        .eq('org_id', ctx.orgId)
+        .eq('reporting_manager_id', ctx.identityId)
         .eq('status', 'active')
       const teamIds = (team ?? []).map((e: any) => e.id as string)
       if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
       query = query.in('employee_id', teamIds)
       if (employee_id && teamIds.includes(employee_id)) query = query.eq('employee_id', employee_id)
     } else {
-      query = query.eq('employee_id', userId)
+      query = query.eq('employee_id', ctx.identityId)
     }
 
     if (status)     query = query.eq('status', status)
@@ -73,8 +68,8 @@ export async function GET(req: NextRequest) {
     if (date_to)    query = query.lte('from_date', date_to)
     if (manager_id) query = query.eq('approved_by', manager_id)
 
-    const { data, error, count } = await query
-    if (error) { console.error('[leaves GET]', error); throw error }
+    const { data, error: dbErr, count } = await query
+    if (dbErr) { console.error('[leaves GET]', dbErr); throw dbErr }
     return NextResponse.json({ data, count })
   } catch (err: unknown) {
     console.error('[leaves GET catch]', errMsg(err))
@@ -84,10 +79,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { leave_type, start_date, end_date, from_date, to_date, days, reason, employee_id } = body
 
     const effectiveFrom = from_date ?? start_date
@@ -97,7 +94,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'leave_type, from_date, to_date, reason are required' }, { status: 400 })
     }
 
-    // Map UI short codes → DB enum values
     const LEAVE_TYPE_MAP: Record<string, string> = {
       CL: 'casual', SL: 'sick', EL: 'earned', LOP: 'unpaid',
       ML: 'maternity', PL: 'paternity', CompOff: 'compensatory',
@@ -108,12 +104,24 @@ export async function POST(req: NextRequest) {
     }
     const dbLeaveType = LEAVE_TYPE_MAP[leave_type] ?? leave_type.toLowerCase()
 
-    const targetEmployee = employee_id ?? (session.user as any)?.id
+    const targetEmployee = employee_id ?? ctx.identityId
 
-    // Overlap check — reject if an active leave already covers any part of the requested range
+    // Cross-tenant guard: if a different employee_id was provided, verify it's in this org
+    if (employee_id && employee_id !== ctx.identityId) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('id', employee_id)
+        .eq('org_id', ctx.orgId)
+        .maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
+
+    // Overlap check — scoped to this employee
     const { data: overlapping } = await supabaseAdmin
       .from('leave_requests')
       .select('id, from_date, to_date, status')
+      .eq('org_id', ctx.orgId)
       .eq('employee_id', targetEmployee)
       .in('status', ['pending', 'approved'])
       .lte('from_date', effectiveTo)
@@ -128,13 +136,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Calculate total_days if not provided
     const msPerDay  = 86400000
     const totalDays = days ?? Math.round((new Date(effectiveTo).getTime() - new Date(effectiveFrom).getTime()) / msPerDay) + 1
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('leave_requests')
       .insert({
+        org_id:      ctx.orgId,
         employee_id: targetEmployee,
         leave_type:  dbLeaveType,
         from_date:   effectiveFrom,
@@ -146,19 +154,21 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) { console.error('[leaves POST]', error); throw error }
+    if (dbErr) { console.error('[leaves POST]', dbErr); throw dbErr }
 
-    // Email HR — fetch employee name + HR emails (non-blocking)
+    // Email HR — fetch HR list within THIS org only
     ;(async () => {
       try {
         const { data: emp } = await supabaseAdmin
           .from('employees')
           .select('first_name, last_name, emp_id')
           .eq('id', targetEmployee)
+          .eq('org_id', ctx.orgId)
           .single()
         const { data: hrs } = await supabaseAdmin
           .from('employees')
           .select('work_email, first_name')
+          .eq('org_id', ctx.orgId)
           .in('role', ['hr_admin', 'hr', 'admin'])
           .eq('status', 'active')
           .limit(5)
@@ -175,6 +185,7 @@ export async function POST(req: NextRequest) {
               toDate: effectiveTo,
               totalDays,
               reason,
+              orgId: ctx.orgId,
             }) : Promise.resolve()
           ))
         }

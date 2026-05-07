@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,20 +13,36 @@ function errMsg(err: unknown): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { course_id, employee_id } = body
 
     if (!course_id) return NextResponse.json({ error: 'course_id is required' }, { status: 400 })
 
-    const enrolleeId = employee_id ?? (session.user as any)?.id as string
+    const enrolleeId = employee_id ?? ctx.identityId
+
+    // Cross-tenant guards
+    {
+      const { data: course } = await supabaseAdmin
+        .from('training_courses').select('id')
+        .eq('id', course_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
+    }
+    if (enrolleeId !== ctx.identityId) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('id')
+        .eq('id', enrolleeId).eq('org_id', ctx.orgId).maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
 
     const { data, error } = await supabaseAdmin
       .from('training_enrollments')
       .upsert(
-        { programme_id: course_id, employee_id: enrolleeId, status: 'enrolled' },
+        { programme_id: course_id, employee_id: enrolleeId, status: 'enrolled', org_id: ctx.orgId },
         { onConflict: 'programme_id,employee_id' }
       )
       .select()
@@ -42,8 +57,9 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { searchParams } = new URL(req.url)
     const course_id = searchParams.get('course_id')
@@ -51,11 +67,26 @@ export async function DELETE(req: NextRequest) {
 
     if (!course_id) return NextResponse.json({ error: 'course_id is required' }, { status: 400 })
 
-    const enrolleeId = employee_id ?? (session.user as any)?.id as string
+    const enrolleeId = employee_id ?? ctx.identityId
+
+    // Cross-tenant guards
+    {
+      const { data: course } = await supabaseAdmin
+        .from('training_courses').select('id')
+        .eq('id', course_id).eq('org_id', ctx.orgId).maybeSingle()
+      if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
+    }
+    if (enrolleeId !== ctx.identityId) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('id')
+        .eq('id', enrolleeId).eq('org_id', ctx.orgId).maybeSingle()
+      if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+    }
 
     const { error } = await supabaseAdmin
       .from('training_enrollments')
       .delete()
+      .eq('org_id', ctx.orgId)
       .eq('programme_id', course_id)
       .eq('employee_id', enrolleeId)
 

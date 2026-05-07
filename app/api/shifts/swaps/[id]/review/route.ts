@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_OR_MANAGER_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'manager', 'operations_head']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -15,21 +16,24 @@ function errMsg(err: unknown): string {
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
+    if (!HR_OR_MANAGER_ROLES.includes(ctx.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { status, reviewer_note } = body
 
     if (!['approved', 'rejected'].includes(status)) {
       return NextResponse.json({ error: 'status must be approved or rejected' }, { status: 400 })
     }
 
-    const reviewerId = (session.user as any)?.id as string
-
     const updates: Record<string, unknown> = {
       status,
-      reviewed_by: reviewerId,
+      reviewed_by: ctx.identityId,
       reviewed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
@@ -39,6 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('shift_swaps')
       .update(updates)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 

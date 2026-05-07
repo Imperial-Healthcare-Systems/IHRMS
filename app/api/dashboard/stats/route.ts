@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const today = new Date().toISOString().split('T')[0]
     const now = new Date()
@@ -26,47 +25,55 @@ export async function GET(_req: NextRequest) {
       supabaseAdmin
         .from('employees')
         .select('id, status, date_of_joining')
+        .eq('org_id', ctx.orgId)
         .neq('status', 'terminated'),
 
       supabaseAdmin
         .from('attendance_daily')
         .select('id, status')
-        .eq('attendance_date', today),
+        .eq('org_id', ctx.orgId)
+        .eq('date', today),
 
       supabaseAdmin
         .from('leave_requests')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .eq('status', 'pending'),
 
       supabaseAdmin
         .from('payroll_runs')
         .select('status, month, year, total_net')
+        .eq('org_id', ctx.orgId)
         .order('created_at', { ascending: false })
         .limit(1),
 
       supabaseAdmin
         .from('job_requisitions')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .eq('status', 'open'),
 
       supabaseAdmin
         .from('expense_claims')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .eq('status', 'submitted'),
 
       supabaseAdmin
         .from('attendance_regularizations')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .eq('status', 'pending'),
 
       supabaseAdmin
         .from('warning_letters')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .gte('issued_date', `${currentYear}-01-01`)
         .neq('status', 'draft'),
     ])
 
-    // --- Headcount breakdown ---
+    // ── Headcount breakdown ──
     const allEmployees = employees.data ?? []
     const totalHeadcount = allEmployees.length
     const activeCount = allEmployees.filter((e) => e.status === 'active').length
@@ -74,12 +81,11 @@ export async function GET(_req: NextRequest) {
     const onNoticeCount = allEmployees.filter((e) => e.status === 'notice_period').length
     const onLeaveCount = allEmployees.filter((e) => e.status === 'on_leave').length
 
-    // New joiners this month
     const newJoinersThisMonth = allEmployees.filter(
       (e) => e.date_of_joining && e.date_of_joining >= thisMonthStart
     ).length
 
-    // --- Today's attendance ---
+    // ── Today's attendance ──
     const attendanceRecords = todayAttendance.data ?? []
     const presentCount = attendanceRecords.filter(
       (a) => ['present', 'work_from_home', 'on_duty', 'half_day', 'late', 'comp_off'].includes(a.status)
@@ -90,7 +96,7 @@ export async function GET(_req: NextRequest) {
     const attendanceRate =
       totalHeadcount > 0 ? Math.round((presentCount / totalHeadcount) * 100) : 0
 
-    // --- Payroll ---
+    // ── Payroll ──
     const payrollRun = (latestPayroll.data ?? [])[0] ?? null
     let periodLabel = null
     if (payrollRun) {

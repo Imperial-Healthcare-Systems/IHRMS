@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,8 +15,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const employee_id  = searchParams.get('employee_id')
@@ -27,8 +28,7 @@ export async function GET(req: NextRequest) {
     const limit        = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset       = parseInt(searchParams.get('offset') ?? '0')
 
-    const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
-    const isAdmin       = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+    const isAdmin = HR_ROLES.includes(ctx.role)
 
     let query = supabaseAdmin
       .from('performance_reviews')
@@ -48,13 +48,14 @@ export async function GET(req: NextRequest) {
         ),
         created_at, updated_at
       `, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
       .range(offset, offset + limit - 1)
 
-    // Scope: non-admins see reviews where they are employee or reviewer
+    // Non-admins see reviews where they are employee or reviewer
     if (!isAdmin) {
-      query = query.or(`employee_id.eq.${sessionUserId},reviewer_id.eq.${sessionUserId}`)
+      query = query.or(`employee_id.eq.${ctx.identityId},reviewer_id.eq.${ctx.identityId}`)
     }
 
     if (employee_id) query = query.eq('employee_id', employee_id)
@@ -68,13 +69,13 @@ export async function GET(req: NextRequest) {
         .lte('review_period_to', `${year}-12-31`)
     }
 
-    const { data, error, count } = await query
-    if (error) {
-      const msg = errMsg(error)
+    const { data, error: dbErr, count } = await query
+    if (dbErr) {
+      const msg = errMsg(dbErr)
       if (msg.includes('does not exist') || msg.includes('PGRST')) {
         return NextResponse.json({ data: [], count: 0 })
       }
-      console.error('[reviews GET]', error)
+      console.error('[reviews GET]', dbErr)
       return NextResponse.json({ error: msg }, { status: 500 })
     }
 
@@ -87,10 +88,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { employee_id, reviewer_id, period_from, period_to, cycle_type, cycle_id, goals, kra_scores, training_needs } = body
 
     if (!employee_id || !reviewer_id || !period_from || !period_to || !cycle_type) {
@@ -105,9 +108,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `cycle_type must be one of: ${VALID_CYCLES.join(', ')}` }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    // Cross-tenant guards
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+
+    const { data: rev } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', reviewer_id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!rev) return NextResponse.json({ error: 'Reviewer not found in your organisation' }, { status: 404 })
+
+    const { data, error: dbErr } = await supabaseAdmin
       .from('performance_reviews')
       .insert({
+        org_id:             ctx.orgId,
         employee_id,
         reviewer_id,
         review_period_from: period_from,
@@ -122,9 +137,9 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) {
-      console.error('[reviews POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[reviews POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data }, { status: 201 })

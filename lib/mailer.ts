@@ -14,7 +14,13 @@ function emailHeader(title: string, subtitle?: string) {
 }
 
 function emailFooter() {
-  return `<p style="font-size:11px;color:#94a3b8;text-align:center;margin:16px 0 0">Imperial Healthcare Systems · This is an automated message, please do not reply.</p>`
+  // The "Powered by IHRMS" watermark is part of every email by default
+  // (per IMPERIAL_TENANT_SPEC v1.0 §9.2). Suppression for full / custom_domain
+  // tenants happens at the call site, where the org's branding is known.
+  return `
+    <p style="font-size:11px;color:#94a3b8;text-align:center;margin:16px 0 4px">Imperial Healthcare Systems · This is an automated message, please do not reply.</p>
+    <p style="font-size:10.5px;color:#cbd5e1;text-align:center;margin:0">Powered by IHRMS (Imperial HRMS) · Made with care in India by Imperial Tech Innovations</p>
+  `
 }
 
 async function createTransporter() {
@@ -23,6 +29,33 @@ async function createTransporter() {
   const nodemailer = (nodemailerModule.default ?? nodemailerModule) as typeof nodemailerModule
   const transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } })
   return { transporter, from }
+}
+
+/**
+ * Resolve the From header for an outgoing message — branded for level-`full`
+ * (and above) tenants when their email_from_addr has been DNS-verified by ops.
+ *
+ * Calling without `orgId` (or for any tenant below level `full`) returns the
+ * platform default from SMTP_FROM. Failure to load branding is silent — we
+ * fall back to platform default rather than risk dropping the email.
+ */
+async function resolveBrandedFrom(orgId?: string): Promise<string> {
+  const platformFrom = getMailConfig().from
+  if (!orgId) return platformFrom
+  try {
+    // Imported lazily so the rest of the mailer module stays lightweight
+    // for callers that don't need branding.
+    const { getOrgBranding } = await import('./branding')
+    const b = await getOrgBranding(orgId)
+    const eligible = b.level === 'full' || b.level === 'custom_domain'
+    if (eligible && b.email_dns_verified && b.email_from_addr) {
+      const addr = b.email_from_addr
+      return b.email_from_name ? `"${b.email_from_name.replace(/"/g, '')}" <${addr}>` : addr
+    }
+  } catch (e) {
+    console.warn('[mailer] resolveBrandedFrom non-fatal:', e instanceof Error ? e.message : e)
+  }
+  return platformFrom
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -38,9 +71,11 @@ export async function sendLeaveSubmittedEmail(params: {
   toDate: string
   totalDays: number
   reason: string
+  orgId?: string
 }) {
   try {
-    const { transporter, from } = await createTransporter()
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
     const { to, hrName, empName, empId, leaveType, fromDate, toDate, totalDays, reason } = params
     const fmt = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
@@ -84,9 +119,11 @@ export async function sendLeaveStatusEmail(params: {
   totalDays: number
   status: 'approved' | 'rejected'
   remarks?: string
+  orgId?: string
 }) {
   try {
-    const { transporter, from } = await createTransporter()
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
     const { to, empName, leaveType, fromDate, toDate, totalDays, status, remarks } = params
     const fmt = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
     const approved = status === 'approved'
@@ -131,10 +168,12 @@ export async function sendAnnouncementEmails(params: {
   body: string
   announcementType: string
   publisherName: string
+  orgId?: string
 }) {
   try {
     if (!params.recipients.length) return
-    const { transporter, from } = await createTransporter()
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
     const { title, body, announcementType, publisherName } = params
 
     const typeCfg: Record<string, { label: string; color: string; bg: string }> = {
@@ -188,9 +227,11 @@ export async function sendWelcomeEmail(params: {
   designation?: string
   department?: string
   joiningDate: string
+  orgId?: string
 }) {
   try {
-    const { transporter, from } = await createTransporter()
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
     const { to, name, empId, designation, department, joiningDate } = params
     const fmt = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -247,13 +288,15 @@ export type SendPayslipEmailParams = {
   pf: string
   payslipHTML: string
   pdfBase64?: string
+  orgId?: string
 }
 
 export async function sendPayslipEmail(p: SendPayslipEmailParams) {
-  const { host, port, user, pass, from, secure } = getMailConfig()
+  const { host, port, user, pass, secure } = getMailConfig()
   const nodemailerModule = await import('nodemailer')
   const nodemailer = (nodemailerModule.default ?? nodemailerModule) as typeof nodemailerModule
   const transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } })
+  const from = await resolveBrandedFrom(p.orgId)
 
   const subject = `Your Payslip for ${p.period} — ${p.name}`
 
@@ -346,6 +389,190 @@ function getMailConfig() {
   }
 
   return { host, port, user, pass, from, secure }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ORG WELCOME — sent after signup completes
+───────────────────────────────────────────────────────────── */
+export async function sendOrgWelcomeEmail(params: {
+  to: string
+  name: string
+  orgName: string
+  trialEndsAt?: string
+  orgId?: string
+}) {
+  try {
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
+    const { to, name, orgName, trialEndsAt } = params
+    const trialFmt = trialEndsAt
+      ? new Date(trialEndsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : null
+
+    const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+        ${emailHeader('Welcome to Imperial', `Your ${orgName} workspace is ready`)}
+        <div style="padding:28px 32px">
+          <p style="font-size:15px;color:#1e293b;margin:0 0 6px">Hi <strong>${name}</strong>,</p>
+          <p style="font-size:13px;color:#64748b;margin:0 0 16px;line-height:1.6">
+            Your workspace <strong>${orgName}</strong> has been created. Sign in any time at
+            <a href="https://imperialhrms.com/login" style="color:#E8622A">imperialhrms.com/login</a> with this email.
+          </p>
+          ${trialFmt ? `<div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:14px 16px;font-size:12px;color:#1e40af;margin-bottom:16px">Your free trial runs until <strong>${trialFmt}</strong>. Add a payment method any time to skip the wait.</div>` : ''}
+          <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:14px 16px;font-size:12px;color:#166534">
+            Next steps: invite your team, create departments, and seed your first holiday list. Everything else can wait.
+          </div>
+          ${emailFooter()}
+        </div>
+      </div>
+    </div>`
+
+    await transporter.sendMail({
+      from, to,
+      subject: `Welcome to Imperial — ${orgName} is ready`,
+      html,
+      text: `Hi ${name}, your workspace ${orgName} has been created. Sign in at imperialhrms.com/login.${trialFmt ? ` Trial ends on ${trialFmt}.` : ''}`,
+    })
+  } catch (e) { console.warn('[mailer] sendOrgWelcomeEmail non-fatal:', e) }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   INVITATION — sent when an admin invites a teammate
+───────────────────────────────────────────────────────────── */
+export async function sendInvitationEmail(params: {
+  to: string
+  orgName: string
+  inviterName: string
+  role: string
+  acceptUrl: string
+  expiresAt: string
+  orgId?: string
+}) {
+  try {
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
+    const { to, orgName, inviterName, role, acceptUrl, expiresAt } = params
+    const expFmt = new Date(expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+
+    const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+        ${emailHeader('You are invited', `Join ${orgName} on Imperial`)}
+        <div style="padding:28px 32px">
+          <p style="font-size:15px;color:#1e293b;margin:0 0 14px">Hello,</p>
+          <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.7">
+            <strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> as a <strong>${role.replace(/_/g, ' ')}</strong> on Imperial Healthcare Systems.
+          </p>
+          <div style="text-align:center;margin:0 0 22px">
+            <a href="${acceptUrl}" style="display:inline-block;background:linear-gradient(135deg,#F47920 0%,#FB8C3A 50%,#E53E1A 100%);color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700;box-shadow:0 4px 14px rgba(244,121,32,0.4)">Accept invitation</a>
+          </div>
+          <p style="font-size:11px;color:#94a3b8;text-align:center;line-height:1.5;margin:0 0 12px">
+            This invite expires on <strong style="color:#475569">${expFmt}</strong>. If the button doesn't work, copy this link into your browser:
+          </p>
+          <p style="font-size:11px;color:#475569;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;word-break:break-all;margin:0 0 12px">${acceptUrl}</p>
+          ${emailFooter()}
+        </div>
+      </div>
+    </div>`
+
+    await transporter.sendMail({
+      from, to,
+      subject: `${inviterName} invited you to ${orgName} on Imperial`,
+      html,
+      text: `${inviterName} invited you to join ${orgName} as ${role}. Accept here: ${acceptUrl} (expires ${expFmt}).`,
+    })
+  } catch (e) { console.warn('[mailer] sendInvitationEmail non-fatal:', e) }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   TRIAL REMINDER — sent 3 / 1 days before trial expiry
+───────────────────────────────────────────────────────────── */
+export async function sendTrialReminderEmail(params: {
+  to: string
+  orgName: string
+  daysLeft: number
+  orgId?: string
+}) {
+  try {
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
+    const { to, orgName, daysLeft } = params
+    const billingUrl = `${process.env.IHRMS_BASE_URL ?? 'https://imperialhrms.com'}/settings/billing`
+
+    const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+        ${emailHeader('Trial ending soon', `${daysLeft} day${daysLeft === 1 ? '' : 's'} left for ${orgName}`)}
+        <div style="padding:28px 32px">
+          <p style="font-size:15px;color:#1e293b;margin:0 0 14px">Hi there,</p>
+          <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.7">
+            Your Imperial trial for <strong>${orgName}</strong> ends in <strong>${daysLeft} day${daysLeft === 1 ? '' : 's'}</strong>.
+            Add a payment method now to keep access uninterrupted — your data stays the same, only billing kicks in.
+          </p>
+          <div style="text-align:center;margin:0 0 18px">
+            <a href="${billingUrl}" style="display:inline-block;background:linear-gradient(135deg,#F47920 0%,#FB8C3A 50%,#E53E1A 100%);color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700;box-shadow:0 4px 14px rgba(244,121,32,0.4)">Add payment method</a>
+          </div>
+          <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:14px 16px;font-size:12px;color:#92400e">
+            What happens after the trial: 3 days of full access (past_due), then 4 days read-only, then 9 days export-only, then deactivation. Data is retained for 90 days after deactivation.
+          </div>
+          ${emailFooter()}
+        </div>
+      </div>
+    </div>`
+
+    await transporter.sendMail({
+      from, to,
+      subject: `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your ${orgName} trial`,
+      html,
+      text: `Your Imperial trial for ${orgName} ends in ${daysLeft} day(s). Add a payment method at ${billingUrl} to keep access.`,
+    })
+  } catch (e) { console.warn('[mailer] sendTrialReminderEmail non-fatal:', e) }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   DEACTIVATION — sent when subscription enters cancelled state
+───────────────────────────────────────────────────────────── */
+export async function sendDeactivationEmail(params: {
+  to: string
+  orgName: string
+  retentionDays: number
+  orgId?: string
+}) {
+  try {
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
+    const { to, orgName, retentionDays } = params
+    const billingUrl = `${process.env.IHRMS_BASE_URL ?? 'https://imperialhrms.com'}/settings/billing`
+
+    const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+        ${emailHeader('Workspace deactivated', `${orgName} access has ended`)}
+        <div style="padding:28px 32px">
+          <p style="font-size:15px;color:#1e293b;margin:0 0 14px">Hello,</p>
+          <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.7">
+            Your Imperial workspace <strong>${orgName}</strong> has been deactivated due to non-payment.
+            Your data is retained for <strong>${retentionDays} days</strong> from today; reactivate any time before then by adding a payment method.
+          </p>
+          <div style="text-align:center;margin:0 0 18px">
+            <a href="${billingUrl}" style="display:inline-block;background:#0F172A;color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700">Reactivate account</a>
+          </div>
+          <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 16px;font-size:12px;color:#991b1b">
+            After ${retentionDays} days, all data — employees, payroll, attendance, documents — is permanently deleted and cannot be recovered.
+          </div>
+          ${emailFooter()}
+        </div>
+      </div>
+    </div>`
+
+    await transporter.sendMail({
+      from, to,
+      subject: `${orgName} has been deactivated`,
+      html,
+      text: `Your Imperial workspace ${orgName} has been deactivated. Data retained for ${retentionDays} days. Reactivate at ${billingUrl}.`,
+    })
+  } catch (e) { console.warn('[mailer] sendDeactivationEmail non-fatal:', e) }
 }
 
 export async function sendOtpEmail({ to, name, otp, expiresInMinutes }: SendOtpEmailParams) {

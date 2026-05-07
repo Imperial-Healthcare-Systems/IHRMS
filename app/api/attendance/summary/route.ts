@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,8 +15,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const month = searchParams.get('month') // YYYY-MM
@@ -23,11 +24,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'month param required (YYYY-MM)' }, { status: 400 })
     }
 
-    const userRole = ((session.user as Record<string, unknown>)?.role as string) ?? 'employee'
-    const userId   = ((session.user as Record<string, unknown>)?.id as string) ?? null
-    const orgId    = ((session.user as Record<string, unknown>)?.orgId as string) ?? null
-    const FULL_ACCESS_ROLES = ['hr_admin', 'super_admin', 'admin', 'hr']
-    const isFullAccess = FULL_ACCESS_ROLES.includes(userRole)
+    const isFullAccess = FULL_ACCESS_ROLES.includes(ctx.role)
 
     const [year, mon] = month.split('-').map(Number)
     const dateFrom = `${month}-01`
@@ -41,7 +38,6 @@ export async function GET(req: NextRequest) {
       if (day !== 0 && day !== 6) workingDays++
     }
 
-    // Fetch attendance records with employee + department info
     let query = supabaseAdmin
       .from('attendance_daily')
       .select(`
@@ -51,16 +47,15 @@ export async function GET(req: NextRequest) {
           department:departments!employees_department_id_fkey(name)
         )
       `)
+      .eq('org_id', ctx.orgId)
       .gte('date', dateFrom)
       .lte('date', dateTo)
 
-    if (orgId) query = query.eq('org_id', orgId)
-    if (!isFullAccess && userId) query = query.eq('employee_id', userId)
+    if (!isFullAccess) query = query.eq('employee_id', ctx.identityId)
 
     const { data: records, error: attErr } = await query
     if (attErr) throw attErr
 
-    // Aggregate per employee (JS-side)
     type EmployeeAgg = {
       empId: string; name: string; department: string
       present: number; absent: number; wfh: number; late: number; otHours: number
@@ -87,7 +82,6 @@ export async function GET(req: NextRequest) {
       if (r.status === 'late') agg.late++
       if (r.total_hours && r.total_hours > 9) agg.otHours += r.total_hours - 9
 
-      // Daily aggregation
       if (!dailyMap.has(r.date)) dailyMap.set(r.date, { present: 0, total: 0 })
       const d = dailyMap.get(r.date)!
       d.total++

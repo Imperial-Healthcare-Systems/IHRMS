@@ -23,7 +23,10 @@ import {
   X,
   Play,
   Briefcase,
+  CreditCard,
+  Palette,
 } from 'lucide-react'
+import Link from 'next/link'
 
 /* ─────────────────────────────────────────────────────────────
    TYPES
@@ -2173,7 +2176,7 @@ function DepartmentsPanel() {
         <div>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-gray-900)', margin: 0 }}>Departments</h3>
           <p style={{ fontSize: '0.8125rem', color: 'var(--color-gray-500)', marginTop: 4 }}>
-            Manage your organisation's departments
+            Manage your organisation&rsquo;s departments
           </p>
         </div>
         <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -2790,6 +2793,45 @@ export default function SettingsPage() {
                 </button>
               )
             })}
+
+            {/* Sibling routes — billing & branding have their own pages so we link out instead of switching panels. */}
+            <Link
+              href="/settings/billing"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 12px',
+                borderRadius: 8,
+                color: 'var(--color-gray-600)',
+                fontWeight: 500,
+                fontSize: '0.875rem',
+                textDecoration: 'none',
+                marginTop: 8,
+                borderTop: '1px solid var(--color-gray-100)',
+                paddingTop: 12,
+              }}
+            >
+              <CreditCard style={{ width: 16, height: 16, flexShrink: 0 }} />
+              Billing & Subscription
+            </Link>
+            <Link
+              href="/settings/branding"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 12px',
+                borderRadius: 8,
+                color: 'var(--color-gray-600)',
+                fontWeight: 500,
+                fontSize: '0.875rem',
+                textDecoration: 'none',
+              }}
+            >
+              <Palette style={{ width: 16, height: 16, flexShrink: 0 }} />
+              Branding
+            </Link>
           </div>
         </nav>
 

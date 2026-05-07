@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const PAYROLL_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin', 'finance_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,11 +13,15 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
+/**
+ * Lists every payslip in a payroll run. HR / payroll admin only — this
+ * exposes everyone's salary, so non-admin users must use /api/payslips/me.
+ */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(PAYROLL_ROLES)
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const search        = searchParams.get('search')
@@ -24,11 +29,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const limit         = parseInt(searchParams.get('limit') ?? '100')
     const offset        = parseInt(searchParams.get('offset') ?? '0')
 
-    // Verify payroll run exists
+    // Verify the payroll run belongs to this org
     const { data: run, error: runError } = await supabaseAdmin
       .from('payroll_runs')
       .select('id, month, year, status')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (runError) {
@@ -37,15 +43,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       throw runError
     }
 
-    let query = supabaseAdmin
+    const query = supabaseAdmin
       .from('payslips')
       .select(`*, employee:employees(id, first_name, last_name, work_email, emp_id)`, { count: 'exact' })
       .eq('payroll_run_id', id)
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: true })
       .range(offset, offset + limit - 1)
 
-    const { data, error, count } = await query
-    if (error) { console.error('[payslips GET]', error); throw error }
+    const { data, error: dbErr, count } = await query
+    if (dbErr) { console.error('[payslips GET]', dbErr); throw dbErr }
 
     let filtered = (data ?? []) as any[]
     if (search) {

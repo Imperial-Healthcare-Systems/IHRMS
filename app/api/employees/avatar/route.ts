@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 const BUCKET = 'avatars'
 const MAX_BYTES = 5 * 1024 * 1024 // 5 MB
@@ -9,11 +8,8 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const userId = (session.user as any)?.id as string
-    if (!userId) return NextResponse.json({ error: 'No user ID in session' }, { status: 400 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const formData = await req.formData()
     const file = formData.get('avatar') as File | null
@@ -27,10 +23,10 @@ export async function POST(req: NextRequest) {
     }
 
     const ext      = file.name.split('.').pop() ?? 'jpg'
-    const filePath = `${userId}/avatar.${ext}`
+    // Org-prefixed path so storage RLS (when applied) can isolate per-tenant
+    const filePath = `${ctx.orgId}/${ctx.identityId}/avatar.${ext}`
     const buffer   = Buffer.from(await file.arrayBuffer())
 
-    // Upload to Supabase Storage (upsert so re-uploads replace the old file)
     const { error: uploadErr } = await supabaseAdmin.storage
       .from(BUCKET)
       .upload(filePath, buffer, {
@@ -40,7 +36,6 @@ export async function POST(req: NextRequest) {
       })
 
     if (uploadErr) {
-      // If bucket doesn't exist yet, surface a helpful message
       if (uploadErr.message?.includes('Bucket not found') || (uploadErr as any).error === 'Bucket not found') {
         return NextResponse.json(
           { error: `Storage bucket "${BUCKET}" not found. Create it in Supabase → Storage.` },
@@ -50,15 +45,14 @@ export async function POST(req: NextRequest) {
       throw uploadErr
     }
 
-    // Get public URL
     const { data: urlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(filePath)
     const publicUrl = urlData.publicUrl
 
-    // Save to employees table
     const { error: updateErr } = await supabaseAdmin
       .from('employees')
       .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
-      .eq('id', userId)
+      .eq('id', ctx.identityId)
+      .eq('org_id', ctx.orgId)
 
     if (updateErr) throw updateErr
 

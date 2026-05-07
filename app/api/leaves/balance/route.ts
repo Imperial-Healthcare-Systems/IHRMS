@@ -1,25 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
-    const employee_id = searchParams.get('employee_id') ?? (session.user as any)?.id
+    const employee_id = searchParams.get('employee_id') ?? ctx.identityId
     const year = parseInt(searchParams.get('year') ?? String(new Date().getFullYear()))
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('leave_balances')
       .select('*')
+      .eq('org_id', ctx.orgId)
       .eq('employee_id', employee_id)
       .eq('year', year)
       .order('leave_type')
 
-    if (error) throw error
+    if (dbErr) throw dbErr
     return NextResponse.json({ data: data ?? [], employee_id, year })
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: 500 })

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin', 'finance_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,7 +15,6 @@ function errMsg(err: unknown): string {
 function isPgrstErr(m: string) {
   return m.includes('does not exist') || m.includes('PGRST') || m.includes('Could not find') || m.includes('ambiguous')
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function safe(fn: () => any): Promise<unknown[]> {
   const { data, error } = await fn()
   if (error) {
@@ -25,12 +25,11 @@ async function safe(fn: () => any): Promise<unknown[]> {
   return (data as unknown[]) ?? []
 }
 
-// Financial year quarter boundaries (Indian FY: Apr–Mar)
 function getQuarter(month: number): number {
-  if (month >= 4 && month <= 6)  return 1  // Q1: Apr–Jun
-  if (month >= 7 && month <= 9)  return 2  // Q2: Jul–Sep
-  if (month >= 10 && month <= 12) return 3  // Q3: Oct–Dec
-  return 4                                  // Q4: Jan–Mar
+  if (month >= 4 && month <= 6)  return 1
+  if (month >= 7 && month <= 9)  return 2
+  if (month >= 10 && month <= 12) return 3
+  return 4
 }
 
 function getQDueDate(q: number, fyEndYear: number): string {
@@ -45,17 +44,16 @@ function getQDueDate(q: number, fyEndYear: number): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const now = new Date()
     const curMonth = now.getMonth() + 1
     const curYear  = now.getFullYear()
-    // Current financial year
     const fyStart = curMonth >= 4 ? curYear : curYear - 1
 
-    const fyParam = searchParams.get('fy') // optional override e.g. "2025-26"
+    const fyParam = searchParams.get('fy')
     let fyStartYear = fyStart
     if (fyParam) {
       const parts = fyParam.split('-')
@@ -63,12 +61,11 @@ export async function GET(req: NextRequest) {
     }
     const fyEndYear = fyStartYear + 1
 
-    // Fetch payslips for FY months: Apr fyStart → Mar fyEnd
-    // Apr–Dec: year = fyStartYear; Jan–Mar: year = fyEndYear
     const rows = await safe(() =>
       supabaseAdmin
         .from('payslips')
         .select('id, month, year, tds, gross_earnings, payment_status')
+        .eq('org_id', ctx.orgId)
         .or(
           `and(year.eq.${fyStartYear},month.gte.4),and(year.eq.${fyEndYear},month.lte.3)`
         )
@@ -77,7 +74,6 @@ export async function GET(req: NextRequest) {
 
     type Row = { id: string; month: number; year: number; tds?: number; gross_earnings?: number; payment_status?: string }
 
-    // Aggregate by quarter
     const qData: Record<number, { tds: number; gross: number; count: number }> = {
       1: { tds: 0, gross: 0, count: 0 },
       2: { tds: 0, gross: 0, count: 0 },

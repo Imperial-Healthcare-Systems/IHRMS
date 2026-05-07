@@ -1,27 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-function isHrAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 /** Returns a signed download URL for an enrolled user (or admin) to stream a video. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string; contentId: string }> }) {
   try {
     const { id: courseId, contentId } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const userId = (session.user as any)?.id as string
-
-    // Fetch content row
+    // Fetch content row (org-scoped)
     const { data: content, error: contentErr } = await supabaseAdmin
       .from('course_content')
       .select('id, course_id, storage_path, external_url')
       .eq('id', contentId)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (contentErr || !content) return NextResponse.json({ error: 'Content not found' }, { status: 404 })
@@ -33,12 +29,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     // For storage-backed videos, verify the user is enrolled (admins bypass)
-    if (!isHrAdmin(session)) {
+    if (!HR_ROLES.includes(ctx.role)) {
       const { data: enrollment } = await supabaseAdmin
         .from('training_enrollments')
         .select('id')
+        .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', userId)
+        .eq('employee_id', ctx.identityId)
         .maybeSingle()
       if (!enrollment) {
         return NextResponse.json({ error: 'You must enrol in this course first' }, { status: 403 })

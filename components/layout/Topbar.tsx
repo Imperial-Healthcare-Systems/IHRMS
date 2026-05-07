@@ -19,6 +19,7 @@ import {
   Menu,
 } from 'lucide-react'
 import { useSidebar } from './SidebarContext'
+import { OrgSwitcher } from './OrgSwitcher'
 
 /* ─────────────────────────────────────────────
    Types
@@ -230,6 +231,11 @@ export function Topbar({ title, subtitle, actions, children }: TopbarProps) {
             <span style={{ fontSize: 9.5, color: '#94A3B8', fontWeight: 600 }}>K</span>
           </div>
         )}
+      </div>
+
+      {/* ── Org switcher (only renders when user has 2+ memberships) ── */}
+      <div className="hidden sm:block">
+        <OrgSwitcher />
       </div>
 
       {/* ── Action Slot (hidden on mobile to prevent topbar overflow) ── */}

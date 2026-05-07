@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const schedule_id = searchParams.get('schedule_id')
@@ -15,7 +14,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required query param: schedule_id' }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    // Verify the schedule belongs to caller's org
+    const { data: sched } = await supabaseAdmin
+      .from('interview_schedules')
+      .select('id')
+      .eq('id', schedule_id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle()
+    if (!sched) return NextResponse.json({ error: 'Schedule not found in your organisation' }, { status: 404 })
+
+    const { data, error: dbErr } = await supabaseAdmin
       .from('interview_feedbacks')
       .select(`
         id, technical_rating, communication_rating, attitude_rating,
@@ -31,9 +39,10 @@ export async function GET(req: NextRequest) {
         created_at, updated_at
       `)
       .eq('schedule_id', schedule_id)
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: true })
 
-    if (error) throw error
+    if (dbErr) throw dbErr
 
     return NextResponse.json({ data })
   } catch (err: unknown) {
@@ -43,79 +52,62 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const {
-      schedule_id,
-      candidate_id,
-      technical_rating,
-      communication_rating,
-      attitude_rating,
-      cultural_fit_rating,
-      overall_rating,
-      remarks,
-      recommendation,
-      strengths,
-      weaknesses,
+      schedule_id, candidate_id,
+      technical_rating, communication_rating, attitude_rating,
+      cultural_fit_rating, overall_rating,
+      remarks, recommendation, strengths, weaknesses,
     } = body
 
     if (
-      !schedule_id ||
-      !candidate_id ||
-      technical_rating === undefined ||
-      communication_rating === undefined ||
-      attitude_rating === undefined ||
-      overall_rating === undefined ||
-      !remarks ||
-      !recommendation
+      !schedule_id || !candidate_id ||
+      technical_rating === undefined || communication_rating === undefined ||
+      attitude_rating === undefined || overall_rating === undefined ||
+      !remarks || !recommendation
     ) {
       return NextResponse.json(
-        {
-          error:
-            'Missing required fields: schedule_id, candidate_id, technical_rating, communication_rating, attitude_rating, overall_rating, remarks, recommendation',
-        },
+        { error: 'Missing required fields: schedule_id, candidate_id, technical_rating, communication_rating, attitude_rating, overall_rating, remarks, recommendation' },
         { status: 400 }
       )
     }
 
-    const interviewerId = (session.user as any)?.id ?? null
+    // Cross-tenant guard: schedule must be in caller's org
+    const { data: sched } = await supabaseAdmin
+      .from('interview_schedules')
+      .select('id, candidate_id')
+      .eq('id', schedule_id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle()
+    if (!sched) return NextResponse.json({ error: 'Schedule not found in your organisation' }, { status: 404 })
 
-    // Insert feedback
     const { data: feedback, error: feedbackError } = await supabaseAdmin
       .from('interview_feedbacks')
       .insert({
+        org_id:               ctx.orgId,
         schedule_id,
-        interviewer_id: interviewerId,
-        technical_rating: parseInt(technical_rating),
+        interviewer_id:       ctx.identityId,
+        technical_rating:     parseInt(technical_rating),
         communication_rating: parseInt(communication_rating),
-        attitude_rating: parseInt(attitude_rating),
-        // cultural_fit_rating stored in overall if no dedicated column; use attitude field or comments
-        overall_rating: parseInt(overall_rating),
-        strengths: strengths ?? null,
-        weaknesses: weaknesses ?? null,
+        attitude_rating:      parseInt(attitude_rating),
+        overall_rating:       parseInt(overall_rating),
+        strengths:            strengths ?? null,
+        weaknesses:           weaknesses ?? null,
         recommendation,
-        comments: remarks + (cultural_fit_rating !== undefined ? ` [cultural_fit:${cultural_fit_rating}]` : ''),
-        submitted_at: new Date().toISOString(),
+        comments:             remarks + (cultural_fit_rating !== undefined ? ` [cultural_fit:${cultural_fit_rating}]` : ''),
+        submitted_at:         new Date().toISOString(),
       })
       .select()
       .single()
 
     if (feedbackError) throw feedbackError
 
-    // Mark the interview schedule as completed
-    const { error: scheduleResultError } = await supabaseAdmin
-      .from('interview_schedules')
-      .update({ result: 'selected', updated_at: new Date().toISOString() })
-      .eq('id', schedule_id)
-
-    if (scheduleResultError) {
-      console.error('Failed to update interview result', scheduleResultError)
-    }
-
-    // Also update the interview_schedules result to reflect completion
-    // (The schema uses `result` for interview outcome; mark with a remark instead)
+    // Mark the interview schedule with feedback-recorded marker
     await supabaseAdmin
       .from('interview_schedules')
       .update({
@@ -123,6 +115,7 @@ export async function POST(req: NextRequest) {
         updated_at: new Date().toISOString(),
       })
       .eq('id', schedule_id)
+      .eq('org_id', ctx.orgId)
 
     return NextResponse.json({ data: feedback }, { status: 201 })
   } catch (err: unknown) {

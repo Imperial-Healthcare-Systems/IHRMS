@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 type ReportType =
   | 'employee_master'
@@ -33,9 +34,9 @@ function isPgrstSchemaError(msg: string) {
 /** Run a query; on schema errors return [] instead of throwing.
  *  Accepts `any` so Supabase's PostgrestFilterBuilder (a thenable, not a
  *  true Promise) is accepted without TypeScript complaining. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function safeQuery(queryFn: () => any): Promise<unknown[]> {
-  const { data, error } = await queryFn()
+async function safeQuery(queryFn: () => unknown): Promise<unknown[]> {
+  const result = await (queryFn() as Promise<{ data: unknown; error: unknown }>)
+  const { data, error } = result
   if (error) {
     const msg = errMsg(error)
     if (isPgrstSchemaError(msg)) {
@@ -58,8 +59,8 @@ const AVAILABLE_REPORTS = [
 
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
     return NextResponse.json({ available_reports: AVAILABLE_REPORTS, formats: ['json', 'csv', 'xlsx'] })
   } catch (err) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
@@ -68,11 +69,12 @@ export async function GET(_req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // Removed isAdmin guard — reports module is accessible to all authenticated HR users
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { report_type, date_from, date_to, department_ids, fields, format } = body as {
       report_type:     ReportType
       date_from?:      string
@@ -112,6 +114,7 @@ export async function POST(req: NextRequest) {
             department:departments!employees_department_id_fkey(id, name, code),
             designation:designations(id, title)
           `)
+          .eq('org_id', ctx.orgId)
           .order('date_of_joining', { ascending: false })
 
         if (department_ids?.length) query = query.in('department_id', department_ids)
@@ -134,7 +137,7 @@ export async function POST(req: NextRequest) {
         let empIds: string[] | undefined
         if (department_ids?.length) {
           const deptEmps = await safeQuery(() =>
-            supabaseAdmin.from('employees').select('id').in('department_id', department_ids)
+            supabaseAdmin.from('employees').select('id').eq('org_id', ctx.orgId).in('department_id', department_ids)
           )
           empIds = deptEmps.map((e) => (e as { id: string }).id)
           if (empIds.length === 0) { data = []; break }
@@ -150,6 +153,7 @@ export async function POST(req: NextRequest) {
               department:departments!employees_department_id_fkey(name)
             )
           `)
+          .eq('org_id', ctx.orgId)
           .gte('attendance_date', date_from)
           .lte('attendance_date', date_to)
           .order('attendance_date', { ascending: true })
@@ -175,6 +179,7 @@ export async function POST(req: NextRequest) {
               designation:designations(title)
             )
           `)
+          .eq('org_id', ctx.orgId)
           .order('year',  { ascending: false })
           .order('month', { ascending: false })
           .limit(2000)
@@ -184,7 +189,7 @@ export async function POST(req: NextRequest) {
 
         if (department_ids?.length) {
           const deptEmps = await safeQuery(() =>
-            supabaseAdmin.from('employees').select('id').in('department_id', department_ids)
+            supabaseAdmin.from('employees').select('id').eq('org_id', ctx.orgId).in('department_id', department_ids)
           )
           const ids = deptEmps.map((e) => (e as { id: string }).id)
           if (ids.length) query = query.in('employee_id', ids)
@@ -209,13 +214,14 @@ export async function POST(req: NextRequest) {
             ),
             policy:leave_policies!policy_id(id, name, leave_type, days_per_year)
           `)
+          .eq('org_id', ctx.orgId)
           .eq('year', currentYear)
           .order('employee_id', { ascending: true })
           .limit(2000)
 
         if (department_ids?.length) {
           const deptEmps = await safeQuery(() =>
-            supabaseAdmin.from('employees').select('id').in('department_id', department_ids)
+            supabaseAdmin.from('employees').select('id').eq('org_id', ctx.orgId).in('department_id', department_ids)
           )
           const ids = deptEmps.map((e) => (e as { id: string }).id)
           if (ids.length) query = query.in('employee_id', ids)
@@ -235,6 +241,7 @@ export async function POST(req: NextRequest) {
             department:departments!employees_department_id_fkey(id, name),
             designation:designations(id, title)
           `)
+          .eq('org_id', ctx.orgId)
           .neq('status', 'terminated')
 
         if (department_ids?.length) query = query.in('department_id', department_ids)
@@ -259,6 +266,7 @@ export async function POST(req: NextRequest) {
         let query = supabaseAdmin
           .from('statutory_compliance')
           .select('*')
+          .eq('org_id', ctx.orgId)
           .order('period_year',  { ascending: false })
           .order('period_month', { ascending: false })
           .limit(500)
@@ -286,7 +294,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       report_type,
       generated_at:  new Date().toISOString(),
-      generated_by:  (session.user as Record<string, unknown>)?.id ?? null,
+      generated_by:  ctx.identityId,
       date_from:     date_from ?? null,
       date_to:       date_to   ?? null,
       format:        format    ?? 'json',

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin', 'finance_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,7 +15,6 @@ function errMsg(err: unknown): string {
 function isPgrstErr(m: string) {
   return m.includes('does not exist') || m.includes('PGRST') || m.includes('Could not find') || m.includes('ambiguous')
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function safe(fn: () => any): Promise<unknown[]> {
   const { data, error } = await fn()
   if (error) {
@@ -27,19 +27,19 @@ async function safe(fn: () => any): Promise<unknown[]> {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const now = new Date()
     const month = parseInt(searchParams.get('month') ?? String(now.getMonth() + 1))
     const year  = parseInt(searchParams.get('year')  ?? String(now.getFullYear()))
 
-    // Query payslips for PT data
     let rows = await safe(() =>
       supabaseAdmin
         .from('payslips')
         .select('id, month, year, gross_earnings, professional_tax, payment_status')
+        .eq('org_id', ctx.orgId)
         .eq('month', month)
         .eq('year', year)
         .limit(2000)
@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
         supabaseAdmin
           .from('payslips')
           .select('id, month, year, gross_earnings, professional_tax, payment_status')
+          .eq('org_id', ctx.orgId)
           .eq('month', actualMonth)
           .eq('year', actualYear)
           .limit(2000)
@@ -67,12 +68,9 @@ export async function GET(req: NextRequest) {
       totalEmployees++
     }
 
-    // Since we don't have state in employees, use aggregate totals only
-    // Build a summary row using PT collected data
     const summary = {
       total_employees: totalEmployees,
       total_pt: totalPt,
-      // PT rate breakdown based on approximate gross ranges
       nil_count:    (rows as Row[]).filter(r => (r.professional_tax ?? 0) === 0).length,
       low_rate_count:  (rows as Row[]).filter(r => { const pt = r.professional_tax ?? 0; return pt > 0 && pt <= 150 }).length,
       high_rate_count: (rows as Row[]).filter(r => (r.professional_tax ?? 0) > 150).length,

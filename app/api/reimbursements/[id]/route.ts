@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -15,8 +16,9 @@ function errMsg(err: unknown): string {
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { data, error } = await supabaseAdmin
       .from('expense_claims')
@@ -29,6 +31,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         )
       `)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (error) {
@@ -37,10 +40,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: errMsg(error) }, { status: 500 })
     }
 
-    const sessionUserId  = (session.user as Record<string, unknown>)?.id as string | undefined
-    const sessionIsAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+    const sessionIsAdmin = HR_ROLES.includes(ctx.role)
 
-    if (!sessionIsAdmin && (data as Record<string, unknown> & { employee?: { id: string } })?.employee?.id !== sessionUserId) {
+    if (!sessionIsAdmin && (data as Record<string, unknown> & { employee?: { id: string } })?.employee?.id !== ctx.identityId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -54,10 +56,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const {
       action,
 
@@ -83,11 +87,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Missing required field: action' }, { status: 400 })
     }
 
-    // Fetch current claim
+    // Fetch current claim (org-scoped)
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('expense_claims')
       .select('id, status, employee_id')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (fetchError) {
@@ -95,15 +100,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       throw fetchError
     }
 
-    const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
-    const isAdmin        = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+    const isAdmin = HR_ROLES.includes(ctx.role)
 
     // 'update' action — employee editing their own pending claim
     if (action === 'update') {
       if (!['draft', 'pending', 'submitted'].includes(current.status)) {
         return NextResponse.json({ error: `Cannot edit a claim with status '${current.status}'` }, { status: 422 })
       }
-      if (current.employee_id !== sessionUserId && !isAdmin) {
+      if (current.employee_id !== ctx.identityId && !isAdmin) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
@@ -127,7 +131,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
 
       const { data, error } = await supabaseAdmin
-        .from('expense_claims').update(editPayload).eq('id', id).select().single()
+        .from('expense_claims').update(editPayload).eq('id', id).eq('org_id', ctx.orgId).select().single()
       if (error) { console.error('[reimbursements PATCH update]', error); return NextResponse.json({ error: errMsg(error) }, { status: 500 }) }
       return NextResponse.json({ data })
     }
@@ -178,6 +182,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('expense_claims')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
@@ -196,17 +201,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const sessionUserId = (session.user as Record<string, unknown>)?.id as string | undefined
-    const isAdmin       = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
+    const isAdmin = HR_ROLES.includes(ctx.role)
 
-    // Fetch the claim to check ownership and status
+    // Fetch the claim to check ownership and status (org-scoped)
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('expense_claims')
       .select('id, status, employee_id')
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (fetchError) {
@@ -214,7 +220,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       throw fetchError
     }
 
-    if (!isAdmin && current.employee_id !== sessionUserId) {
+    if (!isAdmin && current.employee_id !== ctx.identityId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -230,6 +236,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       .from('expense_claims')
       .delete()
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
 
     if (error) {
       console.error('[reimbursements DELETE]', error)

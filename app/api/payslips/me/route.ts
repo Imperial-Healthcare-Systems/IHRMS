@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -18,16 +17,17 @@ const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
 /**
  * GET /api/payslips/me
  * Returns every payslip belonging to the current session user, joined with
- * the payroll run so the UI can show month/year/status. Self-scoped — does
- * not require admin role; HR-admins still see their own payslips here too.
+ * the payroll run so the UI can show month/year/status. Self-scoped — no
+ * admin role required.
+ *
+ * The session's user.id is the employees.id (Path A and Path B both set it
+ * that way), so eq('employee_id', ctx.identityId) does the right thing in
+ * both cases. The org_id filter is defense-in-depth.
  */
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const userId = (session.user as any)?.id as string
-    if (!userId) return NextResponse.json({ error: 'No user id on session' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const buildQuery = (withRun: boolean) => {
       const select = withRun
@@ -36,24 +36,24 @@ export async function GET(_req: NextRequest) {
       return supabaseAdmin
         .from('payslips')
         .select(select)
-        .eq('employee_id', userId)
+        .eq('employee_id', ctx.identityId)  // employees.id (compat layer)
+        .eq('org_id', ctx.orgId)
         .order('created_at', { ascending: false })
     }
 
-    let { data, error } = await buildQuery(true)
-    if (error && (error.code === 'PGRST200' || error.code === 'PGRST201' || error.code === '42703')) {
-      console.warn('[payslips/me] run join failed, retrying without:', error.message)
+    let { data, error: dbErr } = await buildQuery(true)
+    if (dbErr && (dbErr.code === 'PGRST200' || dbErr.code === 'PGRST201' || dbErr.code === '42703')) {
+      console.warn('[payslips/me] run join failed, retrying without:', dbErr.message)
       const retry = await buildQuery(false)
-      data = retry.data; error = retry.error
+      data = retry.data; dbErr = retry.error
     }
 
-    if (error) {
-      console.error('[payslips/me GET]', error)
-      if (error.code === '42P01') return NextResponse.json({ data: [] })
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[payslips/me GET]', dbErr)
+      if (dbErr.code === '42P01') return NextResponse.json({ data: [] })
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
-    // Enrich each row with a "period" label for easy display
     const enriched = (data ?? []).map((p: any) => {
       const run   = p.run ?? null
       const month = run?.month ?? p.month ?? null

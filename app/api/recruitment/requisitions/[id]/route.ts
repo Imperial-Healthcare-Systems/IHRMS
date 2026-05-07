@@ -1,45 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('job_requisitions')
       .select(`
         id, title, employment_type, no_of_positions, filled_positions,
         location, min_experience_years, max_experience_years,
         min_ctc, max_ctc, skills_required, job_description,
         status, priority, target_date,
-        department:departments(id, name, code),
+        department:departments!job_requisitions_department_id_fkey(id, name, code),
         designation:designations(id, title),
         raised_by:employees!job_requisitions_raised_by_fkey(id, first_name, last_name, emp_id),
         approved_by:employees!job_requisitions_approved_by_fkey(id, first_name, last_name, emp_id),
         created_at, updated_at
       `)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
+      throw dbErr
     }
 
-    // Count candidates for this requisition
     const { count: candidatesCount } = await supabaseAdmin
       .from('candidates')
       .select('*', { count: 'exact', head: true })
+      .eq('org_id', ctx.orgId)
       .eq('requisition_id', id)
 
-    // Count by stage
     const { data: stageCounts } = await supabaseAdmin
       .from('candidates')
       .select('status')
+      .eq('org_id', ctx.orgId)
       .eq('requisition_id', id)
 
     const stageBreakdown: Record<string, number> = {}
@@ -60,23 +62,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
-    // Strip immutable fields
-    const { id: _id, created_at: _ca, raised_by: _rb, ...updates } = body
+    const { id: _id, created_at: _ca, raised_by: _rb, org_id: _oi, ...updates } = body
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('job_requisitions')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
+      throw dbErr
     }
 
     return NextResponse.json({ data })
@@ -85,25 +87,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
-    const isAdmin = (session.user as any)?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
-
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('job_requisitions')
       .update({ status: 'closed', updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select('id, title, status')
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
+      throw dbErr
     }
 
     return NextResponse.json({ data, message: 'Requisition closed successfully' })

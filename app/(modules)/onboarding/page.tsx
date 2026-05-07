@@ -412,7 +412,7 @@ export default function OnboardingPage() {
                   <div style={{ textAlign: 'center', padding: '48px 24px' }}>
                     <UserPlus size={40} style={{ color: '#d1d5db', marginBottom: 14 }} />
                     <p style={{ fontWeight: 600, color: '#374151', marginBottom: 8 }}>No employees in onboarding.</p>
-                    <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: 18 }}>Employees with status "probation" appear here automatically.</p>
+                    <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: 18 }}>Employees with status &ldquo;probation&rdquo; appear here automatically.</p>
                     <button onClick={() => setShowModal(true)} style={BTN_PRIMARY}>Start Onboarding</button>
                   </div>
                 ) : (

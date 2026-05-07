@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,8 +15,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const status        = searchParams.get('status')
@@ -36,6 +37,7 @@ export async function GET(req: NextRequest) {
           designation:designations(id, title),
           created_at, updated_at
         `, { count: 'exact' })
+        .eq('org_id', ctx.orgId)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1)
       if (status)        q = q.eq('status', status)
@@ -44,16 +46,15 @@ export async function GET(req: NextRequest) {
       return q
     }
 
-    // Try plain hint first; if PostgREST throws ambiguity, retry with explicit FK name
-    let { data, error, count } = await buildQuery('departments')
-    if (error && error.code === 'PGRST201') {
+    let { data, error: dbErr, count } = await buildQuery('departments')
+    if (dbErr && dbErr.code === 'PGRST201') {
       console.warn('[requisitions GET] departments ambiguous, retrying with explicit FK')
       const retry = await buildQuery('departments!job_requisitions_department_id_fkey')
-      data = retry.data; error = retry.error; count = retry.count
+      data = retry.data; dbErr = retry.error; count = retry.count
     }
-    if (error) {
-      console.error('[requisitions GET]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[requisitions GET]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data: data ?? [], count, limit, offset })
@@ -65,25 +66,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const {
-      title,
-      department_id,
-      designation_id,
-      location,
-      employment_type,
-      openings,
-      min_experience_years,
-      max_experience_years,
-      min_ctc,
-      max_ctc,
-      skills_required,
-      job_description,
-      priority,
-      target_date,
+      title, department_id, designation_id, location,
+      employment_type, openings,
+      min_experience_years, max_experience_years,
+      min_ctc, max_ctc, skills_required, job_description,
+      priority, target_date,
     } = body
 
     if (!title || !department_id || !location || !employment_type || !openings || min_experience_years === undefined) {
@@ -93,11 +87,19 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const postedById = (session.user as any)?.id ?? null
+    // Verify dept belongs to org
+    const { data: dept } = await supabaseAdmin
+      .from('departments')
+      .select('id')
+      .eq('id', department_id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle()
+    if (!dept) return NextResponse.json({ error: 'Department not found in your organisation' }, { status: 404 })
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('job_requisitions')
       .insert({
+        org_id: ctx.orgId,
         title,
         department_id,
         designation_id: designation_id ?? null,
@@ -114,14 +116,14 @@ export async function POST(req: NextRequest) {
         status: 'open',
         priority: priority ?? 'medium',
         target_date: target_date ?? null,
-        raised_by: postedById,
+        raised_by: ctx.identityId,
       })
       .select()
       .single()
 
-    if (error) {
-      console.error('[requisitions POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[requisitions POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     return NextResponse.json({ data }, { status: 201 })

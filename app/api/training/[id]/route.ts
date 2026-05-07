@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { logAudit } from '@/lib/audit'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -13,16 +14,12 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-function isAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
-
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const { data, error } = await supabaseAdmin
       .from('training_courses')
@@ -32,6 +29,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           employee:employees!employee_id(id, first_name, last_name, emp_id))
       `)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
     if (error) {
@@ -47,11 +45,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
     const { title, description, trainer, start_date, end_date, status } = body
 
     const updates: Record<string, unknown> = {}
@@ -66,14 +65,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from('training_courses')
       .update(updates)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
     if (error) throw error
 
-    const orgId = (session.user as any)?.orgId as string | null
-    const actorId = (session.user as any)?.id as string
-    if (orgId) logAudit({ org_id: orgId, actor_id: actorId, action: 'updated', module: 'training', entity_id: id, summary: 'Training course updated' })
+    logAudit({ org_id: ctx.orgId, actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId, action: 'updated', module: 'training', entity_id: id, summary: 'Training course updated' })
 
     return NextResponse.json({ data })
   } catch (err) {

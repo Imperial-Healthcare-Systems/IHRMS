@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 // Vercel Cron: runs 1st of every month at 01:00 UTC
 // Decision Gate #1: monthly accrual

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 // Vercel Cron: runs every Monday at 06:00 UTC (vercel.json schedule: "0 6 * * 1")
 // Generates a weekly headcount snapshot into report_snapshots table.

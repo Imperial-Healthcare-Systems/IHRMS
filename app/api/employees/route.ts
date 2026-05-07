@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendWelcomeEmail } from '@/lib/mailer'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -15,8 +16,8 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const status          = searchParams.get('status')
@@ -26,13 +27,14 @@ export async function GET(req: NextRequest) {
     const limit           = Math.min(parseInt(searchParams.get('limit') ?? '50'), 500)
     const offset          = parseInt(searchParams.get('offset') ?? '0')
 
-    // ── Step 1: core employee query (only columns we know exist from auth-utils) ──
+    // ── Step 1: core employee query (org-scoped) ──
     let query = supabaseAdmin
       .from('employees')
       .select(
         'id, first_name, last_name, status, employment_type, work_location, work_type, avatar_url',
         { count: 'exact' }
       )
+      .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
@@ -56,20 +58,20 @@ export async function GET(req: NextRequest) {
     type Extra = { id: string; emp_id?: string; email?: string; work_email?: string; phone?: string; personal_phone?: string; hire_date?: string; date_of_joining?: string; role?: string; is_admin?: boolean }
     const extraMap: Record<string, Extra> = {}
 
-    // Try to get emp_id / role / is_admin (exist based on auth-utils)
     try {
       const { data: ids_data } = await supabaseAdmin
         .from('employees')
         .select('id, emp_id, role, is_admin')
+        .eq('org_id', ctx.orgId)
         .in('id', ids)
       if (ids_data) ids_data.forEach(r => { extraMap[r.id] = { ...extraMap[r.id], ...r } })
     } catch { /* skip */ }
 
-    // Try work_email / personal_phone / date_of_joining (schema column names)
     try {
       const { data: contact } = await supabaseAdmin
         .from('employees')
         .select('id, work_email, personal_phone, date_of_joining')
+        .eq('org_id', ctx.orgId)
         .in('id', ids)
       if (contact) contact.forEach((r: Extra) => {
         extraMap[r.id] = {
@@ -81,34 +83,34 @@ export async function GET(req: NextRequest) {
       })
     } catch { /* skip */ }
 
-    // Try department join — use explicit FK hint to avoid silent failures
     type EmpDept = { id: string; department_id?: string; department?: { id: string; name: string; code: string } | null }
     const deptMap: Record<string, EmpDept['department']> = {}
     try {
       const { data: depts, error: deptErr } = await supabaseAdmin
         .from('employees')
         .select('id, department_id, department:departments!employees_department_id_fkey(id, name, code)')
+        .eq('org_id', ctx.orgId)
         .in('id', ids)
       if (deptErr) throw deptErr
       if (depts) (depts as unknown as EmpDept[]).forEach(r => { deptMap[r.id] = r.department ?? null })
     } catch {
-      // Fallback: try without FK hint
       try {
         const { data: depts2 } = await supabaseAdmin
           .from('employees')
           .select('id, department:departments(id, name, code)')
+          .eq('org_id', ctx.orgId)
           .in('id', ids)
         if (depts2) (depts2 as unknown as EmpDept[]).forEach(r => { deptMap[r.id] = r.department ?? null })
       } catch { /* skip */ }
     }
 
-    // Try designation join
     type EmpDesig = { id: string; designation?: { id: string; title: string; level?: number } | null }
     const desigMap: Record<string, { id: string; title: string; grade: string } | null> = {}
     try {
       const { data: desigs } = await supabaseAdmin
         .from('employees')
         .select('id, designation:designations(id, title, level)')
+        .eq('org_id', ctx.orgId)
         .in('id', ids)
       if (desigs) (desigs as unknown as EmpDesig[]).forEach(r => {
         desigMap[r.id] = r.designation
@@ -132,7 +134,6 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // ── Step 4: assemble final response ──
     const data = filtered.map(e => {
       const ex = extraMap[e.id] ?? {}
       return {
@@ -166,12 +167,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const isAdmin = (session.user as { isAdmin?: boolean })?.isAdmin
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    // Strip org_id paranoidally — never trust client
+    delete (body as Record<string, unknown>).org_id
+
     const {
       first_name, last_name, email, phone, department_id, designation_id,
       employment_type, hire_date, work_location, work_type, ctc_annual,
@@ -186,18 +188,21 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    // Auto-generate EMP ID
+    // Auto-generate EMP ID — scoped to this org's employee count
     const year = new Date().getFullYear()
-    const { count } = await supabaseAdmin.from('employees').select('*', { count: 'exact', head: true })
+    const { count } = await supabaseAdmin
+      .from('employees')
+      .select('*', { count: 'exact', head: true })
+      .eq('org_id', ctx.orgId)
     const seq = (count ?? 0) + 1
     const emp_id = `EMP/${year}/${String(seq).padStart(3, '0')}`
 
-    // Probation end date — 6 months from joining
     const hireDate = new Date(hire_date)
     const probation_end_date = new Date(hire_date)
     probation_end_date.setMonth(hireDate.getMonth() + 6)
 
     const insertPayload: Record<string, unknown> = {
+      org_id: ctx.orgId,                  // canonical — from JWT, never from body
       employee_code: emp_id,
       first_name,
       last_name,
@@ -216,7 +221,6 @@ export async function POST(req: NextRequest) {
       role:     role     ?? 'employee',
       is_admin: false,
       probation_end_date: probation_end_date.toISOString().split('T')[0],
-      // Schema column names
       email,
       work_email:      email,
       personal_phone:  phone ?? null,
@@ -228,23 +232,23 @@ export async function POST(req: NextRequest) {
     if (gender)              insertPayload.gender         = gender
     if (date_of_birth)       insertPayload.date_of_birth  = date_of_birth
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: insErr } = await supabaseAdmin
       .from('employees')
       .insert(insertPayload)
       .select()
       .single()
 
-    if (error) {
-      console.error('[employees POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (insErr) {
+      console.error('[employees POST]', insErr)
+      return NextResponse.json({ error: errMsg(insErr) }, { status: 500 })
     }
 
-    // Create salary structure if CTC provided (non-critical)
     if (ctc_annual && data?.id) {
       const basic = Math.round(ctc_annual * 0.4 / 12)
       const hra   = Math.round(ctc_annual * 0.2 / 12)
       try {
         await supabaseAdmin.from('salary_structures').insert({
+          org_id: ctx.orgId,
           employee_id: data.id,
           effective_from: hire_date,
           ctc_annual,
@@ -255,16 +259,15 @@ export async function POST(req: NextRequest) {
       } catch { /* non-critical */ }
     }
 
-    // Create probation review (non-critical)
     try {
       await supabaseAdmin.from('probation_reviews').insert({
+        org_id: ctx.orgId,
         employee_id: data.id,
         due_date: probation_end_date.toISOString().split('T')[0],
         outcome: 'pending',
       })
     } catch { /* non-critical */ }
 
-    // Welcome email (non-blocking)
     if (email) {
       sendWelcomeEmail({
         to: email,
@@ -273,6 +276,7 @@ export async function POST(req: NextRequest) {
         joiningDate: hire_date,
         designation: body.designation_title,
         department: body.department_name,
+        orgId: ctx.orgId,
       }).catch(() => {})
     }
 

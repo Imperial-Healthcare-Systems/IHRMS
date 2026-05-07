@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -20,17 +19,16 @@ function errMsg(err: unknown): string {
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; contentId: string }> }) {
   try {
     const { id: courseId, contentId } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireAuth()
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
-    const userId = (session.user as any)?.id as string
-    if (!userId) return NextResponse.json({ error: 'No user id on session' }, { status: 401 })
-
-    // Verify content belongs to this course
+    // Verify content belongs to this course AND this org
     const { data: content, error: cErr } = await supabaseAdmin
       .from('course_content')
       .select('id, course_id')
       .eq('id', contentId)
+      .eq('org_id', ctx.orgId)
       .single()
     if (cErr || !content)                  return NextResponse.json({ error: 'Content not found' }, { status: 404 })
     if (content.course_id !== courseId)    return NextResponse.json({ error: 'Course/content mismatch' }, { status: 400 })
@@ -39,7 +37,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const { error: progErr } = await supabaseAdmin
       .from('course_content_progress')
       .upsert(
-        { course_id: courseId, content_id: contentId, employee_id: userId },
+        { course_id: courseId, content_id: contentId, employee_id: ctx.identityId, org_id: ctx.orgId },
         { onConflict: 'content_id,employee_id', ignoreDuplicates: false },
       )
     if (progErr) {
@@ -52,12 +50,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       supabaseAdmin
         .from('course_content')
         .select('id', { count: 'exact', head: true })
+        .eq('org_id', ctx.orgId)
         .eq('course_id', courseId),
       supabaseAdmin
         .from('course_content_progress')
         .select('id', { count: 'exact', head: true })
+        .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', userId),
+        .eq('employee_id', ctx.identityId),
     ])
 
     const total      = totalItems ?? 0
@@ -71,14 +71,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       let { error: enrollErr } = await supabaseAdmin
         .from('training_enrollments')
         .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', userId)
+        .eq('employee_id', ctx.identityId)
       if (enrollErr && enrollErr.code === '42703') {
         const retry = await supabaseAdmin
           .from('training_enrollments')
           .update({ status: 'completed', completed_at: new Date().toISOString() })
+          .eq('org_id', ctx.orgId)
           .eq('programme_id', courseId)
-          .eq('employee_id', userId)
+          .eq('employee_id', ctx.identityId)
         enrollErr = retry.error
       }
       if (enrollErr) console.warn('[content complete] enrollment update non-fatal:', enrollErr.message)

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
+const ELEVATED_ROLES = ['super_admin', 'hr_admin', 'manager', 'operations_head', 'payroll_admin', 'finance_admin', 'owner', 'admin', 'crm_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -12,22 +14,21 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-const ADMIN_ROLES = ['super_admin', 'hr_admin', 'manager', 'operations_head', 'payroll_admin', 'finance_admin']
-
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('employees')
       .select('id, first_name, last_name, emp_id, employee_code, work_email, role, is_admin, status, updated_at, departments!employees_department_id_fkey(name)')
-      .in('role', ADMIN_ROLES)
+      .eq('org_id', ctx.orgId)
+      .in('role', ELEVATED_ROLES)
       .order('first_name')
 
-    if (error) {
-      console.error('[admin-users GET]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[admin-users GET]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     type EmpRow = Record<string, unknown>
@@ -55,8 +56,8 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json() as { action?: string; q?: string; employee_id?: string; role?: string }
 
@@ -64,21 +65,19 @@ export async function POST(req: NextRequest) {
     if (body.action === 'search') {
       const raw = (body.q ?? '').trim()
       if (raw.length < 2) return NextResponse.json({ data: [] })
-      // PostgREST .or() uses * as wildcard for ilike (not %)
       const q = `*${raw}*`
 
-      // Use Supabase REST — fast HTTP, no cold TCP connection overhead.
-      // Avoid: joining departments (PGRST201 risk), selecting non-existent columns.
-      const { data, error } = await supabaseAdmin
+      const { data, error: dbErr } = await supabaseAdmin
         .from('employees')
         .select('id, first_name, last_name, emp_id, employee_code, work_email, role, is_admin')
+        .eq('org_id', ctx.orgId)
         .eq('status', 'active')
         .or(`first_name.ilike.${q},last_name.ilike.${q}`)
         .limit(10)
 
-      if (error) {
-        console.error('[admin-users search]', error)
-        return NextResponse.json({ error: error.message, data: [] }, { status: 500 })
+      if (dbErr) {
+        console.error('[admin-users search]', dbErr)
+        return NextResponse.json({ error: dbErr.message, data: [] }, { status: 500 })
       }
 
       type EmpRow = Record<string, unknown>
@@ -94,22 +93,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ data: mapped })
     }
 
-    // ── Add / promote to admin ───────────────────────────────────────────────
+    // ── Add / promote to admin (HR only) ─────────────────────────────────────
+    if (!HR_ROLES.includes(ctx.role)) {
+      return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    }
     if (!body.employee_id || !body.role) {
       return NextResponse.json({ error: 'employee_id and role are required' }, { status: 400 })
     }
 
-    // Use Supabase REST — fast HTTP, no cold TCP connection.
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('employees')
       .update({ role: body.role, is_admin: true })
       .eq('id', body.employee_id)
+      .eq('org_id', ctx.orgId)
       .select('id, first_name, last_name, emp_id, employee_code, role, is_admin, status, work_email')
       .single()
 
-    if (error) {
-      console.error('[admin-users POST add]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: error.code === 'PGRST116' ? 404 : 500 })
+    if (dbErr) {
+      console.error('[admin-users POST add]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: dbErr.code === 'PGRST116' ? 404 : 500 })
     }
 
     const e = data as Record<string, unknown>

@@ -785,7 +785,7 @@ export default function ProfilePage() {
                             <span>By: <strong className="text-gray-600">{w.issued_by ? `${w.issued_by.first_name} ${w.issued_by.last_name}` : 'HR'}</strong></span>
                           </div>
                           {w.employee_remarks && (
-                            <p className="mt-2 text-xs text-gray-500 italic">Your remarks: "{w.employee_remarks}"</p>
+                            <p className="mt-2 text-xs text-gray-500 italic">Your remarks: &ldquo;{w.employee_remarks}&rdquo;</p>
                           )}
                           {!isAcked && (
                             <button

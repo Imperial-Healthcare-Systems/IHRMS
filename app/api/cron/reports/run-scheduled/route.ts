@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 // Vercel Cron: runs daily at 07:00 UTC (vercel.json schedule: "0 7 * * *")
 // Processes all active scheduled reports and records execution.

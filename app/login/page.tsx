@@ -17,6 +17,7 @@ import {
   Shield,
   Users,
 } from 'lucide-react'
+import PoweredByImperial from '@/components/branding/PoweredByImperial'
 
 const features = [
   { icon: Users, label: 'Hire-to-Retire Lifecycle', desc: 'End-to-end employee management from recruitment to exit' },
@@ -343,6 +344,9 @@ export default function LoginPage() {
               </span>
             </div>
             <p style={{ fontSize: '11.5px', color: '#CBD5E1' }}>Copyright {new Date().getFullYear()} Imperial Healthcare Systems | IHRMS v2.0</p>
+            <div style={{ marginTop: 10 }}>
+              <PoweredByImperial context="auth" forceShow />
+            </div>
           </div>
         </div>
       </div>

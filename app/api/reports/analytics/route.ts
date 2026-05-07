@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -17,13 +18,15 @@ const PALETTE = ['#1E3A5F','#E8622A','#1A7A4A','#7C3AED','#0369A1','#BE185D','#0
 
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     // ── 1. Active employees + department breakdown ──
     const { data: empData, error: empErr } = await supabaseAdmin
       .from('employees')
       .select('id, status, department:departments!employees_department_id_fkey(id, name)')
+      .eq('org_id', ctx.orgId)
       .neq('status', 'terminated')
 
     if (empErr) {
@@ -64,6 +67,7 @@ export async function GET(_req: NextRequest) {
     const { data: runs, error: runErr } = await supabaseAdmin
       .from('payroll_runs')
       .select('month, year, total_employees, total_net, status')
+      .eq('org_id', ctx.orgId)
       .order('year',  { ascending: false })
       .order('month', { ascending: false })
       .limit(12)

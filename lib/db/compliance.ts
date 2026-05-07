@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 const EPF_WAGE_CEILING = 15000
 const EPF_EE_RATE = 0.12

@@ -1,26 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-function isHrAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
-}
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: courseId } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isHrAdmin(session)) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
+
+    // Verify course belongs to this org
+    {
+      const { data: course } = await supabaseAdmin
+        .from('training_courses').select('id')
+        .eq('id', courseId).eq('org_id', ctx.orgId).maybeSingle()
+      if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
+    }
 
     const body = await req.json()
     const { file_name, content_type } = body
     if (!file_name) return NextResponse.json({ error: 'file_name required' }, { status: 400 })
 
     const safeName = file_name.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const path = `${courseId}/${Date.now()}-${safeName}`
+    // Org-prefixed path so storage RLS isolates per tenant.
+    // The course UUID stays as a sub-folder for human readability.
+    const path = `${ctx.orgId}/${courseId}/${Date.now()}-${safeName}`
 
     const { data, error } = await supabaseAdmin.storage
       .from('course-content')

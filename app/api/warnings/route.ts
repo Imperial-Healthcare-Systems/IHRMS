@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
+const FULL_ACCESS = [...HR_ROLES, 'manager', 'operations_head']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -14,7 +16,6 @@ function errMsg(err: unknown): string {
   return String(err)
 }
 
-// Use * for base table columns — avoids PGRST204 if schema drifts
 const WARNING_SELECT = `
   *,
   employee:employees!employee_id(
@@ -29,8 +30,8 @@ const WARNING_SELECT = `
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const { searchParams } = new URL(req.url)
     const employee_id = searchParams.get('employee_id')
@@ -39,39 +40,36 @@ export async function GET(req: NextRequest) {
     const limit       = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset      = parseInt(searchParams.get('offset') ?? '0')
 
-    const userRole = (session.user as Record<string, unknown>)?.role as string | undefined
-    const userId   = (session.user as Record<string, unknown>)?.id   as string | undefined
-    const FULL_ACCESS = ['hr_admin', 'super_admin', 'admin', 'hr', 'manager', 'operations_head']
-    const isFullAccess = FULL_ACCESS.includes(userRole ?? '')
+    const isFullAccess = FULL_ACCESS.includes(ctx.role)
 
     let query = supabaseAdmin
       .from('warning_letters')
       .select(WARNING_SELECT, { count: 'exact' })
+      .eq('org_id', ctx.orgId)
       .order('issued_date', { ascending: false })
       .limit(limit)
       .range(offset, offset + limit - 1)
 
-    // Employees only see their own records
     if (!isFullAccess) {
-      query = query.eq('employee_id', userId as string)
+      query = query.eq('employee_id', ctx.identityId)
     } else if (employee_id) {
       query = query.eq('employee_id', employee_id)
     }
-    if (status)      query = query.eq('status', status)
+    if (status) query = query.eq('status', status)
     if (year) {
       query = query
         .gte('issued_date', `${year}-01-01`)
         .lte('issued_date', `${year}-12-31`)
     }
 
-    const { data, error, count } = await query
+    const { data, error: dbErr, count } = await query
 
-    if (error) {
-      const msg = errMsg(error)
+    if (dbErr) {
+      const msg = errMsg(dbErr)
       if (msg.includes('does not exist') || msg.includes('PGRST') || msg.includes('Could not find')) {
         return NextResponse.json({ data: [], count: 0 })
       }
-      console.error('[warnings GET]', error)
+      console.error('[warnings GET]', dbErr)
       return NextResponse.json({ error: msg }, { status: 500 })
     }
 
@@ -84,13 +82,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const isAdmin = (session.user as Record<string, unknown>)?.isAdmin as boolean | undefined
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { employee_id, issued_by, date, subject, description } = body
 
     if (!employee_id || !issued_by || !subject || !description) {
@@ -100,15 +97,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Cross-tenant guard
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
+
     const today = new Date().toISOString().split('T')[0]
     const currentYear = new Date().getFullYear()
 
-    const { data: warning, error } = await supabaseAdmin
+    const { data: warning, error: dbErr } = await supabaseAdmin
       .from('warning_letters')
       .insert({
-        employee_id,
-        issued_by,
-        subject,
+        org_id: ctx.orgId,
+        employee_id, issued_by, subject,
         issued_date: date || today,
         description,
         status: 'issued',
@@ -116,15 +118,16 @@ export async function POST(req: NextRequest) {
       .select(WARNING_SELECT)
       .single()
 
-    if (error) {
-      console.error('[warnings POST]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      console.error('[warnings POST]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
-    // Count warnings for this employee in current year
+    // Count this employee's warnings in current year — scoped to org
     const { count: warningCount } = await supabaseAdmin
       .from('warning_letters')
       .select('*', { count: 'exact', head: true })
+      .eq('org_id', ctx.orgId)
       .eq('employee_id', employee_id)
       .gte('issued_date', `${currentYear}-01-01`)
       .lte('issued_date', `${currentYear}-12-31`)
@@ -136,19 +139,28 @@ export async function POST(req: NextRequest) {
       const { error: exitErr } = await supabaseAdmin
         .from('exit_processes')
         .upsert(
-          { employee_id, exit_type: 'termination', reason: `3 warnings issued in calendar year ${currentYear}` },
+          { org_id: ctx.orgId, employee_id, exit_type: 'termination', reason: `3 warnings issued in calendar year ${currentYear}` },
           { onConflict: 'employee_id', ignoreDuplicates: true }
         )
       if (exitErr) console.error('Failed to auto-create exit process', exitErr)
     }
 
-    // Ecosystem event + audit (fire-and-forget)
-    const orgId = (session.user as any)?.orgId as string | undefined
-    const actorId = (session.user as any)?.id as string | undefined
-    if (orgId) {
-      emitEvent({ event_type: 'warning.issued', source_platform: 'ihrms', org_id: orgId, actor_id: actorId, entity_id: employee_id, payload: { employee_id, subject, total_warnings: totalWarnings, auto_termination: autoTermination } })
-      logAudit({ org_id: orgId, actor_id: actorId ?? 'unknown', action: 'created', module: 'warnings', entity_id: employee_id, summary: 'Warning issued to employee' })
-    }
+    emitEvent({
+      event_type: 'warning.issued',
+      source_platform: 'ihrms',
+      org_id: ctx.orgId,
+      actor_id: ctx.identityId,
+      entity_id: employee_id,
+      payload: { employee_id, subject, total_warnings: totalWarnings, auto_termination: autoTermination },
+    })
+    logAudit({
+      org_id: ctx.orgId,
+      actor_identity_id: ctx.identityId, actor_membership_id: ctx.membershipId,
+      action: 'created',
+      module: 'warnings',
+      entity_id: employee_id,
+      summary: 'Warning issued to employee',
+    })
 
     return NextResponse.json(
       { data: warning, warning_count: totalWarnings, auto_termination_triggered: autoTermination },
@@ -162,10 +174,12 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { id, action, employee_remarks } = body as {
       id?: string
       action?: 'issue' | 'acknowledge'
@@ -179,6 +193,10 @@ export async function PATCH(req: NextRequest) {
     const updatePayload: Record<string, unknown> = {}
 
     if (action === 'issue') {
+      // Only HR can issue
+      if (!HR_ROLES.includes(ctx.role)) {
+        return NextResponse.json({ error: 'Forbidden — HR Admin required' }, { status: 403 })
+      }
       updatePayload.status = 'issued'
     } else if (action === 'acknowledge') {
       updatePayload.status = 'acknowledged'
@@ -187,17 +205,18 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: `Unknown action '${action}'` }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('warning_letters')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select(WARNING_SELECT)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Warning letter not found' }, { status: 404 })
-      console.error('[warnings PATCH]', error)
-      return NextResponse.json({ error: errMsg(error) }, { status: 500 })
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Warning letter not found' }, { status: 404 })
+      console.error('[warnings PATCH]', dbErr)
+      return NextResponse.json({ error: errMsg(dbErr) }, { status: 500 })
     }
 
     if (action === 'issue') {
@@ -206,6 +225,7 @@ export async function PATCH(req: NextRequest) {
       const { count: warningCount } = await supabaseAdmin
         .from('warning_letters')
         .select('*', { count: 'exact', head: true })
+        .eq('org_id', ctx.orgId)
         .eq('employee_id', empId)
         .eq('status', 'issued')
         .gte('issued_date', `${currentYear}-01-01`)
@@ -216,7 +236,7 @@ export async function PATCH(req: NextRequest) {
         const { error: exitErr } = await supabaseAdmin
           .from('exit_processes')
           .upsert(
-            { employee_id: empId, exit_type: 'termination', reason: `3 warnings issued in calendar year ${currentYear}` },
+            { org_id: ctx.orgId, employee_id: empId, exit_type: 'termination', reason: `3 warnings issued in calendar year ${currentYear}` },
             { onConflict: 'employee_id', ignoreDuplicates: true }
           )
         if (exitErr) console.error('Failed to auto-create exit process', exitErr)

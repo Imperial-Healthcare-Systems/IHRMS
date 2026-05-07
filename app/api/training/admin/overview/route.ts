@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -10,11 +11,6 @@ function errMsg(err: unknown): string {
     return String(e.message ?? e.details ?? e.hint ?? JSON.stringify(err))
   }
   return String(err)
-}
-
-function isHrAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof authOptions>>>): boolean {
-  const role = ((session as unknown as Record<string, unknown>)?.user as Record<string, unknown>)?.role as string | undefined
-  return ['hr_admin', 'super_admin', 'admin', 'hr'].includes(role ?? '')
 }
 
 /**
@@ -26,11 +22,9 @@ function isHrAdmin(session: Awaited<ReturnType<typeof getServerSession<typeof au
  */
 export async function GET(_req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (!isHrAdmin(session)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-    const orgId = (session.user as any)?.orgId as string | null
+    const auth = await requireRole(HR_ROLES)
+    if (auth.error) return auth.error
+    const ctx = auth.ctx
 
     // 1. Pull enrollments with employee + course joins
     let enrollQuery = supabaseAdmin
@@ -43,9 +37,8 @@ export async function GET(_req: NextRequest) {
         ),
         course:training_courses!course_id(id, title, status, start_date, end_date)
       `)
+      .eq('org_id', ctx.orgId)
       .order('enrolled_at', { ascending: false })
-
-    if (orgId) enrollQuery = enrollQuery.eq('org_id', orgId)
 
     const initial = await enrollQuery
     let enrollments: any[] | null = initial.data as any
@@ -54,11 +47,11 @@ export async function GET(_req: NextRequest) {
     // Fall back without joins if FK hints aren't resolvable
     if (enrollErr && (enrollErr.code === 'PGRST200' || enrollErr.code === 'PGRST201')) {
       console.warn('[training admin] enrollments join failed, retrying without:', enrollErr.message)
-      let retryQ = supabaseAdmin
+      const retryQ = supabaseAdmin
         .from('training_enrollments')
         .select('id, status, enrolled_at, completed_at, course_id, employee_id, score')
+        .eq('org_id', ctx.orgId)
         .order('enrolled_at', { ascending: false })
-      if (orgId) retryQ = retryQ.eq('org_id', orgId)
       const retry = await retryQ
       enrollments = retry.data as any
       enrollErr   = retry.error
@@ -80,6 +73,7 @@ export async function GET(_req: NextRequest) {
       const { data: contents } = await supabaseAdmin
         .from('course_content')
         .select('id, course_id')
+        .eq('org_id', ctx.orgId)
         .in('course_id', courseIds)
       for (const c of contents ?? []) {
         const cid = (c as any).course_id as string
@@ -95,6 +89,7 @@ export async function GET(_req: NextRequest) {
       const { data: progress } = await supabaseAdmin
         .from('course_content_progress')
         .select('employee_id, course_id, content_id')
+        .eq('org_id', ctx.orgId)
         .in('course_id', courseIds)
       for (const p of progress ?? []) {
         const key = `${(p as any).employee_id}|${(p as any).course_id}`

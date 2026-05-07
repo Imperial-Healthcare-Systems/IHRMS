@@ -1,27 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
-    const { employee_id, file_name, content_type } = body
+    const { employee_id, file_name } = body
     if (!employee_id || !file_name) {
       return NextResponse.json({ error: 'employee_id and file_name are required' }, { status: 400 })
     }
 
-    const ext  = file_name.split('.').pop() ?? 'bin'
-    const path = `${employee_id}/${Date.now()}-${file_name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    // Cross-tenant guard
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('id')
+      .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
+    if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
 
-    const { data, error } = await supabaseAdmin.storage
+    // Org-prefixed path so storage RLS (when applied) can isolate per-tenant
+    const path = `${ctx.orgId}/${employee_id}/${Date.now()}-${file_name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+
+    const { data, error: signErr } = await supabaseAdmin.storage
       .from('org-documents')
       .createSignedUploadUrl(path)
 
-    if (error) throw error
+    if (signErr) throw signErr
 
     return NextResponse.json({ signed_url: data.signedUrl, path, token: data.token })
   } catch (err) {

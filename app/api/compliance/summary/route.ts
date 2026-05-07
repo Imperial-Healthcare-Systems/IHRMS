@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireRole } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+
+const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin', 'finance_admin']
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -19,7 +20,6 @@ function isPgrstErr(msg: string) {
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function safe(fn: () => any): Promise<unknown[]> {
   const { data, error } = await fn()
   if (error) {
@@ -32,32 +32,29 @@ async function safe(fn: () => any): Promise<unknown[]> {
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireRole(HR_ROLES)
+    if (error) return error
 
     const now = new Date()
     const currentMonth = now.getMonth() + 1
     const currentYear  = now.getFullYear()
 
-    // ── 1. Total active employees (EPF enrolled = all active) ──
     const employees = await safe(() =>
-      supabaseAdmin.from('employees').select('id, status').neq('status', 'terminated')
+      supabaseAdmin.from('employees').select('id, status').eq('org_id', ctx.orgId).neq('status', 'terminated')
     )
     const totalActive = employees.length
 
-    // ── 2. ESIC eligible from latest payslips (gross ≤ 21000) ──
-    // Get most recent month payslips to count ESIC eligible
     const esicRows = await safe(() =>
       supabaseAdmin
         .from('payslips')
         .select('id, gross_earnings')
+        .eq('org_id', ctx.orgId)
         .eq('year', currentYear)
         .eq('month', currentMonth)
         .lte('gross_earnings', 21000)
         .limit(2000)
     )
 
-    // If no payslips for current month, try previous month
     let esicEligible = esicRows.length
     if (esicEligible === 0) {
       const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1
@@ -66,6 +63,7 @@ export async function GET() {
         supabaseAdmin
           .from('payslips')
           .select('id, gross_earnings')
+          .eq('org_id', ctx.orgId)
           .eq('year', prevYear)
           .eq('month', prevMonth)
           .lte('gross_earnings', 21000)
@@ -74,11 +72,11 @@ export async function GET() {
       esicEligible = prev.length
     }
 
-    // ── 3. Statutory compliance stats ──
     const statRecords = await safe(() =>
       supabaseAdmin
         .from('statutory_compliance')
         .select('id, status, due_date, period_year, period_month')
+        .eq('org_id', ctx.orgId)
         .order('period_year', { ascending: false })
         .order('period_month', { ascending: false })
         .limit(100)
@@ -99,27 +97,24 @@ export async function GET() {
         }
       }
     } else {
-      // Fallback: compute from known statutory calendar
-      // EPF, ESIC due 15th; PT due 30th; TDS Q4 due May 31
       const filings = [
-        { due: new Date(currentYear, currentMonth - 1, 15) }, // EPF
-        { due: new Date(currentYear, currentMonth - 1, 15) }, // ESIC
-        { due: new Date(currentYear, currentMonth - 1, 30) }, // PT
+        { due: new Date(currentYear, currentMonth - 1, 15) },
+        { due: new Date(currentYear, currentMonth - 1, 15) },
+        { due: new Date(currentYear, currentMonth - 1, 30) },
       ]
       dueThisMonth = filings.filter(f => f.due.getMonth() + 1 === currentMonth).length
     }
 
-    // ── 4. Current month payslip EPF/ESIC totals ──
     const payslipTotals = await safe(() =>
       supabaseAdmin
         .from('payslips')
         .select('employee_pf, employee_esic, professional_tax, tds, gross_earnings')
+        .eq('org_id', ctx.orgId)
         .eq('year', currentYear)
         .eq('month', currentMonth)
         .limit(2000)
     )
 
-    // If no current month, try previous
     let totals = payslipTotals
     if (totals.length === 0) {
       const pm = currentMonth === 1 ? 12 : currentMonth - 1
@@ -128,6 +123,7 @@ export async function GET() {
         supabaseAdmin
           .from('payslips')
           .select('employee_pf, employee_esic, professional_tax, tds, gross_earnings')
+          .eq('org_id', ctx.orgId)
           .eq('year', py)
           .eq('month', pm)
           .limit(2000)
@@ -139,7 +135,7 @@ export async function GET() {
     let totalPt = 0, totalTds = 0, totalGross = 0
     for (const r of totals as Array<{ employee_pf?: number; employee_esic?: number; professional_tax?: number; tds?: number; gross_earnings?: number }>) {
       totalEpfEmployee  += r.employee_pf      ?? 0
-      totalEpfEmployer  += r.employee_pf      ?? 0 // employer = same as employee for ECR
+      totalEpfEmployer  += r.employee_pf      ?? 0
       totalEsicEmployee += r.employee_esic    ?? 0
       totalEsicEmployer += Math.round(((r.gross_earnings ?? 0) <= 21000 ? (r.gross_earnings ?? 0) * 0.0325 : 0))
       totalPt           += r.professional_tax ?? 0

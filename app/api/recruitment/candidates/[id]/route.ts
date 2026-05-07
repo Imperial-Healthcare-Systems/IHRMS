@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('candidates')
       .select(`
         id, first_name, last_name, email, phone,
@@ -24,18 +23,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         created_at, updated_at
       `)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Candidate not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Candidate not found' }, { status: 404 })
+      throw dbErr
     }
 
-    // Fetch interview history
     const { data: interviews } = await supabaseAdmin
       .from('interview_schedules')
       .select('id, round_number, round_name, scheduled_at, duration_minutes, mode, result, remarks, created_at')
       .eq('candidate_id', id)
+      .eq('org_id', ctx.orgId)
       .order('scheduled_at', { ascending: true })
 
     return NextResponse.json({ data, interviews: interviews ?? [] })
@@ -47,10 +47,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { stage, send_rejection_email, offer_amount, offer_date, ...rest } = body
 
     const updatePayload: Record<string, unknown> = {
@@ -63,30 +65,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       if (stage === 'rejected' && send_rejection_email) {
         updatePayload.rejection_reason = rest.rejection_reason ?? 'Not selected after evaluation'
-        // rejection_email_sent is tracked in notes or a separate field;
-        // the schema stores rejection_reason — record email sent in notes
         updatePayload.notes = '[rejection_email_sent] ' + (rest.notes ?? '')
       }
 
       if (stage === 'selected' || stage === 'offer') {
         if (offer_amount !== undefined) {
-          // Store offer details in notes as schema doesn't have dedicated offer columns
           const offerNote = `[offer_amount:${offer_amount}][offer_date:${offer_date ?? new Date().toISOString().split('T')[0]}]`
           updatePayload.notes = offerNote + (rest.notes ? ' ' + rest.notes : '')
         }
       }
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('candidates')
       .update(updatePayload)
       .eq('id', id)
+      .eq('org_id', ctx.orgId)
       .select()
       .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') return NextResponse.json({ error: 'Candidate not found' }, { status: 404 })
-      throw error
+    if (dbErr) {
+      if (dbErr.code === 'PGRST116') return NextResponse.json({ error: 'Candidate not found' }, { status: 404 })
+      throw dbErr
     }
 
     return NextResponse.json({ data })

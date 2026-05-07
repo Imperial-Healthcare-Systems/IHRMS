@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth } from '@/lib/session'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 const MAX_OPTIONAL_CLAIMS = 2
 
@@ -17,23 +16,23 @@ function errMsg(err: unknown): string {
 // GET — fetch this employee's optional holiday claims for the year
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const userId = (session.user as any)?.id
     const { searchParams } = new URL(req.url)
     const year = searchParams.get('year') ?? new Date().getFullYear().toString()
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('leave_requests')
       .select('id, from_date, to_date, status, reason')
-      .eq('employee_id', userId)
+      .eq('org_id', ctx.orgId)
+      .eq('employee_id', ctx.identityId)
       .eq('leave_type', 'optional_holiday')
       .gte('from_date', `${year}-01-01`)
       .lte('from_date', `${year}-12-31`)
       .in('status', ['pending', 'approved'])
 
-    if (error) throw error
+    if (dbErr) throw dbErr
     return NextResponse.json({ data: data ?? [], remaining: MAX_OPTIONAL_CLAIMS - (data?.length ?? 0) })
   } catch (err: unknown) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
@@ -43,11 +42,12 @@ export async function GET(req: NextRequest) {
 // POST — claim an optional holiday
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const userId = (session.user as any)?.id
     const body = await req.json()
+    delete (body as Record<string, unknown>).org_id
+
     const { holiday_id, holiday_date, holiday_name } = body
 
     if (!holiday_id || !holiday_date || !holiday_name) {
@@ -56,11 +56,11 @@ export async function POST(req: NextRequest) {
 
     const year = holiday_date.slice(0, 4)
 
-    // Check current claim count
     const { data: existing, error: countErr } = await supabaseAdmin
       .from('leave_requests')
       .select('id, reason')
-      .eq('employee_id', userId)
+      .eq('org_id', ctx.orgId)
+      .eq('employee_id', ctx.identityId)
       .eq('leave_type', 'optional_holiday')
       .gte('from_date', `${year}-01-01`)
       .lte('from_date', `${year}-12-31`)
@@ -75,22 +75,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Check not already claimed this specific holiday
     const alreadyClaimed = existing?.some(r => r.reason?.includes(`[holiday:${holiday_id}]`))
     if (alreadyClaimed) {
       return NextResponse.json({ error: 'You have already claimed this holiday.' }, { status: 409 })
     }
 
-    // Check holiday date is not in the past
     const today = new Date().toISOString().split('T')[0]
     if (holiday_date < today) {
       return NextResponse.json({ error: 'Cannot claim a holiday that has already passed.' }, { status: 400 })
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error: dbErr } = await supabaseAdmin
       .from('leave_requests')
       .insert({
-        employee_id: userId,
+        org_id:      ctx.orgId,
+        employee_id: ctx.identityId,
         leave_type:  'optional_holiday',
         from_date:   holiday_date,
         to_date:     holiday_date,
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) throw error
+    if (dbErr) throw dbErr
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
@@ -111,31 +110,34 @@ export async function POST(req: NextRequest) {
 // DELETE — unclaim (only if holiday not yet passed)
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { ctx, error } = await requireAuth()
+    if (error) return error
 
-    const userId = (session.user as any)?.id
     const { claim_id } = await req.json()
     if (!claim_id) return NextResponse.json({ error: 'claim_id required' }, { status: 400 })
 
-    // Verify ownership and that the holiday hasn't passed
     const { data: claim, error: fetchErr } = await supabaseAdmin
       .from('leave_requests')
       .select('id, employee_id, from_date')
       .eq('id', claim_id)
+      .eq('org_id', ctx.orgId)
       .eq('leave_type', 'optional_holiday')
       .single()
 
     if (fetchErr || !claim) return NextResponse.json({ error: 'Claim not found' }, { status: 404 })
-    if (claim.employee_id !== userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (claim.employee_id !== ctx.identityId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const today = new Date().toISOString().split('T')[0]
     if (claim.from_date < today) {
       return NextResponse.json({ error: 'Cannot cancel a holiday that has already passed.' }, { status: 400 })
     }
 
-    const { error } = await supabaseAdmin.from('leave_requests').delete().eq('id', claim_id)
-    if (error) throw error
+    const { error: dbErr } = await supabaseAdmin
+      .from('leave_requests')
+      .delete()
+      .eq('id', claim_id)
+      .eq('org_id', ctx.orgId)
+    if (dbErr) throw dbErr
     return NextResponse.json({ success: true })
   } catch (err: unknown) {
     return NextResponse.json({ error: errMsg(err) }, { status: 500 })
