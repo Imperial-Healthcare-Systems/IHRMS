@@ -64,8 +64,9 @@ const navGroupConfigs: NavGroupConfig[] = [
     items: [
       { label: 'Employees',   href: '/employees',  icon: Users,        roles: [...HR_ADMIN, 'operations_head', 'manager'] },
       { label: 'Recruitment', href: '/recruitment', icon: UserPlus,     roles: HR_ADMIN },
-      { label: 'Attendance',  href: '/attendance',  icon: Clock,        roles: ALL_ROLES },
-      { label: 'Leaves',      href: '/leaves',      icon: Calendar,     roles: ALL_ROLES },
+      { label: 'Attendance',      href: '/attendance',      icon: Clock,        roles: ALL_ROLES },
+      { label: 'Team Attendance', href: '/team-attendance', icon: Clock,        roles: [...HR_ADMIN, 'operations_head', 'manager'] },
+      { label: 'Leaves',          href: '/leaves',          icon: Calendar,     roles: ALL_ROLES },
       { label: 'Shifts',      href: '/shifts',      icon: CalendarClock, roles: [...HR_ADMIN, 'operations_head', 'manager'] },
       { label: 'Org Chart',   href: '/org-chart',   icon: Network,      roles: ALL_ROLES },
     ],
