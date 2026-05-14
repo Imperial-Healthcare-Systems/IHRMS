@@ -98,6 +98,17 @@ export function AttendanceGridClient({ initial }: { initial: ApiResponse }) {
 
       <AttendanceLegend leaveTypes={payload.leaveTypes} />
 
+      {/* Footer summary per prototype.html — "Showing X of Y · N working days · …" */}
+      <div style={{
+        padding: '7px 16px',
+        borderTop: '0.5px solid #E2E8F0',
+        background: '#FFFFFF',
+        fontSize: 11,
+        color: '#64748B',
+      }}>
+        Showing {displayedRows.length} of {payload.rows.length} · {payload.period.workingDays} working days · Leave codes configured by tenant admin
+      </div>
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )

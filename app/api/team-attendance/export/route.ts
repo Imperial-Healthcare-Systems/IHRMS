@@ -1,16 +1,31 @@
 /**
  * GET /api/team-attendance/export?year=YYYY&month=MM[&manager_id=UUID][&exceptions_only=1]
  *
- * Server-streamed CSV of the manager grid for the requested month.
- * Matches what's on screen for the same filter state — same scope, same
- * filter rules, same columns. Reuses the data-loading path of the JSON
- * route by calling it internally so there's no risk of divergence.
+ * Server-streamed CSV of the manager grid for the requested month. Format
+ * matches `docs/sample-outputs/csv-export-sample.csv`:
+ *
+ *   Imperial HRMS — Team Attendance
+ *   Tenant,<org_name>
+ *   Period,<YYYY-MM>
+ *   Filter,<All employees | Exceptions only>
+ *   Generated at,<ISO timestamp>
+ *
+ *   Status legend
+ *   P,Present
+ *   ...
+ *
+ *   Employee,Role,01 Fri,02 Sat,...,P,A,PM,<pinned codes>,%
+ *   <row data>
+ *
+ * Day columns use "DD Day" (e.g. "01 Fri") so Excel doesn't auto-interpret
+ * them as dates. Reuses the JSON endpoint internally so what's exported is
+ * exactly what's on-screen.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
-import { filterExceptionsOnly, lookupStatus } from '@/lib/attendance'
-import type { LeaveType, StatusCode, TeamAttendancePayload } from '@/types/team-attendance'
+import { filterExceptionsOnly } from '@/lib/attendance'
+import { SYSTEM_CODES, type StatusCode, type TeamAttendancePayload } from '@/types/team-attendance'
 
 function csvEscape(v: string | number | null | undefined): string {
   if (v === null || v === undefined) return ''
@@ -21,14 +36,11 @@ function csvEscape(v: string | number | null | undefined): string {
   return s
 }
 
-function dotCell(code: StatusCode | null, leaveTypes: LeaveType[]): string {
-  if (code === null) return ''
-  // For CSV we emit the code itself (P/A/PM/WO/CL/EL/...). The reader can
-  // map back to labels via the legend or the system_codes constants.
-  const _ = lookupStatus(code, leaveTypes)  // verifies it resolves; not used in CSV output
-  void _
-  return code
+function dotCell(code: StatusCode | null): string {
+  return code === null ? '' : code
 }
+
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export async function GET(req: NextRequest) {
   const auth = await requireAuth()
@@ -38,8 +50,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
 
   try {
-    // Call the JSON endpoint internally so the export reflects exactly the
-    // same data as the on-screen grid. We forward the relevant query params.
+    // Reuse the JSON endpoint so the export reflects the same data as the on-screen grid.
     const innerUrl = new URL('/api/team-attendance', req.url)
     for (const k of ['year', 'month', 'manager_id']) {
       const v = url.searchParams.get(k)
@@ -63,22 +74,44 @@ export async function GET(req: NextRequest) {
       ? filterExceptionsOnly(payload.rows, json.flag_thresholds.absent, json.flag_thresholds.punch_miss)
       : payload.rows
 
-    // Build the CSV. Header columns:
-    //   Emp ID, Name, Role, 1..daysInMonth, P, A, PM, <pinned codes...>, Attendance %
-    const headers: string[] = ['Emp ID', 'Name', 'Role']
-    for (let d = 1; d <= payload.period.daysInMonth; d++) headers.push(String(d))
-    headers.push('P', 'A', 'PM', ...payload.pinnedCodes, 'Attendance %')
-
     const lines: string[] = []
+
+    // ── Metadata header block ───────────────────────────────────────
+    lines.push('Imperial HRMS — Team Attendance')
+    lines.push(`Tenant,${csvEscape(payload.org.name)}`)
+    lines.push(`Period,${payload.period.year}-${String(payload.period.month).padStart(2, '0')}`)
+    lines.push(`Filter,${exceptionsOnly ? 'Exceptions only' : 'All employees'}`)
+    lines.push(`Generated at,${new Date().toISOString()}`)
+    lines.push('')
+
+    // ── Status legend ────────────────────────────────────────────────
+    lines.push('Status legend')
+    for (const code of ['P', 'A', 'PM', 'WO'] as const) {
+      lines.push(`${code},${csvEscape(SYSTEM_CODES[code].label)}`)
+    }
+    for (const lt of payload.leaveTypes) {
+      if (!lt.is_active) continue
+      lines.push(`${csvEscape(lt.code)},${csvEscape(lt.label)}`)
+    }
+    lines.push('')
+
+    // ── Day column headers as "DD Day" ───────────────────────────────
+    const dayHeaders: string[] = []
+    for (let d = 1; d <= payload.period.daysInMonth; d++) {
+      const dow = new Date(payload.period.year, payload.period.month - 1, d).getDay()
+      dayHeaders.push(`${String(d).padStart(2, '0')} ${DOW_SHORT[dow]}`)
+    }
+
+    const headers: string[] = ['Employee', 'Role', ...dayHeaders, 'P', 'A', 'PM', ...payload.pinnedCodes, '%']
     lines.push(headers.map(csvEscape).join(','))
 
+    // ── Data rows ────────────────────────────────────────────────────
     for (const row of rows) {
       const cells: string[] = []
-      cells.push(csvEscape(row.employee.emp_id))
       cells.push(csvEscape(row.employee.name))
       cells.push(csvEscape(row.employee.role))
       for (let d = 0; d < payload.period.daysInMonth; d++) {
-        cells.push(csvEscape(dotCell(row.daily[d], payload.leaveTypes)))
+        cells.push(csvEscape(dotCell(row.daily[d])))
       }
       cells.push(csvEscape(row.aggregate.P))
       cells.push(csvEscape(row.aggregate.A))
@@ -95,7 +128,7 @@ export async function GET(req: NextRequest) {
       org_id: ctx.orgId,
       actor_identity_id: ctx.identityId,
       actor_membership_id: ctx.membershipId,
-      action: 'updated',           // closest existing AuditAction; treat as "exported"
+      action: 'updated',
       module: 'team_attendance',
       summary: `Exported team-attendance CSV (${rows.length} rows, ${payload.period.year}-${String(payload.period.month).padStart(2, '0')}${exceptionsOnly ? ', exceptions only' : ''})`,
     })
