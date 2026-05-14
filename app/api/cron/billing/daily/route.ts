@@ -13,7 +13,12 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { sendTrialReminderEmail, sendDeactivationEmail } from '@/lib/mailer'
+import {
+  sendTrialReminderEmail,
+  sendDeactivationEmail,
+  sendReadOnlyEmail,
+  sendExportOnlyEmail,
+} from '@/lib/mailer'
 
 function authCron(req: NextRequest) {
   return req.headers.get('authorization') === `Bearer ${process.env.CRON_SECRET}`
@@ -77,27 +82,49 @@ async function handle(req: NextRequest) {
   }
 
   // ── 3. past_due > 3 days old → read_only_at set (Day 17) ──────────────
+  // Two-step: SELECT candidates with org info → UPDATE → email each. Bulk
+  // update can't return org join, and we need the billing email per-row.
   const threeDaysAgo = new Date(now); threeDaysAgo.setDate(now.getDate() - 3)
-  const { data: readOnlyRows } = await supabaseAdmin
+  const { data: readOnlyCandidates } = await supabaseAdmin
     .from('org_subscriptions')
-    .update({ read_only_at: now.toISOString() } as never)
+    .select('id, org_id, organisations(name, billing_email)')
     .eq('status', 'past_due')
     .is('read_only_at', null)
-    .lt('soft_locked_at', threeDaysAgo.toISOString())
-    .select('id')
-  const readOnlyTransitions = readOnlyRows?.length ?? 0
+    .lt('soft_locked_at', threeDaysAgo.toISOString()) as { data: SubRow[] | null }
+
+  for (const sub of readOnlyCandidates ?? []) {
+    await supabaseAdmin
+      .from('org_subscriptions')
+      .update({ read_only_at: now.toISOString() } as never)
+      .eq('id', sub.id)
+    const org = pickOrg(sub.organisations)
+    if (org?.billing_email) {
+      await sendReadOnlyEmail({ to: org.billing_email, orgName: org.name, orgId: sub.org_id })
+    }
+  }
+  const readOnlyTransitions = readOnlyCandidates?.length ?? 0
 
   // ── 4. read_only > 4 days → export_only (Day 21) ──────────────────────
   const fourDaysAgo = new Date(now); fourDaysAgo.setDate(now.getDate() - 4)
-  const { data: exportOnlyRows } = await supabaseAdmin
+  const { data: exportOnlyCandidates } = await supabaseAdmin
     .from('org_subscriptions')
-    .update({ export_only_at: now.toISOString() } as never)
+    .select('id, org_id, organisations(name, billing_email)')
     .eq('status', 'past_due')
     .is('export_only_at', null)
     .not('read_only_at', 'is', null)
-    .lt('read_only_at', fourDaysAgo.toISOString())
-    .select('id')
-  const exportOnlyTransitions = exportOnlyRows?.length ?? 0
+    .lt('read_only_at', fourDaysAgo.toISOString()) as { data: SubRow[] | null }
+
+  for (const sub of exportOnlyCandidates ?? []) {
+    await supabaseAdmin
+      .from('org_subscriptions')
+      .update({ export_only_at: now.toISOString() } as never)
+      .eq('id', sub.id)
+    const org = pickOrg(sub.organisations)
+    if (org?.billing_email) {
+      await sendExportOnlyEmail({ to: org.billing_email, orgName: org.name, orgId: sub.org_id })
+    }
+  }
+  const exportOnlyTransitions = exportOnlyCandidates?.length ?? 0
 
   // ── 5. export_only > 9 days → cancelled (Day 30, deactivation email) ──
   const nineDaysAgo = new Date(now); nineDaysAgo.setDate(now.getDate() - 9)

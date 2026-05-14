@@ -176,7 +176,7 @@ export async function GET(req: NextRequest) {
       reference_id: claims.logId,
       metadata: { impersonator_id: claims.impersonator, target_identity_id: identityId },
     } as never).then(({ error }) => {
-      if (error) console.warn('[impersonation-login] tenant_visible_audit insert non-fatal:', error.message)
+      if (error) console.error('[impersonation-login] tenant_visible_audit INSERT FAILED:', error.message, { org_id: claims.orgId, event_type: 'imperial.impersonation' })
     })
 
     // 6. Mint a NextAuth session JWT with the same shape lib/auth.ts emits

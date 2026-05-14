@@ -58,6 +58,8 @@ export function AttendanceGridClient({ initial }: { initial: ApiResponse }) {
 
   return (
     <div style={{ background: '#FFFFFF', borderRadius: 12, border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+      {/* Imperial brand strip — per visual-reference.md */}
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #1B4FBF 70%, #E8600A 100%)' }} />
       <AttendanceHeader
         year={year} month={month}
         exceptionsOnly={exceptionsOnly}
