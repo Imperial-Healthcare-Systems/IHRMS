@@ -32,29 +32,37 @@ export function AttendanceHeader({
       background: '#FFFFFF',
       flexWrap: 'wrap',
     }}>
-      {/* Month nav */}
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <button
-          onClick={() => shift(-1)}
-          aria-label="Previous month"
-          style={navBtn}
-        >
-          <ChevronLeft size={14} />
-        </button>
-        <div style={{
-          padding: '6px 12px',
-          fontSize: 13, fontWeight: 600, color: '#0F172A',
-          minWidth: 110, textAlign: 'center',
+      {/* Eyebrow + month nav — per visual-reference.md */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 600, color: '#94A3B8',
+          letterSpacing: '0.4px', textTransform: 'uppercase',
         }}>
-          {MONTH_NAMES[month - 1]} {year}
+          Manager View
+        </span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <button
+            onClick={() => shift(-1)}
+            aria-label="Previous month"
+            style={navBtn}
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <div style={{
+            padding: '4px 10px',
+            fontSize: 13, fontWeight: 600, color: '#0F172A',
+            minWidth: 110, textAlign: 'center',
+          }}>
+            {MONTH_NAMES[month - 1]} {year}
+          </div>
+          <button
+            onClick={() => shift(1)}
+            aria-label="Next month"
+            style={navBtn}
+          >
+            <ChevronRight size={14} />
+          </button>
         </div>
-        <button
-          onClick={() => shift(1)}
-          aria-label="Next month"
-          style={navBtn}
-        >
-          <ChevronRight size={14} />
-        </button>
       </div>
 
       <div style={{ flex: 1 }} />

@@ -38,7 +38,7 @@ export async function POST(_req: NextRequest) {
       .eq('id', logId)
       .is('ended_at', null)
       .then(({ error }) => {
-        if (error) console.warn('[impersonation-end] log close non-fatal:', error.message)
+        if (error) console.error('[impersonation-end] log close FAILED:', error.message, { log_id: logId })
       })
   }
 
@@ -52,7 +52,7 @@ export async function POST(_req: NextRequest) {
       reference_type: 'impersonation_log',
       reference_id: logId,
     } as never).then(({ error }) => {
-      if (error) console.warn('[impersonation-end] tenant_visible_audit insert non-fatal:', error.message)
+      if (error) console.error('[impersonation-end] tenant_visible_audit INSERT FAILED:', error.message, { org_id: orgId, log_id: logId })
     })
   }
 

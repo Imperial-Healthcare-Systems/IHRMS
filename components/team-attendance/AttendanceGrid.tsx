@@ -50,6 +50,7 @@ export function AttendanceGrid({
 
   return (
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <style>{`.ta-dot:hover { transform: scale(1.4); }`}</style>
       <table style={{
         borderCollapse: 'separate',
         borderSpacing: 0,
@@ -208,11 +209,13 @@ function Dot({ status, leaveTypes }: { status: StatusCode | null; leaveTypes: Le
   const s = lookupStatus(status, leaveTypes)
   return (
     <div
+      className="ta-dot"
       style={{
         width: 14, height: 14, borderRadius: '50%', margin: '0 auto',
         background: s.color,
         opacity: status === 'WO' ? 0.55 : 1,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform 0.12s ease',
       }}
     >
       {s.letter && (

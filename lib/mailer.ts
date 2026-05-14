@@ -531,6 +531,96 @@ export async function sendTrialReminderEmail(params: {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   READ-ONLY — sent when subscription enters read_only state
+   (Day 17 of the wind-down state machine, §7.1)
+───────────────────────────────────────────────────────────── */
+export async function sendReadOnlyEmail(params: {
+  to: string
+  orgName: string
+  orgId?: string
+}) {
+  try {
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
+    const { to, orgName } = params
+    const billingUrl = `${process.env.IHRMS_BASE_URL ?? 'https://imperialhrms.com'}/settings/billing`
+
+    const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+        ${emailHeader('Workspace is now read-only', `${orgName} requires payment`)}
+        <div style="padding:28px 32px">
+          <p style="font-size:15px;color:#1e293b;margin:0 0 14px">Hello,</p>
+          <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.7">
+            Your Imperial workspace <strong>${orgName}</strong> is now <strong>read-only</strong>. You can still view all your data, but
+            creating, updating, or deleting records is blocked until billing is resolved.
+          </p>
+          <div style="text-align:center;margin:0 0 18px">
+            <a href="${billingUrl}" style="display:inline-block;background:#F47920;color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700">Resolve billing</a>
+          </div>
+          <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:14px 16px;font-size:12px;color:#92400e">
+            In 4 days, the workspace transitions to <strong>export-only</strong> (you can download data but not view it normally). 9 days after that, it is deactivated entirely.
+          </div>
+          ${emailFooter()}
+        </div>
+      </div>
+    </div>`
+
+    await transporter.sendMail({
+      from, to,
+      subject: `${orgName} is now read-only — resolve billing to restore access`,
+      html,
+      text: `Your Imperial workspace ${orgName} is now read-only. Resolve billing at ${billingUrl} to restore full access.`,
+    })
+  } catch (e) { console.warn('[mailer] sendReadOnlyEmail non-fatal:', e) }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EXPORT-ONLY — sent when subscription enters export_only state
+   (Day 21 of the wind-down state machine, §7.1)
+───────────────────────────────────────────────────────────── */
+export async function sendExportOnlyEmail(params: {
+  to: string
+  orgName: string
+  orgId?: string
+}) {
+  try {
+    const { transporter } = await createTransporter()
+    const from = await resolveBrandedFrom(params.orgId)
+    const { to, orgName } = params
+    const billingUrl = `${process.env.IHRMS_BASE_URL ?? 'https://imperialhrms.com'}/settings/billing`
+
+    const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <div style="max-width:580px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
+        ${emailHeader('Last chance — workspace is export-only', `${orgName} access ending soon`)}
+        <div style="padding:28px 32px">
+          <p style="font-size:15px;color:#1e293b;margin:0 0 14px">Hello,</p>
+          <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.7">
+            Your Imperial workspace <strong>${orgName}</strong> has transitioned to <strong>export-only</strong>.
+            You can download your data but the main app surfaces are no longer accessible until billing is resolved.
+          </p>
+          <div style="text-align:center;margin:0 0 18px">
+            <a href="${billingUrl}" style="display:inline-block;background:#DC2626;color:#fff;text-decoration:none;padding:12px 28px;border-radius:10px;font-size:14px;font-weight:700">Reactivate now</a>
+          </div>
+          <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 16px;font-size:12px;color:#991b1b">
+            In 9 days, the workspace will be deactivated. Data retention then runs for 90 days before permanent deletion.
+          </div>
+          ${emailFooter()}
+        </div>
+      </div>
+    </div>`
+
+    await transporter.sendMail({
+      from, to,
+      subject: `${orgName} is export-only — 9 days until deactivation`,
+      html,
+      text: `Your Imperial workspace ${orgName} is now export-only. Resolve billing at ${billingUrl} within 9 days to avoid deactivation.`,
+    })
+  } catch (e) { console.warn('[mailer] sendExportOnlyEmail non-fatal:', e) }
+}
+
+/* ─────────────────────────────────────────────────────────────
    DEACTIVATION — sent when subscription enters cancelled state
 ───────────────────────────────────────────────────────────── */
 export async function sendDeactivationEmail(params: {

@@ -25,6 +25,8 @@ import {
   Briefcase,
   CreditCard,
   Palette,
+  Tags,
+  Users2,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -2831,6 +2833,40 @@ export default function SettingsPage() {
             >
               <Palette style={{ width: 16, height: 16, flexShrink: 0 }} />
               Branding
+            </Link>
+            <Link
+              href="/settings/leave-types"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 12px',
+                borderRadius: 8,
+                color: 'var(--color-gray-600)',
+                fontWeight: 500,
+                fontSize: '0.875rem',
+                textDecoration: 'none',
+              }}
+            >
+              <Tags style={{ width: 16, height: 16, flexShrink: 0 }} />
+              Leave Types
+            </Link>
+            <Link
+              href="/settings/team-attendance"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '9px 12px',
+                borderRadius: 8,
+                color: 'var(--color-gray-600)',
+                fontWeight: 500,
+                fontSize: '0.875rem',
+                textDecoration: 'none',
+              }}
+            >
+              <Users2 style={{ width: 16, height: 16, flexShrink: 0 }} />
+              Team Attendance
             </Link>
           </div>
         </nav>

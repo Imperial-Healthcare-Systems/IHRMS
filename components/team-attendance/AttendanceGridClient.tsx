@@ -58,6 +58,8 @@ export function AttendanceGridClient({ initial }: { initial: ApiResponse }) {
 
   return (
     <div style={{ background: '#FFFFFF', borderRadius: 12, border: '1px solid #E2E8F0', overflow: 'hidden' }}>
+      {/* Imperial brand strip — per visual-reference.md */}
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #1B4FBF 70%, #E8600A 100%)' }} />
       <AttendanceHeader
         year={year} month={month}
         exceptionsOnly={exceptionsOnly}
@@ -95,6 +97,17 @@ export function AttendanceGridClient({ initial }: { initial: ApiResponse }) {
       )}
 
       <AttendanceLegend leaveTypes={payload.leaveTypes} />
+
+      {/* Footer summary per prototype.html — "Showing X of Y · N working days · …" */}
+      <div style={{
+        padding: '7px 16px',
+        borderTop: '0.5px solid #E2E8F0',
+        background: '#FFFFFF',
+        fontSize: 11,
+        color: '#64748B',
+      }}>
+        Showing {displayedRows.length} of {payload.rows.length} · {payload.period.workingDays} working days · Leave codes configured by tenant admin
+      </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
