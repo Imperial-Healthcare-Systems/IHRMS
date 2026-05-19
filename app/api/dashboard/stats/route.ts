@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest) {
         .from('attendance_daily')
         .select('id, status')
         .eq('org_id', ctx.orgId)
-        .eq('date', today),
+        .eq('attendance_date', today),
 
       supabaseAdmin
         .from('leave_requests')

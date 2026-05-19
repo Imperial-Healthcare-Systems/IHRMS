@@ -41,6 +41,24 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error
   const ctx = auth.ctx
 
+  // Dev tenant override (DEV/STAGING ONLY). If the caller is Imperial-internal
+  // and has the dev_org_override cookie set, route their reads through that org
+  // instead of their home org. The cookie is set by POST /api/dev/tenants.
+  let effectiveOrgId = ctx.orgId
+  if (process.env.NODE_ENV !== 'production') {
+    const override = req.cookies.get('dev_org_override')?.value
+    if (override && override !== ctx.orgId) {
+      const { data: emp } = await supabaseAdmin
+        .from('employees')
+        .select('roles')
+        .eq('identity_id', ctx.identityId)
+        .maybeSingle() as { data: { roles: string[] | null } | null }
+      if (emp?.roles?.includes('imperial_internal')) {
+        effectiveOrgId = override
+      }
+    }
+  }
+
   try {
     const url = new URL(req.url)
     const now = new Date()
@@ -63,18 +81,18 @@ export async function GET(req: NextRequest) {
     const { data: org } = await supabaseAdmin
       .from('organisations')
       .select('id, name')
-      .eq('id', ctx.orgId)
+      .eq('id', effectiveOrgId)
       .maybeSingle() as { data: { id: string; name: string } | null }
 
     // ── 2. Tenant settings (pinned codes, weekly off days, flag thresholds)
     const { data: settingsRow } = await supabaseAdmin
       .from('tenant_attendance_settings')
       .select('org_id, pinned_codes, weekly_off_days, flag_absent_at, flag_punch_miss_at, fiscal_year_start, created_at, updated_at')
-      .eq('org_id', ctx.orgId)
+      .eq('org_id', effectiveOrgId)
       .maybeSingle() as { data: TenantAttendanceSettings | null }
 
     const settings: TenantAttendanceSettings = settingsRow ?? {
-      org_id: ctx.orgId,
+      org_id: effectiveOrgId,
       pinned_codes: [],
       weekly_off_days: [0, 6],
       flag_absent_at: 2,
@@ -88,7 +106,7 @@ export async function GET(req: NextRequest) {
     const { data: leaveTypes } = await supabaseAdmin
       .from('leave_types')
       .select('id, org_id, code, label, letter, color_hex, is_active, display_order, created_at, updated_at')
-      .eq('org_id', ctx.orgId)
+      .eq('org_id', effectiveOrgId)
       .order('display_order', { ascending: true }) as { data: LeaveType[] | null }
 
     const leaveTypeIdToCode = new Map<string, string>()
@@ -103,19 +121,19 @@ export async function GET(req: NextRequest) {
     const { data: managerEmp } = await supabaseAdmin
       .from('employees')
       .select('id, identity_id')
-      .eq('org_id', ctx.orgId)
+      .eq('org_id', effectiveOrgId)
       .or(`identity_id.eq.${managerId},id.eq.${managerId}`)
       .maybeSingle() as { data: { id: string; identity_id: string | null } | null }
 
     if (!managerEmp) {
       // Manager has no employee profile in this org → empty team.
-      return emptyPayload(ctx.orgId, org?.name ?? '—', year, month, leaveTypes ?? [], settings)
+      return emptyPayload(effectiveOrgId, org?.name ?? '—', year, month, leaveTypes ?? [], settings)
     }
 
     const { data: reports } = await supabaseAdmin
       .from('employees')
       .select('id, first_name, last_name, emp_id, avatar_url, designation_title, role')
-      .eq('org_id', ctx.orgId)
+      .eq('org_id', effectiveOrgId)
       .eq('reporting_manager_id', managerEmp.id)
       .eq('status', 'active')
       .order('first_name', { ascending: true })
@@ -131,7 +149,7 @@ export async function GET(req: NextRequest) {
     }>
 
     if (reportsList.length === 0) {
-      return emptyPayload(ctx.orgId, org?.name ?? '—', year, month, leaveTypes ?? [], settings)
+      return emptyPayload(effectiveOrgId, org?.name ?? '—', year, month, leaveTypes ?? [], settings)
     }
 
     // ── 5. Bulk attendance_daily for the period, all reports at once
@@ -143,7 +161,7 @@ export async function GET(req: NextRequest) {
     const { data: dailyRows } = await supabaseAdmin
       .from('attendance_daily')
       .select('employee_id, attendance_date, status, leave_type_id')
-      .eq('org_id', ctx.orgId)
+      .eq('org_id', effectiveOrgId)
       .in('employee_id', reportIds)
       .gte('attendance_date', firstDay)
       .lte('attendance_date', lastDay) as { data: AttendanceDailyRow[] | null }
@@ -177,7 +195,7 @@ export async function GET(req: NextRequest) {
     })
 
     const payload: TeamAttendancePayload = {
-      org: { id: ctx.orgId, name: org?.name ?? '—' },
+      org: { id: effectiveOrgId, name: org?.name ?? '—' },
       period: {
         year, month,
         daysInMonth: totalDays,

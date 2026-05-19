@@ -37,7 +37,7 @@ function mapRow(r: any) {
   return {
     id:             r.id,
     employee_id:    r.employee_id,
-    date:           r.date,
+    date:           r.attendance_date,
     punch_in:       toTimeStr(r.check_in),
     punch_out:      toTimeStr(r.check_out),
     hours_worked:   r.total_hours ?? null,
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
         employee:employees(id, first_name, last_name, emp_id, department_id)
       `, { count: 'exact' })
       .eq('org_id', ctx.orgId)
-      .order('date', { ascending: false })
+      .order('attendance_date', { ascending: false })
       .limit(limit)
 
     if (employee_id) {
@@ -85,9 +85,9 @@ export async function GET(req: NextRequest) {
       query = query.eq('employee_id', ctx.identityId)
     }
 
-    if (date)      query = query.eq('date', date)
-    if (date_from) query = query.gte('date', date_from)
-    if (date_to)   query = query.lte('date', date_to)
+    if (date)      query = query.eq('attendance_date', date)
+    if (date_from) query = query.gte('attendance_date', date_from)
+    if (date_to)   query = query.lte('attendance_date', date_to)
     if (status)    query = query.eq('status', status)
 
     const { data, error: dbErr, count } = await query
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
         .select('id')
         .eq('org_id', ctx.orgId)
         .eq('employee_id', targetEmployee)
-        .eq('date', today)
+        .eq('attendance_date', today)
         .is('check_in', null)
         .maybeSingle()
 
@@ -201,12 +201,12 @@ export async function POST(req: NextRequest) {
         ;({ data, error: dbErr } = await supabaseAdmin
           .from('attendance_daily')
           .insert({
-            org_id:      ctx.orgId,
-            employee_id: targetEmployee,
-            date:        today,
-            check_in:    now.toISOString(),
+            org_id:          ctx.orgId,
+            employee_id:     targetEmployee,
+            attendance_date: today,
+            check_in:        now.toISOString(),
             status,
-            remarks:     notes ?? null,
+            remarks:         notes ?? null,
             ...geoFields,
           })
           .select()
@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
           console.warn('[punch_in] status constraint rejected work_from_home; retrying as present with [WFH] tag')
           const fallbackPayload = bareRecord
             ? { check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
-            : { org_id: ctx.orgId, employee_id: targetEmployee, date: today, check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
+            : { org_id: ctx.orgId, employee_id: targetEmployee, attendance_date: today, check_in: now.toISOString(), status: 'present', remarks: notes ? `[WFH] ${notes}` : '[WFH]', ...geoFields }
 
           const retryQ = bareRecord
             ? supabaseAdmin.from('attendance_daily').update(fallbackPayload).eq('id', bareRecord.id).eq('org_id', ctx.orgId).select().single()
@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
         .select('id, check_in, status')
         .eq('org_id', ctx.orgId)
         .eq('employee_id', targetEmployee)
-        .eq('date', today)
+        .eq('attendance_date', today)
         .maybeSingle()
 
       if (logErr) { console.error('[punch_out fetch]', logErr); throw logErr }

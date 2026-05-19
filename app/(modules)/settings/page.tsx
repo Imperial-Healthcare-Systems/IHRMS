@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   XCircle,
   ChevronDown,
+  ChevronUp,
   Upload,
   Layers,
   X,
@@ -734,10 +735,211 @@ function LeaveConfigPanel() {
         <span style={{ fontSize: '0.8rem', color: 'var(--color-gray-400)' }}>Save first, then run accrual.</span>
       </div>
 
+      <PinnedAggregatesSection />
+
       <NoteBlock text="Monthly accrual credits leave balances for all active employees each month. Run it on the 1st of each month or schedule it via your cron/automation. Changes take effect on the next accrual run — existing balances are not retroactively altered." />
 
       {editRow && (
         <LeaveTypeEditModal row={editRow} isNew={editIsNew} onClose={() => { setEditRow(null); setEditIsNew(false) }} onSave={saveEdit} />
+      )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PINNED AGGREGATES PICKER  (Team Attendance manager grid)
+   Reads/writes tenant_attendance_settings.pinned_codes — the
+   ordered list of leave codes that get summed as aggregate
+   columns on the right side of /team-attendance.
+───────────────────────────────────────────────────────────── */
+type LeaveTypeOption = {
+  id: string
+  code: string
+  label: string
+  letter: string | null
+  color_hex: string
+  is_active: boolean
+}
+
+function PinnedAggregatesSection() {
+  const [available, setAvailable] = useState<LeaveTypeOption[]>([])
+  const [pinned, setPinned]       = useState<string[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [saving, setSaving]       = useState(false)
+  const [saved, setSaved]         = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/leave-types').then(r => r.ok ? r.json() : { data: [] }),
+      fetch('/api/tenant-attendance-settings').then(r => r.ok ? r.json() : { data: { pinned_codes: [] } }),
+    ]).then(([lt, settings]) => {
+      const types = (lt.data ?? []) as LeaveTypeOption[]
+      setAvailable(types.filter(t => t.is_active))
+      setPinned((settings.data?.pinned_codes ?? []) as string[])
+    }).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  const togglePin = (code: string) => {
+    setError(null); setSaved(false)
+    setPinned(prev => {
+      if (prev.includes(code)) return prev.filter(c => c !== code)
+      if (prev.length >= 8) { setError('Maximum 8 pinned codes.'); return prev }
+      return [...prev, code]
+    })
+  }
+
+  const move = (code: string, delta: -1 | 1) => {
+    setSaved(false)
+    setPinned(prev => {
+      const idx = prev.indexOf(code)
+      if (idx < 0) return prev
+      const newIdx = idx + delta
+      if (newIdx < 0 || newIdx >= prev.length) return prev
+      const next = [...prev]
+      ;[next[idx], next[newIdx]] = [next[newIdx], next[idx]]
+      return next
+    })
+  }
+
+  const handleSave = async () => {
+    setSaving(true); setError(null); setSaved(false)
+    try {
+      const res = await fetch('/api/tenant-attendance-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned_codes: pinned }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Save failed')
+      setSaved(true); setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const byCode = new Map(available.map(lt => [lt.code, lt]))
+  const unpicked = available.filter(lt => !pinned.includes(lt.code))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16, borderTop: '1px solid var(--color-gray-200)' }}>
+      <SectionHeader
+        title="Team Attendance — Pinned Aggregate Columns"
+        description="Choose up to 8 leave codes that appear as aggregate columns on the right side of the manager's team-attendance grid. Codes you don't pin still render as dots on the calendar; only pinned ones get a summed side column."
+      />
+
+      {loading ? (
+        <div style={{ padding: 16, color: 'var(--color-gray-400)', fontSize: '0.85rem' }}>Loading leave types…</div>
+      ) : available.length === 0 ? (
+        <div style={{ padding: 16, background: '#fef3c7', borderRadius: 8, border: '1px solid #fde68a', fontSize: '0.85rem', color: '#78350f' }}>
+          No active leave types yet. Add some in the policy table above first.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          <div>
+            <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-gray-600)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+              Pinned ({pinned.length}/8)
+            </p>
+            {pinned.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--color-gray-400)' }}>None yet. Pick from below.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {pinned.map((code, idx) => {
+                  const lt = byCode.get(code)
+                  if (!lt) {
+                    return (
+                      <div key={code} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+                        <span style={{ flex: 1, fontSize: '0.85rem', color: '#991b1b' }}>
+                          <strong>{code}</strong> — no longer in your active leave types (will fail validation on save)
+                        </span>
+                        <button
+                          onClick={() => togglePin(code)}
+                          style={{ background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '4px 8px', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div key={code} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 8 }}>
+                      <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', background: lt.color_hex, flexShrink: 0 }} />
+                      <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--color-gray-900)', minWidth: 48 }}>{lt.code}</span>
+                      <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--color-gray-700)' }}>{lt.label}</span>
+                      <button
+                        onClick={() => move(code, -1)}
+                        disabled={idx === 0}
+                        style={{ background: 'none', border: '1px solid var(--color-gray-200)', borderRadius: 6, padding: 4, cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.3 : 1, display: 'inline-flex' }}
+                        title="Move up"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        onClick={() => move(code, 1)}
+                        disabled={idx === pinned.length - 1}
+                        style={{ background: 'none', border: '1px solid var(--color-gray-200)', borderRadius: 6, padding: 4, cursor: idx === pinned.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === pinned.length - 1 ? 0.3 : 1, display: 'inline-flex' }}
+                        title="Move down"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                      <button
+                        onClick={() => togglePin(code)}
+                        style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '4px 8px', fontSize: '0.75rem', fontWeight: 500, cursor: 'pointer' }}
+                      >
+                        Unpin
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {unpicked.length > 0 && (
+            <div>
+              <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--color-gray-600)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Available leave types
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {unpicked.map(lt => (
+                  <button
+                    key={lt.code}
+                    onClick={() => togglePin(lt.code)}
+                    disabled={pinned.length >= 8}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+                      background: '#fff', border: '1px solid var(--color-gray-200)', borderRadius: 999,
+                      fontSize: '0.8rem', fontWeight: 500, color: 'var(--color-gray-700)',
+                      cursor: pinned.length >= 8 ? 'not-allowed' : 'pointer',
+                      opacity: pinned.length >= 8 ? 0.4 : 1,
+                    }}
+                  >
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: lt.color_hex, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700 }}>{lt.code}</span>
+                    <span style={{ color: 'var(--color-gray-500)' }}>· {lt.label}</span>
+                    <Plus size={12} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#991b1b', fontSize: '0.8rem' }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <SaveButton label="Save Pinned Codes" onClick={handleSave} saving={saving} saved={saved} />
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-gray-400)' }}>
+              Changes appear on the next /team-attendance render.
+            </span>
+          </div>
+        </div>
       )}
     </div>
   )

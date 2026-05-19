@@ -41,15 +41,15 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('attendance_daily')
       .select(`
-        employee_id, date, status, total_hours,
+        employee_id, attendance_date, status, total_hours,
         employee:employees!attendance_daily_employee_id_fkey(
           id, first_name, last_name, emp_id,
           department:departments!employees_department_id_fkey(name)
         )
       `)
       .eq('org_id', ctx.orgId)
-      .gte('date', dateFrom)
-      .lte('date', dateTo)
+      .gte('attendance_date', dateFrom)
+      .lte('attendance_date', dateTo)
 
     if (!isFullAccess) query = query.eq('employee_id', ctx.identityId)
 
@@ -82,8 +82,8 @@ export async function GET(req: NextRequest) {
       if (r.status === 'late') agg.late++
       if (r.total_hours && r.total_hours > 9) agg.otHours += r.total_hours - 9
 
-      if (!dailyMap.has(r.date)) dailyMap.set(r.date, { present: 0, total: 0 })
-      const d = dailyMap.get(r.date)!
+      if (!dailyMap.has(r.attendance_date)) dailyMap.set(r.attendance_date, { present: 0, total: 0 })
+      const d = dailyMap.get(r.attendance_date)!
       d.total++
       if (isPresent) d.present++
     }

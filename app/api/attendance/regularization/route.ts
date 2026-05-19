@@ -190,7 +190,7 @@ export async function PATCH(req: NextRequest) {
         })
         .eq('org_id', ctx.orgId)
         .eq('employee_id', reg.employee_id)
-        .eq('date', reg.date)
+        .eq('attendance_date', reg.date)
     }
 
     if (reg.employee_id) {
