@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('performance_reviews')
       .select(`
-        id, cycle, cycle_id, review_period_from, review_period_to,
+        id, cycle, cycle_id, review_period_start, review_period_end,
         self_rating, manager_rating, final_rating,
         kra_scores, goals, next_goals, strengths, areas_of_improvement,
         training_needs, promotion_recommended, increment_recommended,
@@ -55,7 +56,9 @@ export async function GET(req: NextRequest) {
 
     // Non-admins see reviews where they are employee or reviewer
     if (!isAdmin) {
-      query = query.or(`employee_id.eq.${ctx.identityId},reviewer_id.eq.${ctx.identityId}`)
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      query = query.or(`employee_id.eq.${me.id},reviewer_id.eq.${me.id}`)
     }
 
     if (employee_id) query = query.eq('employee_id', employee_id)
@@ -65,8 +68,8 @@ export async function GET(req: NextRequest) {
     if (status)      query = query.eq('status', status)
     if (year) {
       query = query
-        .gte('review_period_from', `${year}-01-01`)
-        .lte('review_period_to', `${year}-12-31`)
+        .gte('review_period_start', `${year}-01-01`)
+        .lte('review_period_end', `${year}-12-31`)
     }
 
     const { data, error: dbErr, count } = await query
@@ -125,8 +128,8 @@ export async function POST(req: NextRequest) {
         org_id:             ctx.orgId,
         employee_id,
         reviewer_id,
-        review_period_from: period_from,
-        review_period_to:   period_to,
+        review_period_start: period_from,
+        review_period_end:   period_to,
         cycle:              cycle_type,
         cycle_id:           cycle_id ?? null,
         status:             'draft',

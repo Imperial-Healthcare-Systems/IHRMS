@@ -1,52 +1,52 @@
 /**
- * Impersonation receiver — Phase 5 of IMPERIAL_TENANT_SPEC v1.0 §8.1.
+ * Impersonation receiver — Phase 5 of IMPERIAL_TENANT_SPEC v1.0 §8.2,
+ * rewritten for Supabase Auth.
  *
- * Entry point hit by the Admin Console. Verifies the HS256 token signed
- * with IMPERSONATION_SECRET, walks the membership graph to resolve
- * identity_id + membership_id for the target user in the target org,
- * inserts a `tenant_visible_audit` row (Q3b — customer must see it),
- * mints a NextAuth session cookie carrying isImpersonating=true and
- * the impersonator's identity, then redirects to /dashboard.
+ *   1. Verify the HS256 impersonation token (IMPERSONATION_SECRET).
+ *   2. Validate platform_impersonation_log is open + within window.
+ *   3. Resolve identity_id (Path A: direct membership; Path B: legacy
+ *      employee.id → identity_id fallback).
+ *   4. Write app_metadata on the TARGET auth.users carrying the
+ *      impersonation flags + active org/membership/role/plan/branding/
+ *      all_memberships claims.
+ *   5. Mint a Supabase session via admin.generateLink + server-side
+ *      verifyOtp(token_hash). Cookies are written by @supabase/ssr onto
+ *      the redirect response.
+ *   6. Refresh once so the cookie's JWT carries the new app_metadata.
+ *   7. Insert tenant_visible_audit row (§8.3 — customer must see this).
+ *   8. Redirect to /dashboard?impersonating=1.
  *
- * Cookie maxAge is forced to 3600s — impersonation sessions are
- * short-lived regardless of normal session policy.
+ * The 1-hour impersonation cap is enforced via the platform_impersonation_log
+ * row. lib/session.ts reads app_metadata.impersonation_log_id on every
+ * requireAuth() and force-signs-out if the log row's ended_at is non-NULL.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { encode } from 'next-auth/jwt'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getServerSupabase } from '@/lib/supabase-server'
 import { verifyImpersonationToken } from '@/lib/auth-shared/jwt-claims'
 
-const SESSION_MAX_AGE_SECONDS = 3600 // 1 hour
+const SESSION_MAX_AGE_SECONDS = 3600
 
 export async function GET(req: NextRequest) {
   try {
     const token = new URL(req.url).searchParams.get('token')
     if (!token) return NextResponse.json({ error: 'Missing token' }, { status: 400 })
 
-    const nextAuthSecret = process.env.NEXTAUTH_SECRET
-    if (!nextAuthSecret) {
-      return NextResponse.json({ error: 'NEXTAUTH_SECRET not configured' }, { status: 500 })
-    }
     if (!process.env.IMPERSONATION_SECRET) {
       return NextResponse.json({ error: 'IMPERSONATION_SECRET not configured' }, { status: 500 })
     }
 
-    // 1. Verify the impersonation token signature + claims.
     let claims
     try {
       claims = await verifyImpersonationToken(token)
     } catch {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
-
     if (!claims.sub || !claims.orgId || !claims.impersonator || !claims.logId) {
       return NextResponse.json({ error: 'Malformed token' }, { status: 401 })
     }
 
-    // 2. Verify the impersonation log row exists, hasn't been ended, and is
-    //    still inside the 1-hour grace window. Uses cast through unknown
-    //    because Supabase generated types don't include this Migration-105
-    //    table yet.
+    // ── 2. Log row liveness check ──────────────────────────────────────
     const { data: log } = await supabaseAdmin
       .from('platform_impersonation_log')
       .select('id, ended_at, started_at')
@@ -63,8 +63,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Impersonation session expired' }, { status: 401 })
     }
 
-    // 3. Resolve identity_id + membership_id + role for the target.
-    //    Token may carry an identity_id (preferred) OR a legacy employee.id.
+    // ── 3. Resolve identity + membership for the target ────────────────
     let identityId = claims.sub
     let membershipId: string | null = null
     let role: string = 'member'
@@ -81,7 +80,7 @@ export async function GET(req: NextRequest) {
       membershipId = directMembership.id
       role = directMembership.role
     } else {
-      // Legacy fallback: token's `sub` was an employee.id
+      // Legacy fallback: claims.sub was an employees.id.
       const { data: emp } = await supabaseAdmin
         .from('employees')
         .select('identity_id, membership_id')
@@ -103,9 +102,8 @@ export async function GET(req: NextRequest) {
       role = m?.role ?? 'member'
     }
 
-    // 4. Hydrate identity + org metadata so the session JWT has
-    //    everything the existing routes (legacy fields) expect.
-    const [identityRes, orgRes, empRes] = await Promise.all([
+    // ── 4. Hydrate target identity + org + employee + all_memberships ──
+    const [identityRes, orgRes, empRes, allMemRes] = await Promise.all([
       supabaseAdmin
         .from('identities')
         .select('email, full_name, avatar_url, is_platform_admin')
@@ -122,6 +120,12 @@ export async function GET(req: NextRequest) {
         .eq('identity_id', identityId)
         .eq('org_id', claims.orgId)
         .maybeSingle(),
+      supabaseAdmin
+        .from('memberships')
+        .select('id, org_id, role, organisations(name)')
+        .eq('identity_id', identityId)
+        .eq('status', 'active')
+        .eq('hrms_access', true),
     ])
     const identity = identityRes.data as unknown as {
       email: string
@@ -137,17 +141,97 @@ export async function GET(req: NextRequest) {
     } | null
     const emp = empRes.data as unknown as {
       id: string
-      emp_id: string
-      first_name: string
-      last_name: string
-      role: string
-      is_admin: boolean
+      emp_id: string | null
+      first_name: string | null
+      last_name: string | null
+      role: string | null
+      is_admin: boolean | null
       avatar_url: string | null
     } | null
 
-    // 5. Insert tenant-visible audit (Q3b — customer must see "Imperial admin
-    //    impersonated this user"). The Imperial admin's email comes from
-    //    their own identity row when possible, employee row as fallback.
+    if (!identity?.email) {
+      return NextResponse.json({ error: 'Target identity missing email' }, { status: 500 })
+    }
+
+    const planTier = org?.plan_tier ?? 'free'
+    const subscriptionStatus = org?.subscription_status ?? 'active'
+    const brandingLevel = org?.org_branding?.[0]?.level ?? 'none'
+    const orgName = org?.name ?? null
+
+    const allMemberships = (allMemRes.data ?? []).map(m => {
+      const o = (m as unknown as { organisations: unknown }).organisations
+      const orgRow = Array.isArray(o) ? o[0] : (o as { name: string } | null)
+      return {
+        membership_id: (m as { id: string }).id,
+        org_id: (m as { org_id: string }).org_id,
+        org_name: orgRow?.name ?? '',
+        role: (m as { role: string }).role,
+      }
+    })
+
+    const legacyRole = emp?.role ?? role
+    const legacyIsAdmin = emp?.is_admin ?? ['owner', 'admin', 'hr_admin', 'crm_admin'].includes(role)
+
+    // ── 5. Write app_metadata on the target — replaces previous metadata
+    //      so a half-finished impersonation can't leak claims forward.
+    const { error: metaErr } = await supabaseAdmin.auth.admin.updateUserById(identityId, {
+      app_metadata: {
+        active_org_id:         claims.orgId,
+        active_membership_id:  membershipId,
+        active_role:           role,
+        active_org_name:       orgName,
+        active_branding_level: brandingLevel,
+        plan_tier:             planTier,
+        subscription_status:   subscriptionStatus,
+        is_platform_admin:     identity.is_platform_admin === true,
+        all_memberships:       allMemberships,
+        emp_id:                emp?.emp_id ?? null,
+        is_admin:              legacyIsAdmin,
+        legacy_role:           legacyRole,
+        is_impersonating:      true,
+        impersonator_admin_id: claims.impersonator,
+        impersonation_log_id:  claims.logId,
+      },
+      user_metadata: {
+        full_name:  identity.full_name ?? ([emp?.first_name, emp?.last_name].filter(Boolean).join(' ') || null),
+        avatar_url: identity.avatar_url ?? emp?.avatar_url ?? null,
+      },
+    })
+    if (metaErr) {
+      console.error('[impersonation-login] updateUserById failed:', metaErr)
+      return NextResponse.json({ error: 'Failed to write impersonation claims' }, { status: 500 })
+    }
+
+    // ── 6. Mint Supabase session via generateLink + verifyOtp ──────────
+    const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'magiclink',
+      email: identity.email,
+    })
+    if (linkErr || !linkData?.properties?.hashed_token) {
+      console.error('[impersonation-login] generateLink failed:', linkErr)
+      return NextResponse.json({ error: 'Failed to mint impersonation session' }, { status: 500 })
+    }
+
+    const redirect = NextResponse.redirect(new URL('/dashboard?impersonating=1', req.url))
+
+    const supabase = await getServerSupabase()
+    const { error: verifyErr } = await supabase.auth.verifyOtp({
+      token_hash: linkData.properties.hashed_token,
+      type: 'magiclink',
+    })
+    if (verifyErr) {
+      console.error('[impersonation-login] verifyOtp failed:', verifyErr)
+      return NextResponse.json({ error: 'Failed to establish impersonation session' }, { status: 500 })
+    }
+
+    // ── 7. Force-refresh so the JWT inside the just-set cookie carries
+    //      the is_impersonating + active_org_id claims (verifyOtp issued
+    //      a token before our app_metadata write took effect).
+    await supabase.auth.refreshSession().catch(err => {
+      console.error('[impersonation-login] refreshSession failed:', err)
+    })
+
+    // ── 8. tenant_visible_audit (§8.3) ─────────────────────────────────
     let imperialAdminEmail = 'imperial-admin'
     {
       const { data: adminIdentity } = await supabaseAdmin
@@ -167,87 +251,24 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    await supabaseAdmin.from('tenant_visible_audit').insert({
-      org_id: claims.orgId,
-      event_type: 'imperial.impersonation',
-      imperial_admin_email: imperialAdminEmail,
-      reason: claims.reason ?? null,
-      reference_type: 'impersonation_log',
-      reference_id: claims.logId,
-      metadata: { impersonator_id: claims.impersonator, target_identity_id: identityId },
-    } as never).then(({ error }) => {
-      if (error) console.error('[impersonation-login] tenant_visible_audit INSERT FAILED:', error.message, { org_id: claims.orgId, event_type: 'imperial.impersonation' })
-    })
+    const { error: auditErr } = await supabaseAdmin
+      .from('tenant_visible_audit')
+      .insert({
+        org_id: claims.orgId,
+        event_type: 'imperial.impersonation',
+        imperial_admin_email: imperialAdminEmail,
+        reason: claims.reason ?? null,
+        reference_type: 'impersonation_log',
+        reference_id: claims.logId,
+        metadata: { impersonator_id: claims.impersonator, target_identity_id: identityId },
+      } as never)
+    if (auditErr) {
+      console.error('[impersonation-login] tenant_visible_audit INSERT FAILED:', auditErr.message, {
+        org_id: claims.orgId, event_type: 'imperial.impersonation',
+      })
+    }
 
-    // 6. Mint a NextAuth session JWT with the same shape lib/auth.ts emits
-    //    on a normal credentials login. Keep both legacy and Active*
-    //    fields populated so all retrofitted + non-retrofitted routes work.
-    const planTier = org?.plan_tier ?? 'free'
-    const subscriptionStatus = org?.subscription_status ?? 'active'
-    const brandingLevel = org?.org_branding?.[0]?.level ?? 'none'
-    const legacyId = emp?.id ?? identityId
-    const legacyRole = emp?.role ?? role
-    const legacyIsAdmin = emp?.is_admin ?? ['owner', 'admin', 'hr_admin', 'crm_admin'].includes(role)
-    const legacyName = (identity?.full_name ?? `${emp?.first_name ?? ''} ${emp?.last_name ?? ''}`.trim()) || identity?.email || 'User'
-
-    const sessionToken = await encode({
-      token: {
-        // ── NextAuth canonical ──
-        id:    legacyId,
-        email: identity?.email ?? '',
-        name:  legacyName,
-        picture: identity?.avatar_url ?? emp?.avatar_url ?? null,
-
-        // ── Legacy fields (every existing route reads these) ──
-        empId:               emp?.emp_id ?? null,
-        role:                legacyRole,
-        isAdmin:             legacyIsAdmin,
-        orgId:               claims.orgId,
-        planTier,
-        subscriptionStatus,
-
-        // ── New tenant-spec fields (requireAuth() consumers) ──
-        isPlatformAdmin:        identity?.is_platform_admin ?? false,
-        activeOrgId:            claims.orgId,
-        activeMembershipId:     membershipId,
-        activeRole:             role,
-        activeOrgName:          org?.name ?? null,
-        activeBrandingLevel:    brandingLevel,
-        activePlanTier:         planTier,
-        activeSubscriptionStatus: subscriptionStatus,
-        // Single-org list — impersonation is locked to one org per session.
-        allMemberships: [{
-          membershipId,
-          orgId:   claims.orgId,
-          orgName: org?.name ?? '',
-          role,
-        }],
-
-        // ── Impersonation flags ──
-        isImpersonating:     true,
-        impersonatorAdminId: claims.impersonator,
-        impersonationLogId:  claims.logId,
-      },
-      secret: nextAuthSecret,
-      maxAge: SESSION_MAX_AGE_SECONDS,
-    })
-
-    // 7. Set the cookie + redirect. Cookie name varies by environment per
-    //    NextAuth's default cookie naming (matches getServerSession reads).
-    const isProd = process.env.NODE_ENV === 'production'
-    const cookieName = isProd ? '__Secure-next-auth.session-token' : 'next-auth.session-token'
-
-    const response = NextResponse.redirect(new URL('/dashboard?impersonating=1', req.url))
-    response.cookies.set({
-      name: cookieName,
-      value: sessionToken,
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      maxAge: SESSION_MAX_AGE_SECONDS,
-      path: '/',
-    })
-    return response
+    return redirect
   } catch (err) {
     console.error('[auth/impersonation-login GET]', err)
     const message = err instanceof Error ? err.message : 'Impersonation login failed'

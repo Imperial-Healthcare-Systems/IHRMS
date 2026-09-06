@@ -19,7 +19,7 @@
  *   - `forceShow={true}`: always shown (use sparingly — auth pages where
  *     the user has no session yet).
  */
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import { WATERMARK_LINES } from '@/lib/branding-constants'
 
 const APP_KIND = (process.env.NEXT_PUBLIC_APP_KIND ?? 'ihrms') as 'ihrms' | 'icrm'

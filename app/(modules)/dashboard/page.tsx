@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import toast from 'react-hot-toast'
 import { Topbar } from '@/components/layout/Topbar'
 import {

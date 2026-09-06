@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
+import { toCurrencyString, greaterThanToPaise } from '@/lib/money'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -42,8 +44,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     const sessionIsAdmin = HR_ROLES.includes(ctx.role)
 
-    if (!sessionIsAdmin && (data as Record<string, unknown> & { employee?: { id: string } })?.employee?.id !== ctx.identityId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!sessionIsAdmin) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      const claimEmployeeId = (data as Record<string, unknown> & { employee?: { id: string } })?.employee?.id
+      if (!me || claimEmployeeId !== me.id) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     return NextResponse.json({ data })
@@ -107,8 +113,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!['draft', 'pending', 'submitted'].includes(current.status)) {
         return NextResponse.json({ error: `Cannot edit a claim with status '${current.status}'` }, { status: 422 })
       }
-      if (current.employee_id !== ctx.identityId && !isAdmin) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (!isAdmin) {
+        const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+        if (!me || current.employee_id !== me.id) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
       }
 
       const CATEGORY_MAP: Record<string, string> = {
@@ -125,7 +134,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const editPayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
       if (normalizedCategory) { editPayload.category = normalizedCategory; editPayload.expense_type = normalizedCategory }
       if (editDescription)    editPayload.description = editDescription
-      if (editAmount !== undefined) editPayload.amount = editAmount
+      if (editAmount !== undefined) {
+        const amountStr = toCurrencyString(editAmount)
+        if (!greaterThanToPaise(amountStr, 0)) {
+          return NextResponse.json({ error: 'Amount must be greater than zero.' }, { status: 400 })
+        }
+        editPayload.amount = amountStr
+      }
       if (editYear && editMonth) {
         editPayload.claim_date = `${editYear}-${String(editMonth).padStart(2, '0')}-01`
       }
@@ -220,8 +235,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       throw fetchError
     }
 
-    if (!isAdmin && current.employee_id !== ctx.identityId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!isAdmin) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me || current.employee_id !== me.id) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     // Can only delete if status is 'pending' / 'draft' / 'submitted'

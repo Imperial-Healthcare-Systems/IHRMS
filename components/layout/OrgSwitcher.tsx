@@ -9,7 +9,7 @@
  * legacy fields too, so existing routes pick up the new orgId immediately.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import { useRouter } from 'next/navigation'
 import { Building2, Check, ChevronDown, Loader2 } from 'lucide-react'
 

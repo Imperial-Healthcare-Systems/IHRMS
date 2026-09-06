@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'operations_head']
 const MANAGER_ROLES     = ['manager']
@@ -37,11 +38,13 @@ export async function GET(req: NextRequest) {
 
     let teamIds: string[] = []
     if (MANAGER_ROLES.includes(ctx.role)) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
       const { data: team } = await supabaseAdmin
         .from('employees')
         .select('id')
         .eq('org_id', ctx.orgId)
-        .eq('reporting_manager_id', ctx.identityId)
+        .eq('reporting_manager_id', me.id)
         .eq('status', 'active')
       teamIds = (team ?? []).map((e: any) => e.id as string)
       if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
@@ -57,7 +60,9 @@ export async function GET(req: NextRequest) {
     if (MANAGER_ROLES.includes(ctx.role)) {
       query = query.in('employee_id', teamIds)
     } else if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
-      query = query.eq('employee_id', ctx.identityId)
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      query = query.eq('employee_id', me.id)
     }
 
     if (status)    query = query.eq('status', status)
@@ -186,13 +191,15 @@ export async function PATCH(req: NextRequest) {
 
     if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
       if (MANAGER_ROLES.includes(ctx.role)) {
+        const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+        if (!me) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         const { data: emp } = await supabaseAdmin
           .from('employees')
           .select('reporting_manager_id')
           .eq('id', (exitRow as any).employee_id)
           .eq('org_id', ctx.orgId)
           .single()
-        if (!emp || (emp as any).reporting_manager_id !== ctx.identityId) {
+        if (!emp || (emp as any).reporting_manager_id !== me.id) {
           return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
         }
       } else {

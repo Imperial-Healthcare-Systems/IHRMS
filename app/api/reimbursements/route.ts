@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee, requireActiveEmployee } from '@/lib/employee-context'
+import { toCurrencyString, greaterThanToPaise } from '@/lib/money'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -47,12 +49,14 @@ export async function GET(req: NextRequest) {
 
     // Scope: HR admin sees all; managers see team; employees see own
     if (!sessionIsAdmin) {
-      if (manager_id && manager_id === ctx.identityId) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      if (manager_id && manager_id === me.id) {
         const { data: teamMembers } = await supabaseAdmin
           .from('employees')
           .select('id')
           .eq('org_id', ctx.orgId)
-          .eq('manager_id', manager_id)
+          .eq('reporting_manager_id', me.id)
         const teamIds = (teamMembers ?? []).map((e: { id: string }) => e.id)
         if (teamIds.length > 0) {
           query = query.in('employee_id', teamIds)
@@ -60,7 +64,7 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({ data: [], count: 0 })
         }
       } else {
-        query = query.eq('employee_id', ctx.identityId)
+        query = query.eq('employee_id', me.id)
       }
     }
 
@@ -102,6 +106,9 @@ export async function POST(req: NextRequest) {
     const auth = await requireAuth()
     if (auth.error) return auth.error
     const ctx = auth.ctx
+    const meResult = await requireActiveEmployee(ctx.identityId, ctx.orgId)
+    if (meResult.error) return meResult.error
+    const me = meResult.employee
 
     const body = await req.json()
     delete (body as Record<string, unknown>).org_id
@@ -140,14 +147,20 @@ export async function POST(req: NextRequest) {
     const claim_number = `CLM/${yearNum}/${String(seq).padStart(4, '0')}`
     const claim_date   = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`
 
+    // Money math via decimal.js — never parseFloat() for INR.
+    // Pass the precise 2-decimal STRING to PostgREST so NUMERIC(15,2) stores it lossless.
+    const amountStr = toCurrencyString(amount)
+    if (!greaterThanToPaise(amountStr, 0)) {
+      return NextResponse.json({ error: 'Amount must be greater than zero.' }, { status: 400 })
+    }
     const insertPayload: Record<string, unknown> = {
-      employee_id: ctx.identityId,
+      employee_id: me.id,
       org_id:      ctx.orgId,
       claim_date,
       category,
       expense_type: category,
       description: `[${claim_number}] ${description}`,
-      amount: parseFloat(amount),
+      amount: amountStr,
       currency: 'INR',
       status: 'pending',
     }

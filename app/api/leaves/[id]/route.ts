@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendLeaveStatusEmail } from '@/lib/mailer'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'operations_head']
 
@@ -116,13 +117,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // For approve/reject: caller must be HR/admin OR the employee's reporting manager
     if (action === 'approve' || action === 'reject') {
       if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
+        const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+        if (!me) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         const { data: emp } = await supabaseAdmin
           .from('employees')
           .select('reporting_manager_id')
           .eq('id', (leaveRow as any).employee_id)
           .eq('org_id', ctx.orgId)
           .single()
-        if (!emp || (emp as any).reporting_manager_id !== ctx.identityId) {
+        if (!emp || (emp as any).reporting_manager_id !== me.id) {
           return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
         }
       }
@@ -183,11 +186,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               .from('leave_balances')
               .update({ used_days: newUsed, remaining_days: newRemaining })
               .eq('id', bal.id)
-            if (balUpdateErr) console.warn('[leaves approve] balance update error:', balUpdateErr)
+            if (balUpdateErr) console.error('[leaves approve] balance UPDATE FAILED — user can re-request same days:', balUpdateErr.message, { org_id: ctx.orgId, leave_id: id })
           }
         }
       } catch (balErr) {
-        console.warn('[leaves approve] balance update non-fatal:', balErr)
+        console.error('[leaves approve] balance update FAILED — user can re-request same days:', balErr instanceof Error ? balErr.message : balErr, { org_id: ctx.orgId, leave_id: id })
       }
 
       await sendLeaveNotification(

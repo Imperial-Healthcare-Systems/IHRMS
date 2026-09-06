@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getSession } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +14,7 @@ function isNextInternalError(err: unknown): boolean {
 export default async function Home() {
   let session = null
   try {
-    session = await getServerSession(authOptions)
+    session = await getSession()
   } catch (error) {
     // Rethrow Next.js internal redirect/not-found markers so the framework handles them
     if (isNextInternalError(error)) throw error

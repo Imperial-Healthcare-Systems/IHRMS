@@ -72,6 +72,18 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: idErr?.message ?? 'Identity create failed' }, { status: 500 })
         }
         identityId = created.id
+
+        // Mirror into auth.users sharing the same UUID so auth.uid() = identities.id
+        // after the invitee signs in. Idempotent: skip silently on 422 already-exists.
+        const { error: authUserErr } = await supabaseAdmin.auth.admin.createUser({
+          id: identityId,
+          email: normalizedEmail,
+          email_confirm: true,
+        })
+        if (authUserErr && !/already|exists|registered/i.test(authUserErr.message)) {
+          console.error('[team/accept/complete] auth.users mirror failed:', authUserErr)
+          return NextResponse.json({ error: 'Account provisioning failed', detail: authUserErr.message }, { status: 500 })
+        }
       }
     }
 
@@ -135,7 +147,7 @@ export async function POST(req: NextRequest) {
         status: 'active',
         date_of_joining: new Date().toISOString().split('T')[0],
       } as never).then(({ error }) => {
-        if (error) console.warn('[team/accept/complete] employee insert non-fatal:', error.message)
+        if (error) console.error('[team/accept/complete] employee INSERT FAILED:', error.message, { org_id: invite.org_id, identity_id: identityId })
       })
     }
     if (invite.crm_access) {
@@ -148,7 +160,7 @@ export async function POST(req: NextRequest) {
         role: invite.role === 'crm_admin' ? 'admin' : invite.role,
         is_active: true,
       } as never).then(({ error }) => {
-        if (error) console.warn('[team/accept/complete] crm_users insert non-fatal:', error.message)
+        if (error) console.error('[team/accept/complete] crm_users INSERT FAILED:', error.message, { org_id: invite.org_id, identity_id: identityId })
       })
     }
 

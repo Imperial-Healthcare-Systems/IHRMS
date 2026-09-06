@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -51,7 +52,11 @@ export async function GET(req: NextRequest) {
       .gte('attendance_date', dateFrom)
       .lte('attendance_date', dateTo)
 
-    if (!isFullAccess) query = query.eq('employee_id', ctx.identityId)
+    if (!isFullAccess) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ employees: [], dailyPct: [], workingDays, month })
+      query = query.eq('employee_id', me.id)
+    }
 
     const { data: records, error: attErr } = await query
     if (attErr) throw attErr

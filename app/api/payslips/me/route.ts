@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -20,14 +21,16 @@ const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
  * the payroll run so the UI can show month/year/status. Self-scoped — no
  * admin role required.
  *
- * The session's user.id is the employees.id (Path A and Path B both set it
- * that way), so eq('employee_id', ctx.identityId) does the right thing in
- * both cases. The org_id filter is defense-in-depth.
+ * ctx.identityId is identities.id, not employees.id — resolve via getActiveEmployee.
+ * The org_id filter is defense-in-depth.
  */
 export async function GET(_req: NextRequest) {
   try {
     const { ctx, error } = await requireAuth()
     if (error) return error
+
+    const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+    if (!me) return NextResponse.json({ data: [] })
 
     const buildQuery = (withRun: boolean) => {
       const select = withRun
@@ -36,7 +39,7 @@ export async function GET(_req: NextRequest) {
       return supabaseAdmin
         .from('payslips')
         .select(select)
-        .eq('employee_id', ctx.identityId)  // employees.id (compat layer)
+        .eq('employee_id', me.id)
         .eq('org_id', ctx.orgId)
         .order('created_at', { ascending: false })
     }

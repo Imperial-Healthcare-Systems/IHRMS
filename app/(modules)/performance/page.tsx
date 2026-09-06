@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import { Topbar } from '@/components/layout/Topbar'
 import toast from 'react-hot-toast'
 import { RefreshCw, Clock, CheckCircle, TrendingUp, X, Plus, Star } from 'lucide-react'

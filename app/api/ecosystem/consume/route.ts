@@ -22,18 +22,36 @@ export async function POST(req: NextRequest) {
     // Handle known inbound ICRM→IHRMS events
     switch (event_type) {
       case 'crm.deal.closed': {
-        // Example: notify HR when a deal closes (could trigger commission/bonus flow)
+        // Notify the employee tied to the closed deal.
         const { employee_id, deal_value, deal_name } = payload ?? {}
         if (employee_id) {
-          void Promise.resolve(
-            supabaseAdmin.from('notifications').insert({
-              recipient_id: employee_id,
+          // CRM passes employees.id, but notifications.recipient_id is read as
+          // an identities.id by /api/notifications (.eq('recipient_id', ctx.identityId)).
+          // Resolve employee → identity so the target user actually sees this.
+          const { data: emp, error: lookupErr } = await supabaseAdmin
+            .from('employees')
+            .select('identity_id')
+            .eq('id', employee_id)
+            .eq('org_id', org_id)
+            .maybeSingle() as { data: { identity_id: string | null } | null; error: { message: string } | null }
+
+          if (lookupErr) {
+            console.error('[ecosystem/consume] employee lookup failed:', lookupErr.message, { employee_id, org_id })
+          } else if (emp?.identity_id) {
+            const { error: insertErr } = await supabaseAdmin.from('notifications').insert({
+              org_id,
+              recipient_id: emp.identity_id,
               title: 'Deal Closed — Bonus Eligible',
               body: `Deal "${deal_name ?? 'N/A'}" worth ₹${(deal_value ?? 0).toLocaleString('en-IN')} has been closed. Your commission may be processed in the next payroll.`,
               type: 'info',
-              created_at: new Date().toISOString(),
+              is_read: false,
             })
-          ).catch(() => {})
+            if (insertErr) {
+              console.error('[ecosystem/consume] notification insert FAILED:', insertErr.message, { org_id, recipient_id: emp.identity_id })
+            }
+          } else {
+            console.warn('[ecosystem/consume] employee has no identity_id; skipping notify', { employee_id, org_id })
+          }
         }
         break
       }
@@ -48,14 +66,17 @@ export async function POST(req: NextRequest) {
         console.info('[ecosystem/consume] Unknown event_type:', event_type)
     }
 
-    // Mark event as processed in ecosystem_events table (if tracked)
+    // Mark the event as processed (org-scoped, so a malicious caller can't flip
+    // someone else's tenant rows).
     if (payload?.event_id) {
-      void Promise.resolve(
-        supabaseAdmin
-          .from('ecosystem_events')
-          .update({ processed: true })
-          .eq('id', payload.event_id)
-      ).catch(() => {})
+      const { error: updateErr } = await supabaseAdmin
+        .from('ecosystem_events')
+        .update({ processed: true, processed_at: new Date().toISOString() })
+        .eq('id', payload.event_id)
+        .eq('org_id', org_id)
+      if (updateErr) {
+        console.error('[ecosystem/consume] ecosystem_events update FAILED:', updateErr.message, { event_id: payload.event_id, org_id })
+      }
     }
 
     return NextResponse.json({ received: true, event_type })

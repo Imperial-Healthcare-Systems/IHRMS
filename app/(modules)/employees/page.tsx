@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import { Topbar } from '@/components/layout/Topbar'
 import { employeesApi, payrollApi, type Employee as ApiEmployee, type Department } from '@/lib/api-client'
 import toast from 'react-hot-toast'

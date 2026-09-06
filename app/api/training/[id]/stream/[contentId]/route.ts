@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -30,12 +31,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     // For storage-backed videos, verify the user is enrolled (admins bypass)
     if (!HR_ROLES.includes(ctx.role)) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ error: 'You must enrol in this course first' }, { status: 403 })
       const { data: enrollment } = await supabaseAdmin
         .from('training_enrollments')
         .select('id')
         .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', ctx.identityId)
+        .eq('employee_id', me.id)
         .maybeSingle()
       if (!enrollment) {
         return NextResponse.json({ error: 'You must enrol in this course first' }, { status: 403 })

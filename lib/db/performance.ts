@@ -23,8 +23,8 @@ export async function getPerformanceReviews(filters: {
   if (filters.status) query = query.eq('status', filters.status)
   if (filters.year) {
     query = query
-      .gte('period_start', `${filters.year}-01-01`)
-      .lte('period_end', `${filters.year}-12-31`)
+      .gte('review_period_start', `${filters.year}-01-01`)
+      .lte('review_period_end', `${filters.year}-12-31`)
   }
 
   const { data, error, count } = await query
@@ -67,14 +67,14 @@ export async function getWarningLetters(filters: {
         department:departments(name)),
       issued_by_employee:employees!issued_by(id, first_name, last_name)
     `, { count: 'exact' })
-    .order('date', { ascending: false })
+    .order('issued_date', { ascending: false })
 
   if (filters.employee_id) query = query.eq('employee_id', filters.employee_id)
   if (filters.status) query = query.eq('status', filters.status)
   if (filters.year) {
     query = query
-      .gte('date', `${filters.year}-01-01`)
-      .lte('date', `${filters.year}-12-31`)
+      .gte('issued_date', `${filters.year}-01-01`)
+      .lte('issued_date', `${filters.year}-12-31`)
   }
   if (filters.limit) query = query.limit(filters.limit)
 
@@ -97,8 +97,8 @@ export async function createWarning(payload: Record<string, unknown>) {
     .from('warning_letters')
     .select('*', { count: 'exact', head: true })
     .eq('employee_id', payload.employee_id as string)
-    .gte('date', `${year}-01-01`)
-    .lte('date', `${year}-12-31`)
+    .gte('issued_date', `${year}-01-01`)
+    .lte('issued_date', `${year}-12-31`)
     .neq('status', 'draft')
 
   return { warning: data, warning_count: count ?? 0, auto_termination_triggered: (count ?? 0) >= 3 }
@@ -156,16 +156,16 @@ export async function getProbationReviews(filters: {
     .from('probation_reviews')
     .select(`
       *,
-      employee:employees(id, first_name, last_name, emp_id, hire_date, probation_end_date,
+      employee:employees(id, first_name, last_name, emp_id, date_of_joining, probation_end_date,
         department:departments(name),
         designation:designations(title),
         reporting_manager:employees!reporting_manager_id(id, first_name, last_name))
     `)
-    .order('due_date', { ascending: true })
+    .order('probation_end', { ascending: true })
 
   if (filters.outcome) query = query.eq('outcome', filters.outcome)
   if (filters.overdue) {
-    query = query.lt('due_date', new Date().toISOString().split('T')[0]).eq('outcome', 'pending')
+    query = query.lt('probation_end', new Date().toISOString().split('T')[0]).eq('outcome', 'pending')
   }
 
   const { data, error } = await query

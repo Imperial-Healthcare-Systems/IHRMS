@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -49,13 +50,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // Fetch the current user's completion records for this course
     let completedSet = new Set<string>()
     if (items.length > 0) {
-      const { data: progress } = await supabaseAdmin
-        .from('course_content_progress')
-        .select('content_id')
-        .eq('org_id', ctx.orgId)
-        .eq('course_id', courseId)
-        .eq('employee_id', ctx.identityId)
-      for (const row of progress ?? []) completedSet.add((row as any).content_id as string)
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (me) {
+        const { data: progress } = await supabaseAdmin
+          .from('course_content_progress')
+          .select('content_id')
+          .eq('org_id', ctx.orgId)
+          .eq('course_id', courseId)
+          .eq('employee_id', me.id)
+        for (const row of progress ?? []) completedSet.add((row as any).content_id as string)
+      }
     }
 
     const enriched = items.map(it => ({ ...it, completed_by_me: completedSet.has(it.id as string) }))

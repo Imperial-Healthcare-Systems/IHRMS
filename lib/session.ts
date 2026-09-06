@@ -1,29 +1,42 @@
 /**
- * Canonical session helpers per IMPERIAL_TENANT_SPEC v1.0 Section 3.4.
+ * Session helpers — Supabase Auth backed (Phase E of IHRMS migration).
  *
- * Required at the top of EVERY tenant-scoped API route during/after the
- * Phase 2 retrofit (except /api/auth/* and /api/cron/* routes which run
- * with no session or with CRON_SECRET).
+ * Public surface unchanged from the NextAuth era:
+ *   - `requireAuth()` returns `{ ctx: AuthContext, error: null }` or `{ ctx: null, error: NextResponse }`
+ *   - `requireRole(allowed)` same shape, with role-allow-list check
  *
- * Returns the AuthContext or a 401/403 response. Never trust orgId from
- * anywhere except the JWT (Founding Principle 2).
+ * Added:
+ *   - `getSession()` returns a NextAuth-shaped Session object (or null).
+ *     Used by lib/use-session.ts to synthesise the client hook and by
+ *     impersonation-end / signup flows for soft session reads.
+ *
+ * What changed internally:
+ *   - Session is read from the cookie-backed Supabase server client.
+ *   - AuthContext fields come from auth.users.app_metadata (written by
+ *     verify-otp, switch-org, impersonation-login).
+ *   - Impersonation liveness check on every requireAuth(): if
+ *     app_metadata.impersonation_log_id refers to a row whose ended_at is
+ *     non-NULL, the Supabase session is signed out and 401 is returned.
+ *     Enforces the 1-hour cap; the hourly zombie sweeper closes stale rows.
  */
-import { getServerSession } from 'next-auth'
-import { authOptions } from './auth'
 import { NextResponse } from 'next/server'
+import type { Session, Membership } from '@/types/session'
+
+import { getServerSupabase } from './supabase-server'
+import { supabaseAdmin } from './supabase-admin'
 
 export type AuthContext = {
-  /** identities.id — the auth root */
+  /** identities.id — auth root */
   identityId: string
-  /** memberships.id for the active org (legacy fallback: employee.id when no membership) */
+  /** memberships.id for the active org */
   membershipId: string
-  /** active organisation id — read from JWT only, never from request */
+  /** active organisation id */
   orgId: string
-  /** active membership role (membership_role enum) */
+  /** active membership role */
   role: string
   /** denormalized email for logging convenience */
   email: string
-  /** platform admin flag (Imperial admin only) */
+  /** platform admin flag */
   isPlatformAdmin: boolean
   /** true when this session was issued by the Admin Console as an impersonation */
   isImpersonating: boolean
@@ -31,11 +44,107 @@ export type AuthContext = {
   impersonatorAdminId: string | null
 }
 
+const ADMIN_ROLES = new Set(['owner', 'admin', 'hr_admin', 'crm_admin', 'super_admin'])
+
+function readMembershipsClaim(meta: Record<string, unknown>): Membership[] {
+  const raw = meta.all_memberships
+  if (!Array.isArray(raw)) return []
+  return raw.map(m => {
+    const r = m as Record<string, unknown>
+    return {
+      membershipId: typeof r.membership_id === 'string' ? r.membership_id : '',
+      orgId:        typeof r.org_id === 'string' ? r.org_id : '',
+      orgName:      typeof r.org_name === 'string' ? r.org_name : '',
+      role:         typeof r.role === 'string' ? r.role : 'member',
+    }
+  })
+}
+
+/**
+ * Read the current Supabase session and synthesise a Session object so
+ * existing callers keep working. Returns null if there is no session OR
+ * if the session is an impersonation whose log row has been closed.
+ */
+export async function getSession(): Promise<Session | null> {
+  const supabase = await getServerSupabase()
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (error || !user) return null
+
+  const meta = (user.app_metadata ?? {}) as Record<string, unknown>
+
+  // Impersonation cap enforcement — close the session if the log row ended.
+  const impersonationLogId = typeof meta.impersonation_log_id === 'string' ? meta.impersonation_log_id : null
+  const isImpersonating = meta.is_impersonating === true
+  if (isImpersonating && impersonationLogId) {
+    const { data: log } = await supabaseAdmin
+      .from('platform_impersonation_log')
+      .select('ended_at')
+      .eq('id', impersonationLogId)
+      .maybeSingle() as { data: { ended_at: string | null } | null }
+
+    if (!log || log.ended_at) {
+      await supabase.auth.signOut().catch(() => {})
+      return null
+    }
+  }
+
+  const userMeta = (user.user_metadata ?? {}) as Record<string, unknown>
+  const role = typeof meta.active_role === 'string' ? meta.active_role : 'member'
+  const orgId = typeof meta.active_org_id === 'string' ? meta.active_org_id : ''
+  const membershipId = typeof meta.active_membership_id === 'string' ? meta.active_membership_id : null
+  const orgName = typeof meta.active_org_name === 'string' ? meta.active_org_name : null
+  const brandingLevel = typeof meta.active_branding_level === 'string' ? meta.active_branding_level : 'none'
+  const planTier = typeof meta.plan_tier === 'string' ? meta.plan_tier : 'free'
+  const subscriptionStatus = typeof meta.subscription_status === 'string' ? meta.subscription_status : 'active'
+  const isPlatformAdmin = meta.is_platform_admin === true
+  const impersonatorAdminId = typeof meta.impersonator_admin_id === 'string' ? meta.impersonator_admin_id : null
+  const empId = typeof meta.emp_id === 'string' ? meta.emp_id : null
+  const isAdmin = meta.is_admin === true || ADMIN_ROLES.has(role)
+  const legacyRole = typeof meta.legacy_role === 'string' ? meta.legacy_role : role
+  const allMemberships = readMembershipsClaim(meta)
+
+  const session: Session = {
+    user: {
+      id: user.id,
+      email: user.email ?? '',
+      name: typeof userMeta.full_name === 'string' ? userMeta.full_name : null,
+      image: typeof userMeta.avatar_url === 'string' ? userMeta.avatar_url : null,
+
+      // Legacy fields
+      empId,
+      role: legacyRole,
+      isAdmin,
+      orgId,
+      planTier,
+      subscriptionStatus,
+
+      // Active*
+      isPlatformAdmin,
+      activeOrgId:           orgId,
+      activeMembershipId:    membershipId,
+      activeRole:            role,
+      activeOrgName:         orgName,
+      activeBrandingLevel:   brandingLevel,
+      activePlanTier:        planTier,
+      activeSubscriptionStatus: subscriptionStatus,
+      allMemberships,
+
+      // Impersonation
+      isImpersonating,
+      impersonatorAdminId,
+      impersonationLogId,
+      impersonatedBy: isImpersonating && impersonatorAdminId
+        ? { identityId: impersonatorAdminId, email: '', name: '', startedAt: '' }
+        : null,
+    },
+    expires: '',
+  }
+
+  return session
+}
+
 /**
  * REQUIRED at the top of EVERY tenant-scoped API route.
- *
- * Returns either { ctx, error: null } or { ctx: null, error: <NextResponse> }.
- * Callers do:
  *
  *   const { ctx, error } = await requireAuth()
  *   if (error) return error
@@ -44,18 +153,13 @@ export type AuthContext = {
 export async function requireAuth(): Promise<
   { ctx: AuthContext; error: null } | { ctx: null; error: NextResponse }
 > {
-  const session = await getServerSession(authOptions)
-  const u = session?.user as any
-  if (!u?.id) {
+  const session = await getSession()
+  if (!session?.user?.id) {
     return { ctx: null, error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
-  // Compatibility layer: prefer new Active* fields, fall back to legacy fields.
-  // Once Phase 2 finishes the retrofit, the legacy fallbacks can be removed.
-  const orgId        = u.activeOrgId        ?? u.orgId        ?? null
-  const membershipId = u.activeMembershipId ?? u.id           // employee.id as fallback
-  const role         = u.activeRole         ?? u.role         ?? 'member'
-
+  const u = session.user
+  const orgId = u.activeOrgId ?? u.orgId
   if (!orgId) {
     return {
       ctx: null,
@@ -65,25 +169,19 @@ export async function requireAuth(): Promise<
 
   return {
     ctx: {
-      identityId:           u.id,
-      membershipId,
+      identityId:          u.id,
+      membershipId:        u.activeMembershipId ?? u.id,
       orgId,
-      role,
-      email:                u.email ?? '',
-      isPlatformAdmin:      u.isPlatformAdmin ?? u.isAdmin ?? false,
-      isImpersonating:      u.isImpersonating ?? false,
-      impersonatorAdminId:  u.impersonatorAdminId ?? null,
+      role:                u.activeRole ?? u.role ?? 'member',
+      email:               u.email ?? '',
+      isPlatformAdmin:     u.isPlatformAdmin,
+      isImpersonating:     u.isImpersonating,
+      impersonatorAdminId: u.impersonatorAdminId,
     },
     error: null,
   }
 }
 
-/**
- * Use when the route requires a specific role (or any of a set of roles).
- *
- *   const { ctx, error } = await requireRole(['owner','admin','hr_admin'])
- *   if (error) return error
- */
 export async function requireRole(allowed: string[]): Promise<
   { ctx: AuthContext; error: null } | { ctx: null; error: NextResponse }
 > {

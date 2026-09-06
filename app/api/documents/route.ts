@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { logAudit } from '@/lib/audit'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -23,6 +24,9 @@ export async function GET(req: NextRequest) {
     const employeeId  = searchParams.get('employee_id')
     const isAdminUser = HR_ROLES.includes(ctx.role)
 
+    const me = !isAdminUser ? await getActiveEmployee(ctx.identityId, ctx.orgId) : null
+    if (!isAdminUser && !me) return NextResponse.json({ data: [] })
+
     const buildQuery = (withEmployeeFilter: boolean) => {
       let q = supabaseAdmin
         .from('org_documents')
@@ -41,8 +45,8 @@ export async function GET(req: NextRequest) {
         .order('created_at', { ascending: false })
 
       if (withEmployeeFilter) {
-        if (!isAdminUser)    q = q.eq('employee_id', ctx.identityId)
-        else if (employeeId) q = q.eq('employee_id', employeeId)
+        if (!isAdminUser && me) q = q.eq('employee_id', me.id)
+        else if (employeeId)    q = q.eq('employee_id', employeeId)
       }
       return q
     }

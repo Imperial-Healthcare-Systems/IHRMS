@@ -3,6 +3,7 @@ import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 const FULL_ACCESS = [...HR_ROLES, 'manager', 'operations_head']
@@ -51,7 +52,9 @@ export async function GET(req: NextRequest) {
       .range(offset, offset + limit - 1)
 
     if (!isFullAccess) {
-      query = query.eq('employee_id', ctx.identityId)
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      query = query.eq('employee_id', me.id)
     } else if (employee_id) {
       query = query.eq('employee_id', employee_id)
     }

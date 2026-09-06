@@ -1,75 +1,64 @@
 /**
- * End an active impersonation session — Phase 5 of IMPERIAL_TENANT_SPEC v1.0 §8.3.
+ * End an active impersonation session — Phase 5 §8.3, post-Supabase-Auth.
  *
- * Triggered by the End Session button in the ImpersonationBanner. Three
- * side-effects, all best-effort (we always end the session even if any
- * one of them fails — getting the cookie cleared takes priority):
+ * Three side-effects:
+ *   1. Stamp `platform_impersonation_log.ended_at = now()` (idempotent).
+ *   2. Insert `tenant_visible_audit` row `imperial.impersonation_ended`.
+ *   3. Supabase signOut() — clears the auth cookies via @supabase/ssr.
  *
- *   1. Stamp `platform_impersonation_log.ended_at = now()`
- *   2. Insert tenant_visible_audit row with `imperial.impersonation_ended`
- *   3. Clear the next-auth session cookie
- *
- * The Admin Console redirect URL is configurable via
- * IMPERIAL_ADMIN_BASE_URL — defaults to https://imperialhealthcare.cloud.
+ * Returns the Admin Console redirect target so the client can navigate to it.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getServerSupabase } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function POST(_req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  const u = session?.user as { isImpersonating?: boolean; impersonationLogId?: string; activeOrgId?: string; orgId?: string } | undefined
+  const supabase = await getServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'No active session.' }, { status: 401 })
+  }
 
-  if (!u?.isImpersonating) {
+  const meta = (user.app_metadata ?? {}) as Record<string, unknown>
+  const isImpersonating = meta.is_impersonating === true
+  if (!isImpersonating) {
     return NextResponse.json({ error: 'Not currently impersonating' }, { status: 400 })
   }
 
-  const orgId = u.activeOrgId ?? u.orgId ?? null
-  const logId = u.impersonationLogId ?? null
+  const orgId = typeof meta.active_org_id === 'string' ? meta.active_org_id : null
+  const logId = typeof meta.impersonation_log_id === 'string' ? meta.impersonation_log_id : null
   const adminBase = process.env.IMPERIAL_ADMIN_BASE_URL ?? 'https://imperialhealthcare.cloud'
   const redirectTo = orgId ? `${adminBase}/orgs/${orgId}` : adminBase
 
-  // 1. Close the impersonation log row (idempotent — only updates if not yet ended).
+  // 1. Close the impersonation log row.
   if (logId) {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('platform_impersonation_log')
       .update({ ended_at: new Date().toISOString() } as never)
       .eq('id', logId)
       .is('ended_at', null)
-      .then(({ error }) => {
-        if (error) console.error('[impersonation-end] log close FAILED:', error.message, { log_id: logId })
-      })
+    if (error) console.error('[impersonation-end] log close FAILED:', error.message, { log_id: logId })
   }
 
   // 2. Tenant-visible audit row.
   if (orgId) {
-    await supabaseAdmin.from('tenant_visible_audit').insert({
-      org_id: orgId,
-      event_type: 'imperial.impersonation_ended',
-      imperial_admin_email: session?.user?.email ?? 'imperial-admin',
-      reason: null,
-      reference_type: 'impersonation_log',
-      reference_id: logId,
-    } as never).then(({ error }) => {
-      if (error) console.error('[impersonation-end] tenant_visible_audit INSERT FAILED:', error.message, { org_id: orgId, log_id: logId })
-    })
+    const { error } = await supabaseAdmin
+      .from('tenant_visible_audit')
+      .insert({
+        org_id: orgId,
+        event_type: 'imperial.impersonation_ended',
+        imperial_admin_email: user.email ?? 'imperial-admin',
+        reason: null,
+        reference_type: 'impersonation_log',
+        reference_id: logId,
+      } as never)
+    if (error) console.error('[impersonation-end] tenant_visible_audit INSERT FAILED:', error.message, { org_id: orgId, log_id: logId })
   }
 
-  // 3. Clear the session cookie. Don't rely on signOut() — we want the
-  //    redirect target to be the Admin Console, not /login.
-  const isProd = process.env.NODE_ENV === 'production'
-  const cookieName = isProd ? '__Secure-next-auth.session-token' : 'next-auth.session-token'
-
-  const res = NextResponse.json({ success: true, redirectTo })
-  res.cookies.set({
-    name: cookieName,
-    value: '',
-    httpOnly: true,
-    secure: isProd,
-    sameSite: 'lax',
-    maxAge: 0,
-    path: '/',
+  // 3. Clear the Supabase auth cookies.
+  await supabase.auth.signOut().catch(err => {
+    console.error('[impersonation-end] signOut failed:', err)
   })
-  return res
+
+  return NextResponse.json({ success: true, redirectTo })
 }

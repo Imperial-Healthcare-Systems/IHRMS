@@ -7,10 +7,9 @@
  */
 export const dynamic = 'force-dynamic'
 
-import { getServerSession } from 'next-auth'
+import { getSession } from '@/lib/session'
 import { redirect } from 'next/navigation'
 import { headers, cookies } from 'next/headers'
-import { authOptions } from '@/lib/auth'
 import { Topbar } from '@/components/layout/Topbar'
 import { AttendanceGridClient } from '@/components/team-attendance/AttendanceGridClient'
 import type { TeamAttendancePayload } from '@/types/team-attendance'
@@ -29,7 +28,7 @@ async function fetchInitial(): Promise<{
   const proto = h.get('x-forwarded-proto') ?? 'http'
   const base  = `${proto}://${host}`
 
-  // Forward cookies so the API route's getServerSession sees the same session.
+  // Forward cookies so the API route's session reader sees the same session.
   const cookieStore = await cookies()
   const cookieHeader = cookieStore.getAll().map(c => `${c.name}=${c.value}`).join('; ')
 
@@ -42,7 +41,7 @@ async function fetchInitial(): Promise<{
 }
 
 export default async function TeamAttendancePage() {
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (!session) redirect('/login')
 
   const result = await fetchInitial()

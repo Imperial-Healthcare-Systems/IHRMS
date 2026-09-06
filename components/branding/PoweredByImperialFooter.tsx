@@ -6,15 +6,13 @@
  * Client islands can keep using the bare `<PoweredByImperial>` — the
  * conservative session-based check is good enough for them.
  */
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getSession } from '@/lib/session'
 import { getOrgBranding, shouldShowWatermark } from '@/lib/branding'
 import PoweredByImperial from './PoweredByImperial'
 
 export async function PoweredByImperialFooter() {
-  const session = await getServerSession(authOptions)
-  const orgId = (session?.user as { activeOrgId?: string; orgId?: string } | undefined)?.activeOrgId
-            ?? (session?.user as { orgId?: string } | undefined)?.orgId
+  const session = await getSession()
+  const orgId = session?.user.activeOrgId ?? session?.user.orgId
 
   if (!orgId) {
     // No active org (logged out, or session missing) — show by default.

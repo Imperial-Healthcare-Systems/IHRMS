@@ -68,6 +68,18 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: idErr?.message ?? 'identity insert failed' }, { status: 500 })
         }
         identityId = created.id
+
+        // Mirror into auth.users sharing the same UUID so auth.uid() = identities.id
+        // after this user signs in. Idempotent: skip silently on 422 already-exists.
+        const { error: authUserErr } = await supabaseAdmin.auth.admin.createUser({
+          id: identityId,
+          email: normalizedEmail,
+          email_confirm: true,
+        })
+        if (authUserErr && !/already|exists|registered/i.test(authUserErr.message)) {
+          console.error('[signup/complete] auth.users mirror failed:', authUserErr)
+          return NextResponse.json({ error: 'Account provisioning failed', detail: authUserErr.message }, { status: 500 })
+        }
       }
     }
 
@@ -102,7 +114,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Branding (best-effort — table is optional under some Phase 0 configs)
     await supabaseAdmin.from('org_branding').insert({ org_id: org.id } as never).then(({ error }) => {
-      if (error) console.warn('[signup/complete] org_branding insert non-fatal:', error.message)
+      if (error) console.error('[signup/complete] org_branding INSERT FAILED:', error.message, { org_id: org.id })
     })
 
     // 4. Owner membership.
@@ -144,7 +156,7 @@ export async function POST(req: NextRequest) {
       status: 'trial',
       trial_ends_at: trialEnd.toISOString(),
     } as never).then(({ error }) => {
-      if (error) console.warn('[signup/complete] org_subscriptions insert non-fatal:', error.message)
+      if (error) console.error('[signup/complete] org_subscriptions INSERT FAILED — billing will break:', error.message, { org_id: org.id, product: p.product, tier: p.tier })
     })
 
     // 6. Credits (with monthly allowance).
@@ -156,7 +168,7 @@ export async function POST(req: NextRequest) {
       balance: aiAllowance,
       allowance_reset_date: new Date().toISOString().split('T')[0],
     } as never).then(({ error }) => {
-      if (error) console.warn('[signup/complete] org_credits insert non-fatal:', error.message)
+      if (error) console.error('[signup/complete] org_credits INSERT FAILED — AI features will break:', error.message, { org_id: org.id })
     })
 
     // 7. Founder employee row (only when HRMS is enabled).
@@ -176,7 +188,7 @@ export async function POST(req: NextRequest) {
         status: 'active',
         date_of_joining: new Date().toISOString().split('T')[0],
       } as never).then(({ error }) => {
-        if (error) console.warn('[signup/complete] employee insert non-fatal:', error.message)
+        if (error) console.error('[signup/complete] founder employee INSERT FAILED:', error.message, { org_id: org.id, identity_id: identityId })
       })
     }
 
@@ -190,7 +202,7 @@ export async function POST(req: NextRequest) {
         role: 'super_admin',
         is_active: true,
       } as never).then(({ error }) => {
-        if (error) console.warn('[signup/complete] crm_users insert non-fatal:', error.message)
+        if (error) console.error('[signup/complete] crm_users INSERT FAILED:', error.message, { org_id: org.id, identity_id: identityId })
       })
     }
 

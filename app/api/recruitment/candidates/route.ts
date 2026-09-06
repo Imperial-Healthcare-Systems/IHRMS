@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { toCurrencyString } from '@/lib/money'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
@@ -108,8 +109,9 @@ export async function POST(req: NextRequest) {
         resume_url: resume_url ?? null,
         current_company: current_company ?? null,
         current_designation: current_designation ?? null,
-        current_ctc: current_ctc ? parseFloat(current_ctc) : null,
-        expected_ctc: expected_ctc ? parseFloat(expected_ctc) : null,
+        // CTC is money — use decimal.js string serialisation, not parseFloat.
+        current_ctc: current_ctc ? toCurrencyString(current_ctc) : null,
+        expected_ctc: expected_ctc ? toCurrencyString(expected_ctc) : null,
         notice_period_days: notice_period_days ? parseInt(notice_period_days) : null,
         total_experience: total_experience_years ? parseFloat(total_experience_years) : null,
         skills: skills ?? null,

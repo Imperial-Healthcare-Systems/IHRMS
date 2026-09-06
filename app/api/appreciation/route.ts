@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { emitEvent } from '@/lib/ecosystem'
 import { logAudit } from '@/lib/audit'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const FULL_ACCESS = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'manager', 'operations_head']
 
@@ -24,7 +25,14 @@ export async function GET(req: NextRequest) {
     const limit       = Math.min(parseInt(searchParams.get('limit') ?? '100'), 200)
     const filterEmpId = searchParams.get('employee_id')
 
-    const targetEmpId = FULL_ACCESS.includes(ctx.role) ? (filterEmpId ?? null) : ctx.identityId
+    let targetEmpId: string | null
+    if (FULL_ACCESS.includes(ctx.role)) {
+      targetEmpId = filterEmpId ?? null
+    } else {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      targetEmpId = me.id
+    }
 
     // Use RPC to bypass PostgREST schema cache (legacy reason — kept for compat)
     const { data: rows, error: dbErr } = await supabaseAdmin.rpc('get_appreciations', { p_limit: limit })
@@ -103,9 +111,12 @@ export async function POST(req: NextRequest) {
       .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
     if (!emp) return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
 
+    const giver = await getActiveEmployee(ctx.identityId, ctx.orgId)
+    if (!giver) return NextResponse.json({ error: 'You do not have an employee profile in this organisation.' }, { status: 404 })
+
     const { data, error: dbErr } = await supabaseAdmin.rpc('save_appreciation', {
       p_employee_id: employee_id,
-      p_given_by:    ctx.identityId,
+      p_given_by:    giver.id,
       p_category:    category,
       p_subject:     subject,
       p_description: description ?? null,

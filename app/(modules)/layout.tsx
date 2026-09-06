@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
+import { getSession } from '@/lib/session'
 import { redirect } from 'next/navigation'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { SidebarProvider } from '@/components/layout/SidebarContext'
@@ -21,23 +20,24 @@ function isHexColor(v: string | null): v is string {
 }
 
 export default async function ModulesLayout({ children }: { children: React.ReactNode }) {
-  const session = await getServerSession(authOptions)
+  const session = await getSession()
   if (!session) redirect('/login')
 
   // Server-fetch the branding row so we can apply colours on first paint.
   // Falls back to defaults when no active org or no row.
-  const orgId = (session.user as { activeOrgId?: string; orgId?: string }).activeOrgId
-            ?? (session.user as { orgId?: string }).orgId
+  const orgId = session.user.activeOrgId ?? session.user.orgId
   let primary = DEFAULT_PRIMARY
   let accent  = DEFAULT_ACCENT
+  let logoUrl: string | null = null
   if (orgId) {
     const b = await getOrgBranding(orgId)
-    // Only honour customer colours at level >= 'logo' (the level that unlocks
-    // primary/accent customisation per spec §9.4).
+    // Only honour customer colours + logo at level >= 'logo' (the level that
+    // unlocks primary/accent/logo customisation per spec §9.4).
     const eligible = b.level === 'logo' || b.level === 'full' || b.level === 'custom_domain'
     if (eligible) {
       if (isHexColor(b.primary_color)) primary = b.primary_color
       if (isHexColor(b.accent_color))  accent  = b.accent_color
+      logoUrl = b.logo_url
     }
   }
 
@@ -51,7 +51,7 @@ export default async function ModulesLayout({ children }: { children: React.Reac
     <SidebarProvider>
       <ImpersonationBanner />
       <div className="bg-gray-50" style={themeStyle}>
-        <Sidebar />
+        <Sidebar logoUrl={logoUrl} orgName={session.user.activeOrgName ?? null} />
         {/* On mobile: no left margin (sidebar is an overlay).
             On desktop (lg+): margin-left 248px to sit beside the fixed sidebar. */}
         <div className="lg:ml-[248px]" style={{ minHeight: '100vh', background: '#F1F4F9', display: 'flex', flexDirection: 'column' }}>

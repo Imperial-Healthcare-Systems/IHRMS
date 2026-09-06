@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -23,8 +24,11 @@ export async function GET(req: NextRequest) {
     if (docErr || !doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
 
     const isAdmin = HR_ROLES.includes(ctx.role)
-    if (!isAdmin && doc.employee_id && doc.employee_id !== ctx.identityId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!isAdmin && doc.employee_id) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me || doc.employee_id !== me.id) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     const { data, error: signErr } = await supabaseAdmin.storage

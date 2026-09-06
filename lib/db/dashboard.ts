@@ -16,14 +16,14 @@ export async function getHRDashboardStats() {
     expenseResult,
     probationResult,
   ] = await Promise.all([
-    supabaseAdmin.from('employees').select('status, hire_date').neq('status', 'terminated'),
-    supabaseAdmin.from('attendance_logs').select('status, is_wfh').eq('date', today),
+    supabaseAdmin.from('employees').select('status, date_of_joining').neq('status', 'terminated'),
+    supabaseAdmin.from('attendance_daily').select('status').eq('attendance_date', today),
     supabaseAdmin.from('leave_requests').select('status').eq('status', 'pending'),
     supabaseAdmin.from('payroll_runs').select('status, period_label').order('created_at', { ascending: false }).limit(1),
     supabaseAdmin.from('job_requisitions').select('id').eq('status', 'open'),
     supabaseAdmin.from('attendance_regularizations').select('id').eq('status', 'pending'),
     supabaseAdmin.from('expense_claims').select('id').eq('status', 'pending'),
-    supabaseAdmin.from('probation_reviews').select('id').eq('outcome', 'pending').lt('due_date', today),
+    supabaseAdmin.from('probation_reviews').select('id').eq('outcome', 'pending').lt('probation_end', today),
   ])
 
   const employees = employeesResult.data ?? []
@@ -34,11 +34,11 @@ export async function getHRDashboardStats() {
     active_employees: employees.filter(e => e.status === 'active').length,
     on_probation: employees.filter(e => e.status === 'probation').length,
     on_notice: employees.filter(e => e.status === 'notice_period').length,
-    new_joiners_this_month: employees.filter(e => e.hire_date >= thisMonthStart).length,
-    present_today: attendance.filter(a => ['present', 'late'].includes(a.status)).length,
+    new_joiners_this_month: employees.filter(e => (e as any).date_of_joining >= thisMonthStart).length,
+    present_today: attendance.filter(a => ['present', 'late', 'work_from_home', 'half_day'].includes(a.status)).length,
     absent_today: attendance.filter(a => a.status === 'absent').length,
     on_leave_today: attendance.filter(a => a.status === 'on_leave').length,
-    wfh_today: attendance.filter(a => a.is_wfh).length,
+    wfh_today: attendance.filter(a => a.status === 'work_from_home').length,
     pending_leaves: leaveResult.data?.length ?? 0,
     current_payroll_status: payrollResult.data?.[0]?.status ?? 'not_started',
     current_payroll_period: payrollResult.data?.[0]?.period_label ?? '',
@@ -55,7 +55,7 @@ export async function getManagerDashboardStats(manager_id: string) {
 
   const [teamResult, attendanceResult, leaveResult, regularizationResult] = await Promise.all([
     supabaseAdmin.from('employees').select('id').eq('reporting_manager_id', manager_id).eq('status', 'active'),
-    supabaseAdmin.from('attendance_logs').select('employee_id, status, is_wfh').eq('date', today),
+    supabaseAdmin.from('attendance_daily').select('employee_id, status').eq('attendance_date', today),
     supabaseAdmin.from('leave_requests').select('id').eq('level1_approver_id', manager_id).eq('level1_status', 'pending'),
     supabaseAdmin.from('attendance_regularizations').select('id').eq('status', 'pending'),
   ])
@@ -65,9 +65,9 @@ export async function getManagerDashboardStats(manager_id: string) {
 
   return {
     team_size: teamIds.size,
-    present_today: todayLogs.filter(a => ['present', 'late'].includes(a.status)).length,
+    present_today: todayLogs.filter(a => ['present', 'late', 'work_from_home', 'half_day'].includes(a.status)).length,
     on_leave_today: todayLogs.filter(a => a.status === 'on_leave').length,
-    wfh_today: todayLogs.filter(a => a.is_wfh).length,
+    wfh_today: todayLogs.filter(a => a.status === 'work_from_home').length,
     pending_leave_approvals: leaveResult.data?.length ?? 0,
     pending_regularizations: regularizationResult.data?.length ?? 0,
   }

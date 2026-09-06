@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,7 +9,12 @@ export async function GET(req: NextRequest) {
     if (error) return error
 
     const { searchParams } = new URL(req.url)
-    const employee_id = searchParams.get('employee_id') ?? ctx.identityId
+    let employee_id = searchParams.get('employee_id')
+    if (!employee_id) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], employee_id: null, year: parseInt(searchParams.get('year') ?? String(new Date().getFullYear())) })
+      employee_id = me.id
+    }
     const year = parseInt(searchParams.get('year') ?? String(new Date().getFullYear()))
 
     const { data, error: dbErr } = await supabaseAdmin

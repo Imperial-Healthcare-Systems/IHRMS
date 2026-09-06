@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { requireActiveEmployee } from '@/lib/employee-context'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -22,6 +23,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const auth = await requireAuth()
     if (auth.error) return auth.error
     const ctx = auth.ctx
+    const meResult = await requireActiveEmployee(ctx.identityId, ctx.orgId)
+    if (meResult.error) return meResult.error
+    const me = meResult.employee
 
     // Verify content belongs to this course AND this org
     const { data: content, error: cErr } = await supabaseAdmin
@@ -37,7 +41,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const { error: progErr } = await supabaseAdmin
       .from('course_content_progress')
       .upsert(
-        { course_id: courseId, content_id: contentId, employee_id: ctx.identityId, org_id: ctx.orgId },
+        { course_id: courseId, content_id: contentId, employee_id: me.id, org_id: ctx.orgId },
         { onConflict: 'content_id,employee_id', ignoreDuplicates: false },
       )
     if (progErr) {
@@ -57,7 +61,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         .select('id', { count: 'exact', head: true })
         .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', ctx.identityId),
+        .eq('employee_id', me.id),
     ])
 
     const total      = totalItems ?? 0
@@ -73,14 +77,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         .update({ status: 'completed', completed_at: new Date().toISOString() })
         .eq('org_id', ctx.orgId)
         .eq('course_id', courseId)
-        .eq('employee_id', ctx.identityId)
+        .eq('employee_id', me.id)
       if (enrollErr && enrollErr.code === '42703') {
         const retry = await supabaseAdmin
           .from('training_enrollments')
           .update({ status: 'completed', completed_at: new Date().toISOString() })
           .eq('org_id', ctx.orgId)
           .eq('programme_id', courseId)
-          .eq('employee_id', ctx.identityId)
+          .eq('employee_id', me.id)
         enrollErr = retry.error
       }
       if (enrollErr) console.warn('[content complete] enrollment update non-fatal:', enrollErr.message)

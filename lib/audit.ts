@@ -68,10 +68,16 @@ export function logAudit(entry: AuditEntry): void {
         created_at: fullRow.created_at,
       }
       supabaseAdmin.from('audit_logs').insert(legacyRow).then(({ error: e2 }) => {
-        if (e2) console.warn('[audit.log fallback]', e2.message)
+        if (e2) console.error('[audit.log fallback] INSERT FAILED:', e2.message, {
+          org_id: legacyRow.org_id, action: legacyRow.action, module: legacyRow.module,
+          entity_id: legacyRow.entity_id,
+        })
       })
       return
     }
-    console.warn('[audit.log]', error.message)
+    console.error('[audit.log] INSERT FAILED:', error.message, {
+      org_id: fullRow.org_id, action: fullRow.action, module: fullRow.module,
+      entity_id: fullRow.entity_id,
+    })
   })
 }

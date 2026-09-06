@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -23,7 +24,11 @@ export async function POST(req: NextRequest) {
 
     if (!course_id) return NextResponse.json({ error: 'course_id is required' }, { status: 400 })
 
-    const enrolleeId = employee_id ?? ctx.identityId
+    const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+    const enrolleeId = employee_id ?? me?.id ?? null
+    if (!enrolleeId) {
+      return NextResponse.json({ error: 'You do not have an employee profile in this organisation.' }, { status: 404 })
+    }
 
     // Cross-tenant guards
     {
@@ -32,7 +37,7 @@ export async function POST(req: NextRequest) {
         .eq('id', course_id).eq('org_id', ctx.orgId).maybeSingle()
       if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
     }
-    if (enrolleeId !== ctx.identityId) {
+    if (enrolleeId !== me?.id) {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('id')
         .eq('id', enrolleeId).eq('org_id', ctx.orgId).maybeSingle()
@@ -67,7 +72,11 @@ export async function DELETE(req: NextRequest) {
 
     if (!course_id) return NextResponse.json({ error: 'course_id is required' }, { status: 400 })
 
-    const enrolleeId = employee_id ?? ctx.identityId
+    const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+    const enrolleeId = employee_id ?? me?.id ?? null
+    if (!enrolleeId) {
+      return NextResponse.json({ error: 'You do not have an employee profile in this organisation.' }, { status: 404 })
+    }
 
     // Cross-tenant guards
     {
@@ -76,7 +85,7 @@ export async function DELETE(req: NextRequest) {
         .eq('id', course_id).eq('org_id', ctx.orgId).maybeSingle()
       if (!course) return NextResponse.json({ error: 'Course not found in your organisation' }, { status: 404 })
     }
-    if (enrolleeId !== ctx.identityId) {
+    if (enrolleeId !== me?.id) {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('id')
         .eq('id', enrolleeId).eq('org_id', ctx.orgId).maybeSingle()

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { requireActiveEmployee } from '@/lib/employee-context'
 
 const MAX_OPTIONAL_CLAIMS = 2
 
@@ -18,6 +19,9 @@ export async function GET(req: NextRequest) {
   try {
     const { ctx, error } = await requireAuth()
     if (error) return error
+    const meResult = await requireActiveEmployee(ctx.identityId, ctx.orgId)
+    if (meResult.error) return meResult.error
+    const me = meResult.employee
 
     const { searchParams } = new URL(req.url)
     const year = searchParams.get('year') ?? new Date().getFullYear().toString()
@@ -26,7 +30,7 @@ export async function GET(req: NextRequest) {
       .from('leave_requests')
       .select('id, from_date, to_date, status, reason')
       .eq('org_id', ctx.orgId)
-      .eq('employee_id', ctx.identityId)
+      .eq('employee_id', me.id)
       .eq('leave_type', 'optional_holiday')
       .gte('from_date', `${year}-01-01`)
       .lte('from_date', `${year}-12-31`)
@@ -44,6 +48,9 @@ export async function POST(req: NextRequest) {
   try {
     const { ctx, error } = await requireAuth()
     if (error) return error
+    const meResult = await requireActiveEmployee(ctx.identityId, ctx.orgId)
+    if (meResult.error) return meResult.error
+    const me = meResult.employee
 
     const body = await req.json()
     delete (body as Record<string, unknown>).org_id
@@ -60,7 +67,7 @@ export async function POST(req: NextRequest) {
       .from('leave_requests')
       .select('id, reason')
       .eq('org_id', ctx.orgId)
-      .eq('employee_id', ctx.identityId)
+      .eq('employee_id', me.id)
       .eq('leave_type', 'optional_holiday')
       .gte('from_date', `${year}-01-01`)
       .lte('from_date', `${year}-12-31`)
@@ -89,7 +96,7 @@ export async function POST(req: NextRequest) {
       .from('leave_requests')
       .insert({
         org_id:      ctx.orgId,
-        employee_id: ctx.identityId,
+        employee_id: me.id,
         leave_type:  'optional_holiday',
         from_date:   holiday_date,
         to_date:     holiday_date,
@@ -112,6 +119,9 @@ export async function DELETE(req: NextRequest) {
   try {
     const { ctx, error } = await requireAuth()
     if (error) return error
+    const meResult = await requireActiveEmployee(ctx.identityId, ctx.orgId)
+    if (meResult.error) return meResult.error
+    const me = meResult.employee
 
     const { claim_id } = await req.json()
     if (!claim_id) return NextResponse.json({ error: 'claim_id required' }, { status: 400 })
@@ -125,7 +135,7 @@ export async function DELETE(req: NextRequest) {
       .single()
 
     if (fetchErr || !claim) return NextResponse.json({ error: 'Claim not found' }, { status: 404 })
-    if (claim.employee_id !== ctx.identityId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (claim.employee_id !== me.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const today = new Date().toISOString().split('T')[0]
     if (claim.from_date < today) {

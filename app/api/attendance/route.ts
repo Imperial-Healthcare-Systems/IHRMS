@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const FULL_ACCESS_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
     let query = supabaseAdmin
       .from('attendance_daily')
       .select(`
-        id, employee_id, date, check_in, check_out,
+        id, employee_id, attendance_date, check_in, check_out,
         total_hours, status, is_regularized, remarks,
         geo_lat, geo_lng, geo_location,
         employee:employees(id, first_name, last_name, emp_id, department_id)
@@ -82,7 +83,9 @@ export async function GET(req: NextRequest) {
     if (employee_id) {
       query = query.eq('employee_id', employee_id)
     } else if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
-      query = query.eq('employee_id', ctx.identityId)
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      query = query.eq('employee_id', me.id)
     }
 
     if (date)      query = query.eq('attendance_date', date)
@@ -113,11 +116,15 @@ export async function POST(req: NextRequest) {
 
     const { action, employee_id, is_wfh, notes, geo_lat, geo_lng, geo_location } = body
 
-    const targetEmployee = employee_id ?? ctx.identityId
-    if (!targetEmployee) return NextResponse.json({ error: 'Employee ID required' }, { status: 400 })
+    // Resolve the caller's employees row; if no employee_id passed, default to it.
+    const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+    const targetEmployee = employee_id ?? me?.id ?? null
+    if (!targetEmployee) {
+      return NextResponse.json({ error: 'You do not have an employee profile in this organisation.' }, { status: 404 })
+    }
 
-    // Cross-tenant guard: if targetEmployee differs from session user, verify same org
-    if (employee_id && employee_id !== ctx.identityId) {
+    // Cross-tenant guard: if targetEmployee differs from caller, verify same org
+    if (employee_id && employee_id !== me?.id) {
       const { data: emp } = await supabaseAdmin
         .from('employees')
         .select('id')
@@ -227,6 +234,7 @@ export async function POST(req: NextRequest) {
             : supabaseAdmin.from('attendance_daily').insert(fallbackPayload).select().single()
           const retry = await retryQ
           if (retry.error) {
+            console.error('[punch_in fallback save]', retry.error)
             return NextResponse.json({ error: retry.error.message, code: retry.error.code, details: retry.error.details }, { status: 500 })
           }
           return NextResponse.json({ data: mapRow({ ...retry.data, status: 'work_from_home' }), message: 'Punched in (WFH)' }, { status: bareRecord ? 200 : 201 })

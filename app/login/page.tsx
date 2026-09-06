@@ -1,7 +1,6 @@
 'use client'
 
 import { FormEvent, useState } from 'react'
-import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import {
   Activity,
@@ -47,6 +46,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
   const [challengeToken, setChallengeToken] = useState('')
   const [maskedEmail, setMaskedEmail] = useState('')
   const [success, setSuccess] = useState('')
@@ -55,7 +55,7 @@ export default function LoginPage() {
   const [requestingOtp, setRequestingOtp] = useState(false)
   const [verifyingOtp, setVerifyingOtp] = useState(false)
 
-  const isOtpStep = Boolean(challengeToken)
+  const isOtpStep = otpSent
   const validateEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 
   async function requestOtp() {
@@ -89,11 +89,12 @@ export default function LoginPage() {
         return
       }
 
-      setChallengeToken(payload.challengeToken)
+      setChallengeToken(payload.challengeToken ?? '')
       setMaskedEmail(payload.maskedEmail ?? normalizedEmail)
       setSuccess(payload.message ?? 'OTP sent. Check your inbox for the verification code.')
       setDevOtp(payload.devOtp ?? '')
       setOtp('')
+      setOtpSent(true)
     } catch {
       setError('Something went wrong while sending the OTP. Please try again.')
     } finally {
@@ -118,19 +119,19 @@ export default function LoginPage() {
     setError('')
 
     try {
-      const result = await signIn('credentials', {
-        email: email.trim().toLowerCase(),
-        otp,
-        challengeToken,
-        redirect: false,
+      const response = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), otp }),
       })
+      const payload = await response.json()
 
-      if (result?.error) {
-        setError('The OTP is invalid or has expired. Request a new code and try again.')
+      if (!response.ok) {
+        setError(payload.error ?? 'The OTP is invalid or has expired. Request a new code and try again.')
         return
       }
 
-      router.push('/dashboard')
+      router.push(payload.redirectTo ?? '/dashboard')
       router.refresh()
     } catch {
       setError('Something went wrong while verifying the OTP. Please try again.')
@@ -146,6 +147,7 @@ export default function LoginPage() {
     setSuccess('')
     setError('')
     setDevOtp('')
+    setOtpSent(false)
   }
 
   return (

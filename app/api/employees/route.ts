@@ -263,7 +263,8 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from('probation_reviews').insert({
         org_id: ctx.orgId,
         employee_id: data.id,
-        due_date: probation_end_date.toISOString().split('T')[0],
+        probation_start: hireDate.toISOString().split('T')[0],
+        probation_end: probation_end_date.toISOString().split('T')[0],
         outcome: 'pending',
       })
     } catch { /* non-critical */ }

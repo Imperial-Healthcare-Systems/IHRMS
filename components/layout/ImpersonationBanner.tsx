@@ -10,7 +10,7 @@
  * app/(modules)/layout.tsx so it covers every authenticated page.
  */
 import { useState } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import { AlertTriangle, Loader2, LogOut } from 'lucide-react'
 
 export function ImpersonationBanner() {

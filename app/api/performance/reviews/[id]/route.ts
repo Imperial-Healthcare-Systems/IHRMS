@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -22,7 +23,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { data, error: dbErr } = await supabaseAdmin
       .from('performance_reviews')
       .select(`
-        id, cycle, cycle_id, review_period_from, review_period_to,
+        id, cycle, cycle_id, review_period_start, review_period_end,
         self_rating, manager_rating, final_rating,
         kra_scores, goals, next_goals, strengths, areas_of_improvement,
         training_needs, promotion_recommended, increment_recommended,
@@ -76,8 +77,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       throw fetchError
     }
 
-    const isHr          = HR_ROLES.includes(ctx.role)
-    const isParticipant = current.employee_id === ctx.identityId || current.reviewer_id === ctx.identityId
+    const isHr = HR_ROLES.includes(ctx.role)
+    let isParticipant = false
+    if (!isHr) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      isParticipant = !!me && (current.employee_id === me.id || current.reviewer_id === me.id)
+    }
 
     if (!isHr && !isParticipant) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

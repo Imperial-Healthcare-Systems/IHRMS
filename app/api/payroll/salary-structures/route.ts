@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { toCurrencyString, toDecimal, divide } from '@/lib/money'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'payroll_admin']
 
@@ -15,7 +16,7 @@ function errMsg(err: unknown): string {
 
 export async function GET(req: NextRequest) {
   try {
-    const { ctx, error } = await requireAuth()
+    const { ctx, error } = await requireRole(HR_ROLES)
     if (error) return error
 
     const { searchParams } = new URL(req.url)
@@ -80,33 +81,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Employee not found in your organisation' }, { status: 404 })
     }
 
-    const basicN        = parseFloat(basic)             || 0
-    const hraN          = parseFloat(hra)               || 0
-    const conveyanceN   = parseFloat(conveyance)        || 0
-    const medN          = parseFloat(medical_allowance) || 0
-    const specialN      = parseFloat(special_allowance) || 0
-    const ltaN          = parseFloat(lta)               || 0
-    const ctcAnnualN    = parseFloat(ctc_annual)        || 0
-    const empPfN        = parseFloat(pf_employer)       || 0
-    const empEsicN      = parseFloat(esic_employer)     || 0
-
-    const ctcMonthly = Math.round(ctcAnnualN / 12)
+    // Decimal-precision money math — keeps salary components lossless and
+    // ctc_monthly = ctc_annual / 12 properly rounded to paise (not whole rupees).
+    const ctcAnnualD = toDecimal(ctc_annual)
+    const ctcMonthlyStr = toCurrencyString(divide(ctcAnnualD, 12))
 
     const insertPayload: Record<string, unknown> = {
       org_id:               ctx.orgId,             // canonical — from JWT
       employee_id,
       effective_from,
       effective_to:         effective_to || null,
-      ctc_annual:           ctcAnnualN,
-      ctc_monthly:          ctcMonthly,
-      basic_monthly:        basicN,
-      hra_monthly:          hraN,
-      special_allowance:    specialN,
-      conveyance_allowance: conveyanceN,
-      medical_allowance:    medN,
-      lta_monthly:          ltaN,
-      employer_pf:          empPfN,
-      employer_esic:        empEsicN,
+      ctc_annual:           toCurrencyString(ctcAnnualD),
+      ctc_monthly:          ctcMonthlyStr,
+      basic_monthly:        toCurrencyString(basic),
+      hra_monthly:          toCurrencyString(hra),
+      special_allowance:    toCurrencyString(special_allowance),
+      conveyance_allowance: toCurrencyString(conveyance),
+      medical_allowance:    toCurrencyString(medical_allowance),
+      lta_monthly:          toCurrencyString(lta),
+      employer_pf:          toCurrencyString(pf_employer),
+      employer_esic:        toCurrencyString(esic_employer),
       is_active:            true,
       remarks:              remarks || null,
     }

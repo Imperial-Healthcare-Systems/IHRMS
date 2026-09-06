@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { requireActiveEmployee } from '@/lib/employee-context'
 
 const BUCKET = 'avatars'
 const MAX_BYTES = 5 * 1024 * 1024 // 5 MB
@@ -10,6 +11,9 @@ export async function POST(req: NextRequest) {
   try {
     const { ctx, error } = await requireAuth()
     if (error) return error
+    const meResult = await requireActiveEmployee(ctx.identityId, ctx.orgId)
+    if (meResult.error) return meResult.error
+    const me = meResult.employee
 
     const formData = await req.formData()
     const file = formData.get('avatar') as File | null
@@ -24,7 +28,7 @@ export async function POST(req: NextRequest) {
 
     const ext      = file.name.split('.').pop() ?? 'jpg'
     // Org-prefixed path so storage RLS (when applied) can isolate per-tenant
-    const filePath = `${ctx.orgId}/${ctx.identityId}/avatar.${ext}`
+    const filePath = `${ctx.orgId}/${me.id}/avatar.${ext}`
     const buffer   = Buffer.from(await file.arrayBuffer())
 
     const { error: uploadErr } = await supabaseAdmin.storage
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
     const { error: updateErr } = await supabaseAdmin
       .from('employees')
       .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
-      .eq('id', ctx.identityId)
+      .eq('id', me.id)
       .eq('org_id', ctx.orgId)
 
     if (updateErr) throw updateErr

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession } from '@/lib/use-session'
 import { Topbar } from '@/components/layout/Topbar'
 import { announcementsApi, employeesApi, type Announcement as ApiAnnouncement } from '@/lib/api-client'
 import toast from 'react-hot-toast'

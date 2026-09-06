@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { logAudit } from '@/lib/audit'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
@@ -34,8 +35,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       throw dbErr
     }
 
-    if (!isAdminUser && data.employee_id && data.employee_id !== ctx.identityId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!isAdminUser && data.employee_id) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me || data.employee_id !== me.id) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
     return NextResponse.json({ data })

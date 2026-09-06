@@ -130,13 +130,17 @@ export async function GET(req: NextRequest) {
       return emptyPayload(effectiveOrgId, org?.name ?? '—', year, month, leaveTypes ?? [], settings)
     }
 
-    const { data: reports } = await supabaseAdmin
+    const { data: reports, error: reportsErr } = await supabaseAdmin
       .from('employees')
-      .select('id, first_name, last_name, emp_id, avatar_url, designation_title, role')
+      .select('id, first_name, last_name, emp_id, avatar_url, role')
       .eq('org_id', effectiveOrgId)
       .eq('reporting_manager_id', managerEmp.id)
       .eq('status', 'active')
       .order('first_name', { ascending: true })
+
+    if (reportsErr) {
+      console.error('[team-attendance] reports query failed:', reportsErr.message)
+    }
 
     const reportsList = (reports ?? []) as Array<{
       id: string
@@ -144,7 +148,6 @@ export async function GET(req: NextRequest) {
       last_name: string | null
       emp_id: string | null
       avatar_url: string | null
-      designation_title: string | null
       role: string | null
     }>
 
@@ -185,7 +188,7 @@ export async function GET(req: NextRequest) {
         employee: {
           id: emp.id,
           name: `${emp.first_name}${emp.last_name ? ' ' + emp.last_name : ''}`.trim(),
-          role: emp.designation_title ?? emp.role ?? '—',
+          role: emp.role ?? '—',
           emp_id: emp.emp_id,
           avatar_url: emp.avatar_url,
         },

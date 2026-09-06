@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const SHIFT_MANAGER_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr', 'manager', 'operations_head']
 
@@ -34,8 +35,13 @@ export async function GET(req: NextRequest) {
       .order('work_date', { ascending: false })
       .order('created_at', { ascending: false })
 
-    if (!isAdminUser) query = query.eq('employee_id', ctx.identityId)
-    else if (employeeId) query = query.eq('employee_id', employeeId)
+    if (!isAdminUser) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [] })
+      query = query.eq('employee_id', me.id)
+    } else if (employeeId) {
+      query = query.eq('employee_id', employeeId)
+    }
 
     const { data, error } = await query
     if (error) {

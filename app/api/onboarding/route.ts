@@ -8,7 +8,7 @@ const HR_ROLES = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireAuth()
+    const auth = await requireRole(HR_ROLES)
     if (auth.error) return auth.error
     const ctx = auth.ctx
 
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     const [reviewsResult, docsResult] = await Promise.all([
       supabaseAdmin
         .from('probation_reviews')
-        .select('id, employee_id, due_date, outcome')
+        .select('id, employee_id, probation_end, outcome')
         .eq('org_id', ctx.orgId)
         .in('employee_id', employeeIds),
       supabaseAdmin

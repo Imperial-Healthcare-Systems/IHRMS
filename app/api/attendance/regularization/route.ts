@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { getActiveEmployee } from '@/lib/employee-context'
 
 const FULL_ACCESS_ROLES  = ['owner', 'admin', 'hr_admin', 'super_admin', 'hr']
 const MANAGER_ROLES      = ['manager', 'operations_head']
@@ -51,18 +52,22 @@ export async function GET(req: NextRequest) {
     if (FULL_ACCESS_ROLES.includes(ctx.role)) {
       if (employee_id) query = query.eq('employee_id', employee_id)
     } else if (MANAGER_ROLES.includes(ctx.role)) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
       const { data: team } = await supabaseAdmin
         .from('employees')
         .select('id')
         .eq('org_id', ctx.orgId)
-        .eq('reporting_manager_id', ctx.identityId)
+        .eq('reporting_manager_id', me.id)
         .eq('status', 'active')
       const teamIds = (team ?? []).map((e: any) => e.id as string)
       if (teamIds.length === 0) return NextResponse.json({ data: [], count: 0 })
       query = query.in('employee_id', teamIds)
       if (employee_id && teamIds.includes(employee_id)) query = query.eq('employee_id', employee_id)
     } else {
-      query = query.eq('employee_id', ctx.identityId)
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ data: [], count: 0 })
+      query = query.eq('employee_id', me.id)
     }
 
     if (status) query = query.eq('status', status)
@@ -96,10 +101,14 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const targetEmployee = employee_id ?? ctx.identityId
+    const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+    const targetEmployee = employee_id ?? me?.id ?? null
+    if (!targetEmployee) {
+      return NextResponse.json({ error: 'You do not have an employee profile in this organisation.' }, { status: 404 })
+    }
 
     // Cross-tenant guard
-    if (employee_id && employee_id !== ctx.identityId) {
+    if (employee_id && employee_id !== me?.id) {
       const { data: emp } = await supabaseAdmin
         .from('employees').select('id')
         .eq('id', employee_id).eq('org_id', ctx.orgId).maybeSingle()
@@ -154,13 +163,15 @@ export async function PATCH(req: NextRequest) {
 
     // Authorization: HR/admin OR direct reporting manager
     if (!FULL_ACCESS_ROLES.includes(ctx.role)) {
+      const me = await getActiveEmployee(ctx.identityId, ctx.orgId)
+      if (!me) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const { data: emp } = await supabaseAdmin
         .from('employees')
         .select('reporting_manager_id')
         .eq('id', (existing as any).employee_id)
         .eq('org_id', ctx.orgId)
         .single()
-      if (!emp || (emp as any).reporting_manager_id !== ctx.identityId) {
+      if (!emp || (emp as any).reporting_manager_id !== me.id) {
         return NextResponse.json({ error: 'Forbidden: you are not the reporting manager for this employee' }, { status: 403 })
       }
     }

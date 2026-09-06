@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { toCurrencyString } from '@/lib/money'
 import { requireAuth, requireRole } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
@@ -109,8 +110,9 @@ export async function POST(req: NextRequest) {
         filled_positions: 0,
         min_experience_years: parseFloat(min_experience_years),
         max_experience_years: max_experience_years ? parseFloat(max_experience_years) : null,
-        min_ctc: min_ctc ? parseFloat(min_ctc) : null,
-        max_ctc: max_ctc ? parseFloat(max_ctc) : null,
+        // CTC is money — use decimal.js string serialisation, not parseFloat.
+        min_ctc: min_ctc ? toCurrencyString(min_ctc) : null,
+        max_ctc: max_ctc ? toCurrencyString(max_ctc) : null,
         skills_required: skills_required ?? null,
         job_description: job_description ?? null,
         status: 'open',

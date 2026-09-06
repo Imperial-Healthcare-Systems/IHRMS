@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { signOut, useSession } from 'next-auth/react'
+import { signOut, useSession } from '@/lib/use-session'
 import {
   LayoutDashboard,
   Users,
@@ -126,7 +126,19 @@ const ROLE_LABELS: Record<string, string> = {
   employee:        'Employee',
 }
 
-export function Sidebar() {
+export interface SidebarProps {
+  /**
+   * Customer logo from `org_branding.logo_url`, resolved server-side in
+   * app/(modules)/layout.tsx. Only passed when the org's branding level
+   * actually unlocks it — the Sidebar does no gating of its own.
+   * Null/undefined falls back to the Imperial mark.
+   */
+  logoUrl?: string | null
+  /** Org name, used as alt text when a customer logo is shown. */
+  orgName?: string | null
+}
+
+export function Sidebar({ logoUrl = null, orgName = null }: SidebarProps = {}) {
   const pathname = usePathname()
   const { data: session } = useSession()
   const { isOpen, close } = useSidebar()
@@ -134,6 +146,13 @@ export function Sidebar() {
   /* Track mobile breakpoint so we can drive transform via React state
      (more reliable than CSS data-attribute on production builds) */
   const [isMobile, setIsMobile] = useState(false)
+
+  /* If the customer's logo URL 404s (bucket wiped, row points at a deleted
+     object), fall back to the Imperial mark rather than a broken image. */
+  const [logoFailed, setLogoFailed] = useState(false)
+  useEffect(() => { setLogoFailed(false) }, [logoUrl])
+  const showCustomLogo = !!logoUrl && !logoFailed
+
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1023px)')
     setIsMobile(mq.matches)
@@ -196,22 +215,44 @@ export function Sidebar() {
           className="flex items-center shrink-0"
           style={{ padding: '12px 14px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', gap: 6 }}
         >
-          {/* White logo — mix-blend-mode:screen makes the black bg invisible on dark navbar */}
+          {/* Customer logo when branding is enabled for this org, else the
+              Imperial mark. mixBlendMode:'screen' is deliberately NOT applied
+              to a customer logo — it exists to knock the black background out
+              of our own PNG and would mangle an arbitrary uploaded image. */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
-            <Image
-              src="/imperial-logo-white.png"
-              alt="Imperial Healthcare Systems"
-              width={180}
-              height={56}
-              style={{
-                width: '100%',
-                maxWidth: 180,
-                height: 'auto',
-                objectFit: 'contain',
-                mixBlendMode: 'screen',
-              }}
-              priority
-            />
+            {showCustomLogo ? (
+              <Image
+                src={logoUrl!}
+                alt={orgName ?? 'Organisation logo'}
+                width={180}
+                height={56}
+                onError={() => setLogoFailed(true)}
+                unoptimized
+                style={{
+                  width: 'auto',
+                  maxWidth: 180,
+                  maxHeight: 44,
+                  height: 'auto',
+                  objectFit: 'contain',
+                }}
+                priority
+              />
+            ) : (
+              <Image
+                src="/imperial-logo-white.png"
+                alt="Imperial Healthcare Systems"
+                width={180}
+                height={56}
+                style={{
+                  width: '100%',
+                  maxWidth: 180,
+                  height: 'auto',
+                  objectFit: 'contain',
+                  mixBlendMode: 'screen',
+                }}
+                priority
+              />
+            )}
           </div>
 
           {/* Mobile close button */}

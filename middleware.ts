@@ -1,9 +1,20 @@
-import { withAuth } from 'next-auth/middleware'
-import { NextResponse } from 'next/server'
-import type { NextRequestWithAuth } from 'next-auth/middleware'
+/**
+ * Supabase-Auth-backed middleware (Phase G of IHRMS auth migration).
+ *
+ * Replaces the prior `next-auth/middleware` `withAuth` wrapper. Two
+ * responsibilities:
+ *
+ *   1. Refresh the Supabase auth cookie (createServerClient + getUser).
+ *      Without this pass, server components on subsequent requests would
+ *      see a stale session.
+ *
+ *   2. Route role-gating against `app_metadata.legacy_role` / `active_role`.
+ *      The role-prefix map below preserves the exact policy the previous
+ *      withAuth callback enforced.
+ */
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-// Role → allowed route prefixes
-// Routes not listed here are accessible to all authenticated users (e.g. /dashboard, /profile)
 const ROUTE_ROLES: Record<string, string[]> = {
   '/payroll':        ['super_admin', 'hr_admin', 'admin', 'hr', 'payroll_admin'],
   '/settings':       ['super_admin', 'hr_admin', 'admin', 'hr'],
@@ -22,40 +33,62 @@ const ROUTE_ROLES: Record<string, string[]> = {
   '/assets':         ['super_admin', 'hr_admin', 'admin', 'hr'],
 }
 
-export default withAuth(
-  function middleware(req: NextRequestWithAuth) {
-    const { token } = req.nextauth
-    const role = (token?.role as string | null | undefined) ?? 'employee'
-    const pathname = req.nextUrl.pathname
+export async function middleware(req: NextRequest) {
+  let response = NextResponse.next({ request: req })
 
-    // Find the most specific matching route prefix
-    const matchedPrefix = Object.keys(ROUTE_ROLES)
-      .filter((prefix) => pathname.startsWith(prefix))
-      .sort((a, b) => b.length - a.length)[0]  // longest match wins
-
-    if (matchedPrefix) {
-      const allowedRoles = ROUTE_ROLES[matchedPrefix]
-      if (!allowedRoles.includes(role)) {
-        // Redirect to dashboard with an "access denied" query param
-        const url = req.nextUrl.clone()
-        url.pathname = '/dashboard'
-        url.searchParams.set('denied', matchedPrefix.replace('/', ''))
-        return NextResponse.redirect(url)
-      }
-    }
-
-    return NextResponse.next()
-  },
-  {
-    pages: {
-      signIn: '/login',
-      error: '/login',
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          for (const { name, value } of cookiesToSet) {
+            req.cookies.set(name, value)
+          }
+          response = NextResponse.next({ request: req })
+          for (const { name, value, options } of cookiesToSet) {
+            response.cookies.set(name, value, options)
+          }
+        },
+      },
     },
-    callbacks: {
-      authorized: ({ token }) => !!token,
-    },
+  )
+
+  // Refresh the session and read claims.
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    const url = req.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('returnTo', req.nextUrl.pathname)
+    return NextResponse.redirect(url)
   }
-)
+
+  const meta = (user.app_metadata ?? {}) as Record<string, unknown>
+  const role = typeof meta.legacy_role === 'string'
+    ? meta.legacy_role
+    : (typeof meta.active_role === 'string' ? meta.active_role : 'employee')
+
+  const pathname = req.nextUrl.pathname
+  const matchedPrefix = Object.keys(ROUTE_ROLES)
+    .filter(prefix => pathname.startsWith(prefix))
+    .sort((a, b) => b.length - a.length)[0]
+
+  if (matchedPrefix) {
+    const allowed = ROUTE_ROLES[matchedPrefix]
+    if (!allowed.includes(role)) {
+      const url = req.nextUrl.clone()
+      url.pathname = '/dashboard'
+      url.searchParams.set('denied', matchedPrefix.replace('/', ''))
+      return NextResponse.redirect(url)
+    }
+  }
+
+  return response
+}
 
 export const config = {
   matcher: [

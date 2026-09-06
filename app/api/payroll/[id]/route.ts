@@ -18,7 +18,7 @@ function errMsg(err: unknown): string {
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
-    const { ctx, error } = await requireAuth()
+    const { ctx, error } = await requireRole(PAYROLL_ROLES)
     if (error) return error
 
     const { data: run, error: dbErr } = await supabaseAdmin

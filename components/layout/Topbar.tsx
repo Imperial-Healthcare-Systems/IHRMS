@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useSession, signOut } from 'next-auth/react'
+import { useSession, signOut } from '@/lib/use-session'
 import {
   Search,
   Bell,
