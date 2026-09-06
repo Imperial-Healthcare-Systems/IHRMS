@@ -21,8 +21,10 @@ type Tenant = { org_id: string; org_name: string }
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
 export default function DevTenantSwitcher() {
-  if (!IS_DEV) return null
-
+  // Hooks must run unconditionally and in the same order on every render, so
+  // the IS_DEV guard gates the RENDER (below), not the hook calls. The
+  // compile-time tree-shake still works: IS_DEV is a build-time constant, so
+  // in a production build the whole render body below is dead code.
   const [open, setOpen] = useState(false)
   const [tenants, setTenants] = useState<Tenant[] | null>(null)
   const [currentOverride, setCurrentOverride] = useState<string | null>(null)
@@ -32,7 +34,7 @@ export default function DevTenantSwitcher() {
   const [switching, setSwitching] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!open || tenants !== null) return
+    if (!IS_DEV || !open || tenants !== null) return
     setLoading(true)
     fetch('/api/dev/tenants')
       .then(async r => {
@@ -77,6 +79,10 @@ export default function DevTenantSwitcher() {
     }
   }
 
+  // Gate 1 (compile-time): IS_DEV is a build-time constant, so everything
+  // below is pruned from the production bundle.
+  if (!IS_DEV) return null
+  // Gate 2 (runtime): /api/dev/tenants 404s for non-internal callers.
   if (allowed === false) return null
 
   const hasOverride = !!currentOverride && currentOverride !== homeOrgId
@@ -173,7 +179,7 @@ export default function DevTenantSwitcher() {
               </div>
 
               <div style={{ padding: '6px 10px', fontSize: 10, color: '#94A3B8', borderTop: '1px solid #F1F5F9', marginTop: 4 }}>
-                Pass <code style={{ background: '#F1F5F9', padding: '0 4px', borderRadius: 3 }}>?manager_id=&lt;uuid&gt;</code> in the URL to view another manager's team in the override tenant.
+                Pass <code style={{ background: '#F1F5F9', padding: '0 4px', borderRadius: 3 }}>?manager_id=&lt;uuid&gt;</code> in the URL to view another manager&apos;s team in the override tenant.
               </div>
             </>
           )}

@@ -19,6 +19,9 @@ type Stage    = 'All' | 'Applied' | 'Screening' | 'Interview' | 'Technical' | 'H
 
 const DEPARTMENTS = ['All Departments']
 const STAGES: Stage[] = ['All', 'Applied', 'Screening', 'Interview', 'Technical', 'HR Round', 'Offer', 'Selected', 'Rejected']
+// Funnel columns, in order. Module scope keeps the reference stable across
+// renders so the funnel useMemo only depends on the candidate list.
+const FUNNEL_STAGES = ['Applied', 'Screening', 'Interview', 'Technical', 'HR Round', 'Offer', 'Selected']
 
 /* ─────────────────────────────────────────────────────────────
    DESIGN TOKENS  — same bg/color/border triads as Employee page
@@ -292,9 +295,9 @@ export default function RecruitmentPage() {
     return groups
   }, [apiInterviews])
 
-  // Funnel computed from real candidate stages
-  const funnelStages = ['Applied','Screening','Interview','Technical','HR Round','Offer','Selected']
-  const funnel = useMemo(() => funnelStages.map(label => ({
+  // Funnel computed from real candidate stages. FUNNEL_STAGES lives at module
+  // scope so it is referentially stable and doesn't have to enter the deps.
+  const funnel = useMemo(() => FUNNEL_STAGES.map(label => ({
     label,
     count: apiCandidates.filter(c => c.stage === label).length,
   })), [apiCandidates])
