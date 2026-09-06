@@ -30,14 +30,16 @@ export default async function ModulesLayout({ children }: { children: React.Reac
             ?? (session.user as { orgId?: string }).orgId
   let primary = DEFAULT_PRIMARY
   let accent  = DEFAULT_ACCENT
+  let logoUrl: string | null = null
   if (orgId) {
     const b = await getOrgBranding(orgId)
-    // Only honour customer colours at level >= 'logo' (the level that unlocks
-    // primary/accent customisation per spec §9.4).
+    // Only honour customer colours + logo at level >= 'logo' (the level that
+    // unlocks primary/accent/logo customisation per spec §9.4).
     const eligible = b.level === 'logo' || b.level === 'full' || b.level === 'custom_domain'
     if (eligible) {
       if (isHexColor(b.primary_color)) primary = b.primary_color
       if (isHexColor(b.accent_color))  accent  = b.accent_color
+      logoUrl = b.logo_url
     }
   }
 
@@ -51,7 +53,10 @@ export default async function ModulesLayout({ children }: { children: React.Reac
     <SidebarProvider>
       <ImpersonationBanner />
       <div className="bg-gray-50" style={themeStyle}>
-        <Sidebar />
+        <Sidebar
+          logoUrl={logoUrl}
+          orgName={(session.user as { activeOrgName?: string | null }).activeOrgName ?? null}
+        />
         {/* On mobile: no left margin (sidebar is an overlay).
             On desktop (lg+): margin-left 248px to sit beside the fixed sidebar. */}
         <div className="lg:ml-[248px]" style={{ minHeight: '100vh', background: '#F1F4F9', display: 'flex', flexDirection: 'column' }}>
