@@ -2220,3 +2220,84 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   TEXT FITTING — keep copy inside its box
+   ─────────────────────────────────────────────────────────────
+
+   Why this section exists
+   -----------------------
+   Cards across the app are built from the same header pattern:
+
+     <div style="display:flex; justify-content:space-between">
+       <div><p>Some title</p><p>subtitle</p></div>   <- text block
+       <div>badge / action</div>                      <- trailing chip
+     </div>
+
+   A flex item defaults to `min-width: auto`, which refuses to shrink
+   below its own content width. So a long employee name, department
+   title, org name or email does not wrap — it pushes the trailing
+   badge past the card's edge, or spills over the border itself.
+   There are ~146 of these rows and only ~39 carried `min-width: 0`.
+
+   Rather than hand-patch every inline style, the three rules below fix
+   the class of bug centrally:
+
+     1. Text elements inside a card may shrink (so they wrap/ellipsis).
+     2. Controls and icons inside a card may NOT shrink (so allowing (1)
+        doesn't squash buttons and badges instead).
+     3. Long unbroken strings (emails, IDs, URLs) break rather than
+        overflow, since wrapping can't help a string with no spaces.
+
+   Everything is wrapped in :where() so specificity stays 0 — any
+   existing rule or inline style still wins, which keeps this safe to
+   apply broadly. For elements that are not flex/grid items the
+   min-width declaration is a no-op: block boxes already resolve
+   `min-width: auto` to 0.
+   ───────────────────────────────────────────────────────────── */
+
+/* 0. The card itself must be allowed to shrink. Page grids use tracks
+      like `repeat(3, 1fr)`, and a grid/flex track also defaults to
+      min-width:auto — so without this a wide card overflows its own
+      column no matter how its contents behave. */
+:where(.card, .stat-card, .table-wrapper) {
+  min-width: 0;
+}
+
+/* 1. Let text blocks shrink instead of pushing siblings out. */
+:where(.card, .modal, .table-wrapper)
+:where(div, p, span, a, h1, h2, h3, h4, h5, h6, li, dd, dt, label) {
+  min-width: 0;
+}
+
+/* 2. ...but never squash the controls they sit beside. */
+:where(.card, .modal) :where(button, .btn, .badge, .trend-chip, svg, img) {
+  flex-shrink: 0;
+}
+
+/* 3. A string with no spaces can't wrap — break it instead of
+      letting it run past the card edge. */
+:where(.card, .modal, .data-table td) {
+  overflow-wrap: break-word;
+}
+
+/* Note on badges: they deliberately get NO max-width or clipping here.
+   `.badge` is display:inline-flex, and text-overflow does not apply to
+   flex containers — so clipping would chop status text mid-character
+   with no ellipsis, which is worse than the original bug. Rules 1 and 2
+   already handle it properly: the badge keeps its natural width
+   (flex-shrink:0) and the text block beside it shrinks instead. */
+
+/* Table cells: let genuinely long free text wrap rather than forcing
+   the horizontal scrollbar. Columns that must stay on one line already
+   set white-space: nowrap locally, and that still wins. */
+.data-table tbody td {
+  overflow-wrap: break-word;
+}
+
+/* Page titles: a long org or module name should wrap within the header
+   rather than collide with the action buttons beside it. */
+.page-header-title,
+.card-title {
+  overflow-wrap: break-word;
+}
